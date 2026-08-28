@@ -15,14 +15,19 @@ pub struct Message {
     pub tool_calls: Option<Vec<ToolCall>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_call_id: Option<String>,
+    /// The model's own reasoning, when it separates that from its answer.
+    /// Providers disagree on the name, hence the alias. Never serialized: it is
+    /// for display only, and sending it back can be rejected upstream.
+    #[serde(default, alias = "reasoning_content", skip_serializing)]
+    pub reasoning: Option<String>,
 }
 
 impl Message {
     pub fn text(role: &str, content: impl Into<String>) -> Message {
-        Message { role: role.into(), content: Some(content.into()), tool_calls: None, tool_call_id: None }
+        Message { role: role.into(), content: Some(content.into()), tool_calls: None, tool_call_id: None, reasoning: None }
     }
     pub fn tool_result(id: &str, content: impl Into<String>) -> Message {
-        Message { role: "tool".into(), content: Some(content.into()), tool_calls: None, tool_call_id: Some(id.into()) }
+        Message { role: "tool".into(), content: Some(content.into()), tool_calls: None, tool_call_id: Some(id.into()), reasoning: None }
     }
 }
 

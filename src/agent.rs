@@ -81,6 +81,17 @@ fn thinking_phrase() -> &'static str {
     THINKING[N.fetch_add(1, Ordering::Relaxed) % THINKING.len()]
 }
 
+/// A readable slice of a model's reasoning for the public log — enough to show
+/// where it is heading, not the whole chain of thought. Collapsed to one line so
+/// a long ramble cannot flood the page.
+fn glimpse(s: &str) -> String {
+    let flat = s.split_whitespace().collect::<Vec<_>>().join(" ");
+    match flat.char_indices().nth(240) {
+        Some((cut, _)) => format!("{}…", &flat[..cut]),
+        None => flat,
+    }
+}
+
 /// First index of the tail to keep verbatim: walk back from the newest message
 /// until `keep_recent` characters are banked, then step forward off any orphaned
 /// tool result, since a `role: "tool"` message is meaningless without the
@@ -329,11 +340,24 @@ Drop superseded detail, resolved dead ends, and chatter.",
                 }
             };
             self.add_usage(u);
+            if let Some(r) = msg.reasoning.as_deref().map(str::trim).filter(|r| !r.is_empty()) {
+                self.log_line(name, "reasoning", &glimpse(r));
+            }
             history.push(msg.clone());
             let calls = msg.tool_calls.unwrap_or_default();
             if calls.is_empty() {
                 // Model answered in prose; treat it as the report.
-                report = msg.content.unwrap_or_default();
+                report = msg.content.clone().unwrap_or_default();
+                if report.trim().is_empty() {
+                    // Nothing said and nothing called — a reasoning-only turn. Ending
+                    // here would hand the CEO an empty report as if the task were done.
+                    self.log_line(name, "no-action", "model replied with no answer and no tool call — nudging it");
+                    history.push(Message::text(
+                        "user",
+                        "Continue: either call a tool, or call finish(report) with your result.",
+                    ));
+                    continue;
+                }
                 break;
             }
             let mut finished = false;
@@ -550,15 +574,28 @@ Save one-off lessons with save_playbook. Then continue the mission.\n\n{log}{sta
                 }
             };
             self.add_usage(u);
-            if let Some(c) = &msg.content {
-                if !c.trim().is_empty() {
-                    self.log_line("CEO", "says", c);
-                }
+            let said = msg.content.as_deref().map(str::trim).is_some_and(|c| !c.is_empty());
+            if said {
+                self.log_line("CEO", "says", msg.content.as_deref().unwrap_or_default());
             }
+            // Show where it is heading. Models that split reasoning from their answer
+            // put a whole turn's work here, and it was being dropped on the floor.
+            let mused = match msg.reasoning.as_deref().map(str::trim) {
+                Some(r) if !r.is_empty() => {
+                    self.log_line("CEO", "reasoning", &glimpse(r));
+                    true
+                }
+                _ => false,
+            };
             history.push(msg.clone());
 
             let calls = msg.tool_calls.unwrap_or_default();
             if calls.is_empty() {
+                // A turn with no content, no reasoning and no tool call is a spin: it
+                // costs a call and produces nothing. Say so, or the log just goes quiet.
+                if !said && !mused {
+                    self.log_line("CEO", "no-action", "model replied with nothing at all — nudging it to act");
+                }
                 history.push(Message::text(
                     "user",
                     "Do not stop. Take the next concrete action with a tool call (or finish(report) if you hit a milestone).",

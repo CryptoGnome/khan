@@ -247,6 +247,30 @@ mod tests {
     }
 
     #[test]
+    fn model_reasoning_is_captured_but_never_sent_back() {
+        use crate::llm::Message;
+        // Providers disagree on the field name; both must land.
+        for field in ["reasoning", "reasoning_content"] {
+            let raw = format!(
+                r#"{{"role":"assistant","content":null,"{field}":"I should check the balance first."}}"#
+            );
+            let m: Message = serde_json::from_str(&raw).unwrap();
+            assert_eq!(
+                m.reasoning.as_deref(),
+                Some("I should check the balance first."),
+                "{field} should be captured"
+            );
+            // Echoing reasoning back upstream can be rejected, so it must not serialize.
+            let back = serde_json::to_string(&m).unwrap();
+            assert!(!back.contains("reasoning"), "reasoning must not be sent back: {back}");
+            assert!(!back.contains("check the balance"), "reasoning text must not be sent back");
+        }
+        // A message with no reasoning field at all still parses.
+        let plain: Message = serde_json::from_str(r#"{"role":"user","content":"hi"}"#).unwrap();
+        assert!(plain.reasoning.is_none());
+    }
+
+    #[test]
     fn compaction_keeps_recent_turns_and_never_orphans_a_tool_result() {
         use crate::agent::split_point;
         use crate::llm::Message;
