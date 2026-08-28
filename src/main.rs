@@ -204,6 +204,58 @@ mod tests {
     }
 
     #[test]
+    fn redact_hides_key_material_but_keeps_public_addresses() {
+        use crate::state::redact as r;
+        // A Solana secret key (base58, 88 chars) and the JSON keypair file form.
+        let secret = "4wBqpZM9xaSheZzJSMawUGeTncBjuLGF1TRHVvz2XjR8DfBBFWnMe1FbGqUyxNhMJ8dCVQoyYuoDVzJvYqVdRaeg";
+        let keypair = format!("[{}]", (0..64).map(|i| (i % 256).to_string()).collect::<Vec<_>>().join(","));
+        for s in [secret.to_string(), keypair, "sk-or-v1-abcdef0123456789abcdef".into(), "bu0y_abcdef0123456789".into()] {
+            let out = r(&format!("writing key {s} to vault"));
+            assert!(!out.contains(&s), "secret must not survive redaction: {out}");
+            assert!(out.contains("REDACTED"), "should mark the redaction: {out}");
+        }
+        // The company publishes its deposit address on purpose — a 32-44 char
+        // base58 public key must stay readable, or the funding flow breaks.
+        let addr = "JmGucHQUPhZsoqnzAGjMkdFDDUDgYtjW3fHjXXu1Lu1";
+        assert!(r(&format!("deposit to {addr}")).contains(addr), "public address must survive");
+        assert_eq!(r("ran: cargo build --release"), "ran: cargo build --release");
+        // A transaction signature is shape-identical to a secret key, so it is
+        // redacted too — but the prefix must survive so the on-chain proof of work
+        // stays traceable on an explorer.
+        let sig = "4vAyncxjU72SMvv7ZUDmkmfscnX6HiKCsoxj1CPBeiaE4v59LJ4MwmrgXR2hwyhEP7F7hrNRcpcB7ed2Jt2AkMAE";
+        let out = r(&format!("confirmed {sig}"));
+        assert!(out.contains("4vAync"), "signature prefix must survive: {out}");
+        assert!(!out.contains(sig), "full 88-char token must not survive: {out}");
+    }
+
+    #[test]
+    fn workspace_paths_cannot_escape_via_parent_dir() {
+        let cfg: crate::config::Config = toml::from_str(
+            "ceo_model = \"p/m\"\n[[providers]]\nname = \"p\"\nbase_url = \"http://x\"\napi_key_env = \"X\"\npaid_models = [\"m\"]\n",
+        )
+        .unwrap();
+        let root = std::env::temp_dir().join("khan-fs-escape-test");
+        let ws = root.join("ws");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&ws).unwrap();
+        let ctx = crate::tools::ToolCtx {
+            cfg,
+            store: std::sync::Arc::new(crate::state::Store::open(":memory:").unwrap()),
+            workspace: ws.clone(),
+            http: reqwest::Client::new(),
+        };
+        // On Linux the ancestor probe alone let this through: `new` does not exist,
+        // so exists() failed all the way back to the workspace and the check passed,
+        // then create_dir_all made `new` real and the write escaped.
+        for bad in ["new/../../escaped.txt", "../escaped.txt", "a/b/../../../escaped.txt"] {
+            assert!(crate::tools::fs::write_file(&ctx, bad, "pwn").is_err(), "{bad} must be rejected");
+        }
+        assert!(!root.join("escaped.txt").exists(), "nothing may be written outside the workspace");
+        assert!(crate::tools::fs::write_file(&ctx, "sub/ok.txt", "fine").is_ok());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn tool_call_roundtrip() {
         let raw = r#"{"role":"assistant","content":null,
             "tool_calls":[{"id":"c1","type":"function","function":{"name":"shell","arguments":"{\"command\":\"dir\"}"}}]}"#;

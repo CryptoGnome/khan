@@ -7,6 +7,107 @@ fn log_row_json(id: i64, ts: &str, agent: &str, event: &str, detail: &str) -> St
     serde_json::json!({"id": id, "ts": ts, "agent": agent, "event": event, "detail": detail}).to_string()
 }
 
+fn is_tok(c: char) -> bool {
+    c.is_ascii_alphanumeric() || c == '-' || c == '_'
+}
+
+fn looks_secret(t: &str) -> bool {
+    let n = t.len();
+    if t.starts_with("sk-") && n >= 20 {
+        return true;
+    }
+    if t.starts_with("bu0y_") && n >= 16 {
+        return true;
+    }
+    // 64+ hex chars: generic private key material.
+    if n >= 64 && t.chars().all(|c| c.is_ascii_hexdigit()) {
+        return true;
+    }
+    // 64+ base58: a Solana secret key is 87-88 chars. Public addresses are only
+    // 32-44, and the company publishes those on purpose, so the threshold sits
+    // above them deliberately.
+    if n >= 64 && t.chars().all(|c| c.is_ascii_alphanumeric() && !"0OIl".contains(c)) {
+        return true;
+    }
+    false
+}
+
+/// If a JSON byte array starts at `i`, return (index just past `]`, element count).
+fn byte_array(b: &[char], i: usize) -> Option<(usize, usize)> {
+    let ws = |c: char| matches!(c, ' ' | '\n' | '\r' | '\t');
+    let mut j = i + 1;
+    let mut n = 0usize;
+    loop {
+        while j < b.len() && ws(b[j]) {
+            j += 1;
+        }
+        let start = j;
+        while j < b.len() && b[j].is_ascii_digit() {
+            j += 1;
+        }
+        if j == start || j - start > 3 {
+            return None;
+        }
+        n += 1;
+        while j < b.len() && ws(b[j]) {
+            j += 1;
+        }
+        match b.get(j)? {
+            ',' => j += 1,
+            ']' => return Some((j + 1, n)),
+            _ => return None,
+        }
+    }
+}
+
+/// Strip secret-shaped strings out of activity-log text.
+///
+/// The activity log is served to anyone on the internet by the web viewer, so
+/// this is the one place a leaked key can be stopped *in code* rather than by
+/// asking the model nicely (prompts.rs SECURITY rule 3). It runs before the DB
+/// insert, so the replayed history is scrubbed too — not just the live stream.
+///
+/// Covers: Solana secret keys (base58 and the 64-byte JSON keypair form),
+/// 64+ char hex key material, and sk-/bu0y_ API keys. It does NOT detect
+/// mnemonic seed phrases — those are ordinary words and cannot be matched
+/// without a wordlist.
+pub fn redact(s: &str) -> String {
+    let b: Vec<char> = s.chars().collect();
+    let mut out = String::with_capacity(s.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == '[' {
+            if let Some((end, n)) = byte_array(&b, i) {
+                if n >= 32 {
+                    out.push_str("[REDACTED-KEYPAIR]");
+                    i = end;
+                    continue;
+                }
+            }
+        }
+        if is_tok(b[i]) && (i == 0 || !is_tok(b[i - 1])) {
+            let mut j = i;
+            while j < b.len() && is_tok(b[j]) {
+                j += 1;
+            }
+            if looks_secret(&b[i..j].iter().collect::<String>()) {
+                // Keep a short prefix. A Solana transaction signature has exactly the
+                // same shape as a secret key (both 64 bytes base58), so this cannot
+                // tell them apart — and signatures are the on-chain proof of work the
+                // public log exists to show. Six characters is enough to match one on
+                // an explorer, and far too little to weaken a key.
+                out.extend(b[i..j].iter().take(6));
+                out.push_str("...[REDACTED]");
+                i = j;
+                continue;
+            }
+        }
+        out.push(b[i]);
+        i += 1;
+    }
+    out
+}
+
 /// Internal persistent state (khan.db): prompts, agents, run log, memories, kv.
 pub struct Store {
     pub conn: Mutex<Connection>,
@@ -75,6 +176,8 @@ impl Store {
 
     pub fn log(&self, agent: &str, event: &str, detail: &str) {
         let ts = chrono::Utc::now().to_rfc3339();
+        // Scrub before the insert, so the viewer's history replay is covered too.
+        let detail = redact(detail);
         let id = {
             let c = self.conn.lock().unwrap();
             match c.execute(
@@ -85,7 +188,7 @@ impl Store {
                 Err(_) => 0,
             }
         };
-        let _ = self.log_tx.send(log_row_json(id, &ts, agent, event, detail));
+        let _ = self.log_tx.send(log_row_json(id, &ts, agent, event, &detail));
     }
 
     /// Last n log rows as JSON (oldest first), same shape as the live stream.

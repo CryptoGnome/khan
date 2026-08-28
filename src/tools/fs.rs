@@ -1,12 +1,21 @@
 use super::ToolCtx;
 use anyhow::{bail, Context, Result};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 /// Resolve a workspace-relative path and refuse anything that escapes the workspace.
 fn resolve(ctx: &ToolCtx, rel: &str) -> Result<PathBuf> {
     let rel = rel.trim_start_matches(['/', '\\']);
     if Path::new(rel).is_absolute() {
         bail!("absolute paths are not allowed; use paths relative to the workspace");
+    }
+    // Reject `..` outright. The ancestor probe below cannot be trusted to catch it:
+    // on Linux, `exists()` fails on any path with a missing component, so a path like
+    // `new/../../khan.db` rewinds the probe all the way back to the workspace, passes
+    // the containment check, and then write_file's create_dir_all materialises `new`
+    // and the write lands outside. (Windows normalises `..` lexically and blocks it,
+    // so this only ever bit the Linux deployment.)
+    if Path::new(rel).components().any(|c| matches!(c, Component::ParentDir)) {
+        bail!("`..` is not allowed in workspace paths");
     }
     let ws = ctx.workspace.canonicalize().context("workspace missing")?;
     let joined = ws.join(rel);

@@ -1,7 +1,7 @@
 pub mod credits;
 pub mod custom;
 pub mod skills;
-mod fs;
+pub(crate) mod fs;
 pub mod shell;
 mod sql;
 mod web;
@@ -124,7 +124,12 @@ pub async fn execute(ctx: &ToolCtx, agent: &str, name: &str, args: &Value) -> St
     ctx.store.record_tool_call(name, !failed, if failed { &text } else { "" });
     if failed {
         // Surface it in the activity log too (the viewer styles *-error red).
-        ctx.store.log(agent, &format!("{name}-error"), &text);
+        // Capped: `text` here is tool OUTPUT — for shell that is the child's whole
+        // stdout+stderr, and any command whose output merely starts with "ERROR"
+        // lands here — while the activity log is public. A short head is enough to
+        // see what broke; the agent still gets the full text as the tool result.
+        let brief: String = text.chars().take(400).collect();
+        ctx.store.log(agent, &format!("{name}-error"), &brief);
     }
     truncate(text)
 }
