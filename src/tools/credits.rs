@@ -23,8 +23,11 @@ pub async fn run(ctx: &ToolCtx) -> Result<String> {
         .iter()
         .find(|p| p.name == PROVIDER)
         .with_context(|| format!("no '{PROVIDER}' provider configured"))?;
-    let key = std::env::var(&prov.api_key_env)
-        .with_context(|| format!("env var {} not set", prov.api_key_env))?;
+    let key = ctx
+        .cfg
+        .key_for(PROVIDER)
+        .with_context(|| format!("env var {} not set", prov.api_key_env))?
+        .to_string();
     let base = prov.base_url.trim_end_matches('/');
 
     let get = |path: String| {

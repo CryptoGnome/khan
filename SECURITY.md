@@ -17,8 +17,10 @@ Understand the boundaries before deploying:
 - An immutable security preamble is appended to every agent's system prompt
   from code (not from the editable prompts table), covering prompt-injection
   resistance, secret handling, and the read-only rule for the public log page.
-- API keys, tokens, and other secret-shaped environment variables are stripped
-  from every shell child process agents spawn.
+- API keys are moved out of the process environment entirely at startup: khan
+  reads them once into memory, then removes them, so they are absent from
+  `/proc/<pid>/environ` as well as from every shell child agents spawn. Other
+  secret-shaped environment variables are removed at the same time.
 - The GitHub CLI (`gh`) is blocked in the agent shell so agents can never use
   a personal GitHub login; only local `git` is available.
 - The web log viewer has **no write endpoints** — page viewers cannot send
@@ -32,8 +34,10 @@ Understand the boundaries before deploying:
   host. Run it in a container (the provided Dockerfile / Railway setup), not
   on a machine holding anything you can't afford to expose.
 - The log viewer is **unauthenticated**. Anyone with the URL can read the
-  full activity log, including tool arguments. Keep the URL private or don't
-  enable public networking.
+  full activity log, including tool arguments. Key-shaped strings are redacted
+  from it in code, but that is a pattern match, not a guarantee — a mnemonic
+  seed phrase is ordinary words and cannot be detected. Keep the URL private
+  or don't enable public networking.
 - There is **no spend cap** on API usage. The only hard stop is stopping the
   process/service.
 

@@ -229,6 +229,32 @@ mod tests {
     }
 
     #[test]
+    fn api_keys_leave_the_process_environment_at_load() {
+        // Stripping child envs is not enough: a child can read its parent's copy
+        // from /proc/<pid>/environ on Linux. The key must not be in the parent's
+        // environment at all once config is loaded.
+        std::env::set_var("KHAN_TEST_API_KEY", "super-secret-value");
+        let path = std::env::temp_dir().join("khan-key-scrub-test.toml");
+        std::fs::write(
+            &path,
+            "ceo_model = \"p/m\"\n[[providers]]\nname = \"p\"\nbase_url = \"http://x\"\napi_key_env = \"KHAN_TEST_API_KEY\"\npaid_models = [\"m\"]\n",
+        )
+        .unwrap();
+        let cfg = crate::config::Config::load(path.to_str().unwrap()).unwrap();
+
+        assert!(
+            std::env::var("KHAN_TEST_API_KEY").is_err(),
+            "the key must be gone from the environment after load"
+        );
+        // ...and khan must still be able to use it.
+        let (_, model, key) = cfg.resolve("p/m").unwrap();
+        assert_eq!(model, "m");
+        assert_eq!(key, "super-secret-value");
+        assert_eq!(cfg.key_for("p"), Some("super-secret-value"));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
     fn workspace_paths_cannot_escape_via_parent_dir() {
         let cfg: crate::config::Config = toml::from_str(
             "ceo_model = \"p/m\"\n[[providers]]\nname = \"p\"\nbase_url = \"http://x\"\napi_key_env = \"X\"\npaid_models = [\"m\"]\n",

@@ -29,6 +29,10 @@ pub struct Config {
     /// Max agent-loop iterations for a delegated employee task.
     #[serde(default = "default_employee_max_iters")]
     pub employee_max_iters: u64,
+    /// Provider API keys, read from the environment once at load and held only
+    /// here. Never deserialized from the config file — keys never live on disk.
+    #[serde(skip)]
+    keys: std::collections::HashMap<String, String>,
 }
 
 fn default_workspace() -> String {
@@ -45,12 +49,46 @@ impl Config {
     pub fn load(path: &str) -> Result<Config> {
         let text = std::fs::read_to_string(path)
             .with_context(|| format!("cannot read config file {path} (copy khan.toml.example to khan.toml)"))?;
-        let cfg: Config = toml::from_str(&text).context("invalid khan.toml")?;
+        let mut cfg: Config = toml::from_str(&text).context("invalid khan.toml")?;
         if cfg.providers.is_empty() {
             bail!("khan.toml must define at least one [[providers]] entry");
         }
+        cfg.take_keys_from_env();
         cfg.resolve(&cfg.ceo_model)?; // validate early
         Ok(cfg)
+    }
+
+    /// Move API keys out of the process environment and into this struct.
+    ///
+    /// Stripping secrets from agent-spawned children (tools::shell) is not enough
+    /// on its own: khan's own environment still held the keys, and on Linux a
+    /// child can read its parent's copy straight out of /proc/<pid>/environ,
+    /// walking around the whole control. Whether that read is permitted depends
+    /// on the host kernel's yama ptrace_scope — which is not ours to rely on — so
+    /// take the keys out of the environment entirely and keep them in memory.
+    ///
+    /// Called once during load, before any agent task exists.
+    fn take_keys_from_env(&mut self) {
+        for p in &self.providers {
+            if let Ok(v) = std::env::var(&p.api_key_env) {
+                self.keys.insert(p.api_key_env.clone(), v);
+            }
+        }
+        // Drop the provider keys plus anything else secret-shaped: khan needs none
+        // of them from the environment again, and what isn't there cannot leak.
+        let doomed: Vec<String> = std::env::vars()
+            .map(|(k, _)| k)
+            .filter(|k| crate::tools::shell::is_sensitive_env(k) || self.keys.contains_key(k))
+            .collect();
+        for k in doomed {
+            std::env::remove_var(k);
+        }
+    }
+
+    /// The API key for a provider, or None if it was never set.
+    pub fn key_for(&self, provider: &str) -> Option<&str> {
+        let p = self.providers.iter().find(|p| p.name == provider)?;
+        self.keys.get(&p.api_key_env).map(String::as_str)
     }
 
     /// Split "provider/model" into (provider, model id, api key).
@@ -63,8 +101,13 @@ impl Config {
             .iter()
             .find(|p| p.name == pname)
             .with_context(|| format!("unknown provider '{pname}' in model '{model}'"))?;
-        let key = std::env::var(&prov.api_key_env)
-            .with_context(|| format!("env var {} not set (needed by provider {})", prov.api_key_env, prov.name))?;
+        // Read from the in-memory map, not the environment: take_keys_from_env has
+        // already removed these vars from the process so nothing can read them back.
+        let key = self
+            .keys
+            .get(&prov.api_key_env)
+            .with_context(|| format!("env var {} not set (needed by provider {})", prov.api_key_env, prov.name))?
+            .clone();
         Ok((prov.clone(), mname.to_string(), key))
     }
 
