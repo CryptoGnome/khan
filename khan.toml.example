@@ -1,9 +1,13 @@
 # Copy to khan.toml and edit. API keys come from env vars, never this file.
 
-# Model the CEO runs on, as "provider/model" (glm53flash: cheap and capable)
-ceo_model = "bu0y/glm53flash"
-# Cheap model for internal work like history summarization (defaults to ceo_model)
-utility_model = "openrouter/free"
+# Model the CEO runs on, as "provider/model". It must support tool calling.
+ceo_model = "bu0y/deepseekv4flash0731"
+# Cheap model for internal work like history summarization (defaults to ceo_model).
+# NOT the "free" auto-router: it fails on essentially every call and only works
+# because khan then falls back, which wastes a round trip each time. Name a
+# concrete free model instead. minimax-m3 has a 1M context, which suits
+# summarizing a long history in one pass.
+utility_model = "openrouter/minimax/minimax-m3:free"
 
 # Directory agents work in (created automatically)
 workspace = "workspace"
@@ -21,6 +25,7 @@ api_key_env = "BU0Y_API_KEY"
 # itself (https://bu0y.com/llms.txt, https://api.bu0y.com/v1/models) and can
 # hire onto ANY catalog slug as "bu0y/<slug>".
 paid_models = [
+  "deepseekv4flash0731",
   "glm53flash",
 ]
 
@@ -34,7 +39,8 @@ api_key_env = "OPENROUTER_API_KEY"
 # hire employees onto them. Check the current set with:
 #   curl -s https://openrouter.ai/api/v1/models | jq '.data[]
 #     | select(.id|endswith(":free")) | select(.supported_parameters|index("tools")) | .id'
-# ("openrouter/free" is still fine as utility_model — summarization needs no tools.)
+# Don't use "openrouter/free" anywhere, including utility_model: in practice it
+# fails on every call and only appears to work because khan falls back.
 free_models = [
   "z-ai/glm-5.2:free",
   "minimax/minimax-m3:free",
