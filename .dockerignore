@@ -1,0 +1,6 @@
+target
+khan.db
+khan.db-journal
+workspace
+*.log
+.git

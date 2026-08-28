@@ -1,0 +1,43 @@
+# Copy to khan.toml and edit. API keys come from env vars, never this file.
+
+# Model the CEO runs on, as "provider/model"
+ceo_model = "bu0y/anthropic/claude-sonnet-4"
+# Cheap model for internal work like history summarization (defaults to ceo_model)
+utility_model = "openrouter/meta-llama/llama-3.3-70b-instruct:free"
+
+# Directory agents work in (created automatically)
+workspace = "workspace"
+
+# CEO self-reflection/evolution every N iterations
+reflect_every = 10
+# Max loop iterations per delegated employee task
+employee_max_iters = 30
+
+[[providers]]
+name = "bu0y"
+base_url = "https://api.bu0y.com/v1"
+api_key_env = "BU0Y_API_KEY"
+paid_models = [
+  "anthropic/claude-sonnet-4",
+  "openai/gpt-5.4",
+  "google/gemini-2.5-pro",
+]
+
+[[providers]]
+name = "openrouter"
+base_url = "https://openrouter.ai/api/v1"
+api_key_env = "OPENROUTER_API_KEY"
+# "free" auto-routes to whatever free model is currently available — good default
+# for easy/bulk work. List specific models too if you want the CEO to pick deliberately.
+free_models = [
+  "free",
+  "meta-llama/llama-3.3-70b-instruct:free",
+  "deepseek/deepseek-chat-v3-0324:free",
+]
+
+# Add any other OpenAI-compatible endpoint the same way:
+# [[providers]]
+# name = "local"
+# base_url = "http://localhost:11434/v1"
+# api_key_env = "LOCAL_API_KEY"
+# paid_models = ["llama3"]

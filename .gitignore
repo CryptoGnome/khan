@@ -1,0 +1,5 @@
+/target
+# local config (copy of khan.toml.example) and runtime state
+/khan.toml
+/khan.db
+/workspace

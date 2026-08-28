@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>khan &mdash; live log</title>
+<style>
+  :root{
+    --bg:#14141b; --panel:#1a1b26; --line:#262738; --text:#c0caf5; --dim:#565f89;
+    --says:#7aa2f7; --report:#bb9af7; --milestone:#9ece6a; --founder:#ff79c6;
+    --team:#ff9e64; --evolve:#2ac3de; --sys:#565f89; --error:#f7768e; --tool:#8f98c9;
+  }
+  *{box-sizing:border-box; margin:0}
+  html,body{height:100%}
+  body{background:var(--bg); color:var(--text); display:flex; flex-direction:column;
+       font:13px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  header{display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+         padding:10px 16px; background:var(--panel); border-bottom:1px solid var(--line)}
+  h1{font-size:14px; font-weight:600; letter-spacing:.18em}
+  h1 b{color:var(--team)}
+  #dot{width:8px; height:8px; border-radius:50%; background:var(--error); flex:none;
+       transition:background .3s}
+  #dot.live{background:var(--milestone); box-shadow:0 0 6px var(--milestone)}
+  #status{color:var(--dim); font-size:11px; min-width:80px}
+  #q{background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:6px;
+     padding:5px 10px; font:inherit; width:200px; outline:none}
+  #q:focus{border-color:var(--says)}
+  #agents{display:flex; gap:6px; flex-wrap:wrap; margin-left:auto}
+  .chip{background:transparent; border:1px solid var(--line); border-radius:999px;
+        color:var(--dim); padding:2px 10px; font:inherit; font-size:11px; cursor:pointer}
+  .chip.on{border-color:currentColor; color:var(--c); background:color-mix(in srgb, var(--c) 12%, transparent)}
+  #feed{flex:1; overflow-y:auto; padding:8px 0 24px; overscroll-behavior:contain}
+  .row{display:grid; grid-template-columns:70px 110px 130px 1fr; gap:10px; align-items:baseline;
+       padding:3px 16px; border-left:2px solid transparent; cursor:default}
+  .row:hover{background:color-mix(in srgb, var(--panel) 70%, transparent)}
+  .row.open, .row.expandable{cursor:pointer}
+  .ts{color:var(--dim); font-size:11px}
+  .agent{font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .event{font-size:11px; color:var(--c); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .event::before{content:''; display:inline-block; width:7px; height:7px; border-radius:2px;
+                 background:var(--c); margin-right:6px; vertical-align:0}
+  .detail{color:var(--text); overflow-wrap:anywhere}
+  .detail .more{color:var(--dim)}
+  .row{--c:var(--tool)}
+  .cat-says{--c:var(--says)} .cat-report{--c:var(--report)} .cat-milestone{--c:var(--milestone)}
+  .cat-founder{--c:var(--founder)} .cat-team{--c:var(--team)} .cat-evolve{--c:var(--evolve)}
+  .cat-sys{--c:var(--sys)} .cat-error{--c:var(--error)}
+  .cat-sys .detail{color:var(--dim)}
+  .cat-error{border-left-color:var(--error)}
+  .cat-error .detail{color:var(--error)}
+  .cat-milestone{border-left-color:var(--milestone);
+                 background:color-mix(in srgb, var(--milestone) 6%, transparent)}
+  .cat-founder{border-left-color:var(--founder)}
+  .full{display:none; margin:2px 16px 8px 96px; padding:10px 12px; background:var(--panel);
+        border:1px solid var(--line); border-radius:8px; max-height:420px; overflow:auto}
+  .full pre{white-space:pre-wrap; overflow-wrap:anywhere; font:inherit; font-size:12px}
+  .row.open + .full{display:block}
+  #jump{position:fixed; right:20px; bottom:20px; background:var(--says); color:var(--bg);
+        border:0; border-radius:999px; padding:8px 16px; font:inherit; font-weight:600;
+        cursor:pointer; box-shadow:0 4px 14px rgba(0,0,0,.5)}
+  #jump[hidden]{display:none}
+  @media (max-width:700px){
+    .row{grid-template-columns:56px 90px 1fr; gap:8px}
+    .event{display:none}
+    .full{margin-left:16px}
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1><b>KHAN</b> LOG</h1>
+  <span id="dot"></span><span id="status">connecting</span>
+  <input id="q" type="search" placeholder="filter&hellip;" autocomplete="off">
+  <div id="agents"></div>
+</header>
+<div id="feed"></div>
+<button id="jump" hidden>&darr; latest</button>
+<script>
+'use strict';
+const feed = document.getElementById('feed');
+const dot = document.getElementById('dot');
+const statusEl = document.getElementById('status');
+const jump = document.getElementById('jump');
+const qInput = document.getElementById('q');
+const agentsBar = document.getElementById('agents');
+
+const seen = new Set();
+const agentChips = new Map();   // agent name -> chip element
+const activeAgents = new Set(); // empty = show all
+let q = '';
+let stick = true;
+
+const CATS = {
+  says:'says', report:'report', finish:'milestone', 'founder-message':'founder',
+  hire:'team', fire:'team', delegate:'team', delegate_parallel:'team',
+  rate_work:'team', list_team:'team',
+  update_prompt:'evolve', rollback_prompt:'evolve', save_playbook:'evolve',
+  create_tool:'evolve', rollback_tool:'evolve', create_skill:'evolve',
+  rollback_skill:'evolve', use_skill:'evolve', compacted:'evolve',
+  startup:'sys', shutdown:'sys', 'model-fallback':'sys',
+};
+const catOf = ev => CATS[ev] || (/error|fail/i.test(ev) ? 'error' : 'tool');
+
+function agentColor(name){
+  if (name === 'CEO') return '#e0af68';
+  if (name === 'khan') return '#565f89';
+  let h = 0;
+  for (const ch of name) h = (h * 31 + ch.codePointAt(0)) >>> 0;
+  return `hsl(${h % 360} 62% 66%)`;
+}
+
+// Translate known events into plain sentences. Returns null for unknown
+// events (custom tools), which fall back to the key:value preview.
+function humanize(event, detail){
+  let o = null;
+  try { o = JSON.parse(detail); } catch {}
+  if (!o || typeof o !== 'object' || Array.isArray(o)) o = {};
+  const g = k => typeof o[k] === 'string' ? o[k] : '';
+  switch (event){
+    case 'says':            return detail;
+    case 'report':          return 'reported back: ' + detail;
+    case 'founder-message': return 'founder: ' + detail;
+    case 'shell':           return 'ran: ' + g('command');
+    case 'read_file':       return 'read file ' + g('path');
+    case 'write_file':      return 'wrote file ' + g('path');
+    case 'list_files':      return 'listed files in "' + (g('path') || 'workspace') + '"';
+    case 'web_fetch':       return 'fetched ' + g('url');
+    case 'web_search':      return 'searched the web: "' + g('query') + '"';
+    case 'sql':             return 'ran SQL: ' + g('query');
+    case 'remember':        return 'saved memory "' + g('key') + '": ' + g('content');
+    case 'recall':          return 'searched memory: "' + g('query') + '"';
+    case 'hire':            return 'hired ' + g('name') + ' on ' + g('model') + ' — ' + g('role');
+    case 'fire':            return 'fired ' + g('name');
+    case 'delegate':        return 'assigned ' + g('agent') + ': ' + g('task');
+    case 'delegate_parallel': {
+      const ts = Array.isArray(o.tasks) ? o.tasks : [];
+      return 'assigned ' + ts.length + ' tasks in parallel: '
+        + ts.map(t => `${t.agent} → ${t.task}`).join('  |  ');
+    }
+    case 'rate_work':       return 'rated ' + g('agent') + ' ' + (o.score ?? '?') + '/5'
+                                 + (g('note') ? ' — ' + g('note') : '');
+    case 'update_prompt':   return 'improved prompt "' + g('name') + '" — ' + g('reason');
+    case 'rollback_prompt': return 'rolled back prompt "' + g('name') + '"';
+    case 'save_playbook':   return 'saved playbook "' + g('topic') + '"';
+    case 'create_tool':     return 'built tool "' + g('name') + '" — ' + (g('description') || g('reason'));
+    case 'rollback_tool':   return 'rolled back tool "' + g('name') + '"';
+    case 'create_skill':    return 'wrote skill "' + g('name') + '" — ' + (g('description') || g('reason'));
+    case 'rollback_skill':  return 'rolled back skill "' + g('name') + '"';
+    case 'use_skill':       return 'loaded skill "' + g('name') + '"';
+    case 'finish':          return 'milestone: ' + g('report');
+  }
+  return null;
+}
+
+// Tool-call details are JSON args: preview them as "key: value" pairs.
+function preview(detail){
+  try {
+    const o = JSON.parse(detail);
+    if (o && typeof o === 'object' && !Array.isArray(o))
+      return Object.entries(o)
+        .map(([k, v]) => `${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`)
+        .join('   ');
+  } catch {}
+  return detail;
+}
+
+function pretty(detail){
+  try { return JSON.stringify(JSON.parse(detail), null, 2); } catch {}
+  return detail;
+}
+
+function matches(row){
+  if (activeAgents.size && !activeAgents.has(row.dataset.agent)) return false;
+  if (q && !row.dataset.text.includes(q)) return false;
+  return true;
+}
+
+function applyFilter(){
+  for (const row of feed.querySelectorAll('.row')){
+    const show = matches(row);
+    row.style.display = show ? '' : 'none';
+    row.nextElementSibling.style.display = show && row.classList.contains('open') ? '' : 'none';
+    if (!show) row.classList.remove('open');
+  }
+  if (stick) feed.scrollTop = feed.scrollHeight;
+}
+
+function ensureAgentChip(name){
+  if (agentChips.has(name)) return;
+  const chip = document.createElement('button');
+  chip.className = 'chip';
+  chip.textContent = name;
+  chip.style.setProperty('--c', agentColor(name));
+  chip.onclick = () => {
+    if (activeAgents.has(name)) activeAgents.delete(name);
+    else activeAgents.add(name);
+    chip.classList.toggle('on');
+    applyFilter();
+  };
+  agentChips.set(name, chip);
+  agentsBar.appendChild(chip);
+}
+
+function add(e){
+  if (seen.has(e.id)) return;
+  seen.add(e.id);
+  ensureAgentChip(e.agent);
+
+  const cat = catOf(e.event);
+  const row = document.createElement('div');
+  row.className = 'row cat-' + cat;
+  row.dataset.agent = e.agent;
+
+  const ts = document.createElement('span');
+  ts.className = 'ts';
+  const d = new Date(e.ts);
+  ts.textContent = isNaN(d) ? '' : d.toLocaleTimeString('en-GB');
+
+  const ag = document.createElement('span');
+  ag.className = 'agent';
+  ag.textContent = e.agent;
+  ag.style.color = agentColor(e.agent);
+
+  const ev = document.createElement('span');
+  ev.className = 'event';
+  ev.textContent = e.event;
+
+  const detail = e.detail || '';
+  const short = (humanize(e.event, detail) ?? preview(detail)).replace(/\s+/g, ' ');
+  const de = document.createElement('span');
+  de.className = 'detail';
+  const MAX = 300;
+  de.textContent = short.slice(0, MAX);
+  if (short.length > MAX){
+    const more = document.createElement('span');
+    more.className = 'more';
+    more.textContent = ' …';
+    de.appendChild(more);
+  }
+
+  row.append(ts, ag, ev, de);
+  row.dataset.text = `${e.agent} ${e.event} ${short}`.toLowerCase();
+
+  const full = document.createElement('div');
+  full.className = 'full';
+  if (short.length > MAX || pretty(detail) !== short){
+    row.classList.add('expandable');
+    row.onclick = () => {
+      if (!full.firstChild){
+        const pre = document.createElement('pre');
+        pre.textContent = pretty(detail);
+        full.appendChild(pre);
+      }
+      row.classList.toggle('open');
+      full.style.display = row.classList.contains('open') ? 'block' : 'none';
+    };
+  }
+
+  const show = matches(row);
+  row.style.display = show ? '' : 'none';
+  full.style.display = 'none';
+  feed.append(row, full);
+
+  while (feed.children.length > 6000){
+    feed.firstChild.remove(); // row
+    feed.firstChild.remove(); // its .full
+  }
+  if (stick) feed.scrollTop = feed.scrollHeight;
+}
+
+feed.addEventListener('scroll', () => {
+  stick = feed.scrollTop + feed.clientHeight >= feed.scrollHeight - 60;
+  jump.hidden = stick;
+});
+jump.onclick = () => { feed.scrollTop = feed.scrollHeight; };
+qInput.addEventListener('input', () => { q = qInput.value.toLowerCase(); applyFilter(); });
+
+const es = new EventSource('/logs');
+es.onopen = () => { dot.classList.add('live'); statusEl.textContent = 'live'; };
+es.onerror = () => { dot.classList.remove('live'); statusEl.textContent = 'reconnecting'; };
+es.onmessage = ev => { try { add(JSON.parse(ev.data)); } catch {} };
+</script>
+</body>
+</html>
