@@ -367,13 +367,23 @@ Use this with live model prices to estimate spend and rebalance the team's model
                 } else {
                     format!("\n\nEmployee performance ratings (use these — not vibes — to judge prompt changes):\n{stats}")
                 };
+                let health = self.ctx.store.tool_health_text();
+                let health_block = if health.is_empty() {
+                    String::new()
+                } else {
+                    format!(
+                        "\n\nFAILING TOOLS — a tool failing repeatedly is broken infrastructure, not bad luck. \
+Diagnose it (reproduce with shell, read the error), then route around it: build a working replacement with \
+create_tool and record the workaround as a skill so the whole company stops wasting calls on it.\n{health}"
+                    )
+                };
                 history.push(Message::text("user", format!(
                     "[Scheduled reflection] Review the recent activity log below. What's working, what isn't? \
 If a prompt (yours or an employee's) is causing weak results, improve it with update_prompt, \
 or rollback_prompt if a recent change hurt. If a custom tool erred or is missing, improve or build it with \
 create_tool (rollback_tool reverts a bad version). If you or employees keep re-figuring-out the same procedure, \
 capture it as a skill with create_skill; improve skills that led agents astray (rollback_skill reverts). \
-Save one-off lessons with save_playbook. Then continue the mission.\n\n{log}{stats_block}\n\n{toks}"
+Save one-off lessons with save_playbook. Then continue the mission.\n\n{log}{stats_block}{health_block}\n\n{toks}"
                 )));
             }
 

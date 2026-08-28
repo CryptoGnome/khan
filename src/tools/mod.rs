@@ -113,5 +113,14 @@ pub async fn execute(ctx: &ToolCtx, agent: &str, name: &str, args: &Value) -> St
             None => Ok(format!("unknown tool: {name}")),
         },
     };
-    truncate(out.unwrap_or_else(|e| format!("ERROR: {e:#}")))
+    let text = out.unwrap_or_else(|e| format!("ERROR: {e:#}"));
+    // Record every outcome so a tool that is broken in this environment shows up
+    // as a pattern at reflection instead of being silently re-tried forever.
+    let failed = text.starts_with("ERROR");
+    ctx.store.record_tool_call(name, !failed, if failed { &text } else { "" });
+    if failed {
+        // Surface it in the activity log too (the viewer styles *-error red).
+        ctx.store.log(agent, &format!("{name}-error"), &text);
+    }
+    truncate(text)
 }

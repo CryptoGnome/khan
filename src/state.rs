@@ -36,6 +36,9 @@ impl Store {
              CREATE TABLE IF NOT EXISTS run_log (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL,
                 agent TEXT NOT NULL, event TEXT NOT NULL, detail TEXT);
+             CREATE TABLE IF NOT EXISTS tool_calls (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL,
+                tool TEXT NOT NULL, ok INTEGER NOT NULL, err TEXT);
              CREATE TABLE IF NOT EXISTS tool_defs (
                 name TEXT NOT NULL, version INTEGER NOT NULL, description TEXT NOT NULL,
                 params TEXT NOT NULL, lang TEXT NOT NULL, script TEXT NOT NULL,
@@ -123,6 +126,44 @@ impl Store {
             .map(|it| it.filter_map(|x| x.ok()).collect())
             .unwrap_or_default();
         rows.into_iter().rev().collect::<Vec<_>>().join("\n")
+    }
+
+    // --- tool health (so broken tooling becomes visible, not silently retried) ---
+
+    pub fn record_tool_call(&self, tool: &str, ok: bool, err: &str) {
+        let c = self.conn.lock().unwrap();
+        let _ = c.execute(
+            "INSERT INTO tool_calls(ts, tool, ok, err) VALUES(?1,?2,?3,?4)",
+            params![chrono::Utc::now().to_rfc3339(), tool, ok as i64, err],
+        );
+    }
+
+    /// Recently-failing tools, worst first, for the reflection step.
+    /// Empty when everything is healthy, so a healthy run adds no prompt noise.
+    pub fn tool_health_text(&self) -> String {
+        let c = self.conn.lock().unwrap();
+        let mut stmt = match c.prepare(
+            "SELECT tool, COUNT(*) AS calls, SUM(1-ok) AS fails,
+                    (SELECT err FROM tool_calls e WHERE e.tool=t.tool AND e.ok=0 ORDER BY e.id DESC LIMIT 1)
+             FROM tool_calls t
+             WHERE t.id > (SELECT COALESCE(MAX(id),0) - 300 FROM tool_calls)
+             GROUP BY t.tool HAVING fails > 0 ORDER BY fails DESC",
+        ) {
+            Ok(s) => s,
+            Err(_) => return String::new(),
+        };
+        let rows: Vec<String> = stmt
+            .query_map([], |r| {
+                let (tool, calls, fails, err): (String, i64, i64, Option<String>) =
+                    (r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?);
+                Ok(format!(
+                    "- {tool}: {fails} of {calls} recent calls FAILED — last error: {}",
+                    err.unwrap_or_default().chars().take(160).collect::<String>()
+                ))
+            })
+            .map(|it| it.filter_map(|x| x.ok()).collect())
+            .unwrap_or_default();
+        rows.join("\n")
     }
 
     // --- founder messages (khan tell) ---

@@ -163,6 +163,12 @@ token count is printed. **There is no spend cap — watch it.**
   agent sees a compact skill index each turn and loads a skill's full
   instructions with `use_skill` before doing work it covers. Versioned like
   tools: same name = new version, `rollback_skill` reverts.
+- **Tool health** — every tool call's outcome is recorded. Failures show up
+  immediately in the activity log (red), and repeated failures are aggregated
+  into the reflection step as "N of M recent calls FAILED — last error: …", so
+  the CEO sees broken infrastructure as a *pattern* and routes around it
+  (diagnose → build a replacement with `create_tool` → save the workaround as
+  a skill) instead of silently retrying a dead tool forever.
 - **Self-evolution** — prompts live in `khan.db`, versioned. Every
   `reflect_every` iterations the CEO reviews the activity log and may rewrite
   its own or employees' prompts (`update_prompt`), roll back bad changes, and

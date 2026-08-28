@@ -190,6 +190,20 @@ mod tests {
     }
 
     #[test]
+    fn tool_health_reports_only_failing_tools() {
+        let store = crate::state::Store::open(":memory:").unwrap();
+        for _ in 0..3 {
+            store.record_tool_call("shell", true, "");
+        }
+        store.record_tool_call("web_search", false, "ERROR: search request failed: timed out");
+        store.record_tool_call("web_search", false, "ERROR: search request failed: timed out");
+        let h = store.tool_health_text();
+        assert!(h.contains("web_search"), "should flag the broken tool: {h}");
+        assert!(h.contains("2 of 2"), "should report the failure ratio: {h}");
+        assert!(!h.contains("shell"), "healthy tools must not add noise: {h}");
+    }
+
+    #[test]
     fn tool_call_roundtrip() {
         let raw = r#"{"role":"assistant","content":null,
             "tool_calls":[{"id":"c1","type":"function","function":{"name":"shell","arguments":"{\"command\":\"dir\"}"}}]}"#;

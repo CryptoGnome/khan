@@ -36,8 +36,18 @@ pub async fn search(ctx: &ToolCtx, query: &str) -> Result<String> {
         .send()
         .await
         .context("search request failed")?;
+    let status = resp.status();
     let body = resp.text().await.unwrap_or_default();
     let text = html2text::from_read(body.as_bytes(), 100);
+    // A block/captcha page returns 200 with no results, which would otherwise look
+    // like a successful search. Report it as an error so it's visibly broken.
+    if !status.is_success() || !text.contains("http") {
+        return Ok(format!(
+            "ERROR: web_search got no usable results (HTTP {status}). Search engines commonly block \
+datacenter IPs. If this keeps happening, build a replacement with create_tool against a search API \
+that accepts a key, and record the workaround as a skill."
+        ));
+    }
     // The results section starts after the search form; return a generous slice.
     Ok(untrusted(text))
 }
