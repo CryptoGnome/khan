@@ -131,6 +131,7 @@ async fn main() -> Result<()> {
     // daily limit is 50 or 1000 depending on whether credits were ever purchased,
     // and khan paces itself against whichever it actually has.
     let llm = llm::Client::new();
+    llm.discover_context_limits(&cfg).await;
     if let Some(l) = llm.discover_limits(&cfg).await {
         let tier = if l.is_free_tier {
             "free tier (no credits ever purchased)"
@@ -395,5 +396,37 @@ mod tests {
         assert_eq!(calls[0].function.name, "shell");
         let back = serde_json::to_string(&m).unwrap();
         assert!(back.contains("\"tool_calls\""));
+    }
+
+    #[test]
+    fn context_aware_compaction_can_only_ever_tighten() {
+        use crate::agent::{compact_threshold, Orchestrator as O};
+        let (at, floor) = (O::COMPACT_AT, O::COMPACT_FLOOR);
+
+        // An unknown window - every bu0y model, since their catalog is prices only -
+        // must leave the existing threshold untouched.
+        assert_eq!(compact_threshold(None, 16_384), at);
+
+        // The models actually configured today all have room to spare, so the
+        // context-aware path must be a no-op for them.
+        for ctx in [256_000u32, 1_000_000, 1_048_576] {
+            assert_eq!(compact_threshold(Some(ctx), 16_384), at, "ctx {ctx} should not change");
+        }
+
+        // A window too small for a 200k history tightens, and by enough to matter.
+        assert!(compact_threshold(Some(64_000), 16_384) < at);
+
+        // Sweep the whole plausible space, including the degenerate cases that
+        // would panic or wrap on unchecked arithmetic: never above the old
+        // threshold, never below the anti-thrash floor, and always leaving room
+        // for compaction to actually get under the bar.
+        for ctx in [1u32, 2, 1_000, 8_192, 32_768, 64_000, 128_000, 200_000, u32::MAX] {
+            for mt in [1u32, 4_096, 16_384, 100_000, u32::MAX] {
+                let got = compact_threshold(Some(ctx), mt);
+                assert!(got <= at, "ctx {ctx} mt {mt}: {got} exceeds {at}");
+                assert!(got >= floor, "ctx {ctx} mt {mt}: {got} below {floor}");
+                assert!(got > O::KEEP_RECENT, "ctx {ctx} mt {mt}: would thrash");
+            }
+        }
     }
 }

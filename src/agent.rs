@@ -109,6 +109,27 @@ pub(crate) fn split_point(history: &[Message], keep_recent: usize) -> usize {
     split
 }
 
+/// Compaction threshold in characters for a model whose context window is `ctx`
+/// tokens, or None when the provider does not publish one.
+///
+/// Three properties hold for every input, and the clamp is what guarantees them:
+/// the result never exceeds `COMPACT_AT`, so this can only tighten the existing
+/// behaviour and never loosen it; it is exactly `COMPACT_AT` whenever the window
+/// is unknown, so providers like bu0y that publish only prices are unaffected;
+/// and it never falls below `COMPACT_FLOOR`, so it cannot land near KEEP_RECENT
+/// and summarize on every iteration without ever getting under the bar.
+pub(crate) fn compact_threshold(ctx: Option<u32>, max_tokens: u32) -> usize {
+    let Some(ctx) = ctx else {
+        return Orchestrator::COMPACT_AT;
+    };
+    // The provider's rule is prompt + max_tokens <= context_length, and it rejects
+    // rather than clamps, so the output ceiling comes off the top of the budget.
+    let budget = ctx.saturating_sub(max_tokens).saturating_sub(Orchestrator::CTX_RESERVE);
+    (budget as usize)
+        .saturating_mul(Orchestrator::CHARS_PER_TOKEN)
+        .clamp(Orchestrator::COMPACT_FLOOR, Orchestrator::COMPACT_AT)
+}
+
 const CEO_TOOL_NAMES: &[&str] = &[
     "hire", "delegate", "delegate_parallel", "rate_work", "fire", "list_team",
     "update_prompt", "rollback_prompt", "save_playbook", "finish",
@@ -197,17 +218,42 @@ impl Orchestrator {
     /// pod per request, so there is no prompt cache to amortise it against. Raise
     /// it to let the agent keep more raw history; lower it to spend less per turn
     /// and come back faster after a restart.
-    const COMPACT_AT: usize = 200_000;
+    pub(crate) const COMPACT_AT: usize = 200_000;
     /// Characters of the most recent turns kept verbatim. Recency is what the agent
     /// needs to continue the exact thing it was doing; older detail goes to the brief.
-    const KEEP_RECENT: usize = 40_000;
+    pub(crate) const KEEP_RECENT: usize = 40_000;
+
+    /// Never compact below this, whatever the model's window says. Compaction only
+    /// helps if it ends under the threshold, and it always keeps KEEP_RECENT
+    /// verbatim — so a threshold near that would summarize on every single
+    /// iteration and never get under it, burning a call each time to achieve
+    /// nothing. A model too small to clear this floor cannot host the agent at all;
+    /// thrashing would not save it, so we leave the request to fail honestly.
+    pub(crate) const COMPACT_FLOOR: usize = 60_000;
+    /// Characters per token, deliberately low. Real text runs 3.5-4, and JSON tool
+    /// traffic lower still; underestimating makes the budget come out smaller, so
+    /// the error is always on the side of compacting sooner.
+    pub(crate) const CHARS_PER_TOKEN: usize = 3;
+    /// Tokens set aside for what the budget cannot see: tool schemas (rebuilt each
+    /// iteration and never part of history), and the growth of the turn in flight.
+    pub(crate) const CTX_RESERVE: u32 = 8_000;
 
     fn history_chars(history: &[Message]) -> usize {
         history.iter().map(|m| m.content.as_deref().map_or(0, |c| c.len())).sum()
     }
 
-    async fn maybe_compact(&self, name: &str, history: &mut Vec<Message>) {
-        if Self::history_chars(history) < Self::COMPACT_AT || history.len() < 20 {
+    /// Where to compact for a given model.
+    ///
+    /// This can only ever *lower* COMPACT_AT, never raise it, and only when the
+    /// provider actually published a context window. An unknown model — which is
+    /// every bu0y model, since their catalog is prices only — keeps the existing
+    /// threshold exactly, so the default path is byte-for-byte what it was.
+    fn compact_at(&self, model: &str) -> usize {
+        compact_threshold(self.llm.context_limit(model), self.ctx.cfg.max_tokens)
+    }
+
+    async fn maybe_compact(&self, name: &str, model: &str, history: &mut Vec<Message>) {
+        if Self::history_chars(history) < self.compact_at(model) || history.len() < 20 {
             return;
         }
         self.compact(name, history).await;
@@ -324,7 +370,7 @@ Drop superseded detail, resolved dead ends, and chatter.",
                 report = "(interrupted by shutdown)".into();
                 break;
             }
-            self.maybe_compact(name, &mut history).await;
+            self.maybe_compact(name, &model, &mut history).await;
             // Rebuilt every iteration so custom tools created anywhere show up immediately.
             let mut schemas = tools::work_schemas();
             schemas.extend(tools::custom::management_schemas());
@@ -492,7 +538,7 @@ Drop superseded detail, resolved dead ends, and chatter.",
             }
             iter += 1;
             self.ctx.store.kv_set("iteration", &iter.to_string());
-            self.maybe_compact("CEO", &mut history).await;
+            self.maybe_compact("CEO", &self.ctx.cfg.ceo_model, &mut history).await;
             // Rebuilt every iteration so newly created custom tools become callable at once.
             let mut schemas = tools::work_schemas();
             schemas.extend(tools::custom::management_schemas());

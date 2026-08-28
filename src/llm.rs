@@ -86,6 +86,10 @@ pub struct Client {
     /// Locally counted use of `:free` variants, which share one account-wide cap.
     free: Mutex<FreeUsage>,
     limits: Mutex<Option<Limits>>,
+    /// "provider/model" -> context window in tokens, for providers that publish it.
+    /// Absent means unknown, which callers must treat as "no opinion" rather than
+    /// as a small window.
+    ctx_limits: Mutex<HashMap<String, u32>>,
 }
 
 impl Client {
@@ -98,7 +102,41 @@ impl Client {
             cooldown: Mutex::new(HashMap::new()),
             free: Mutex::new(FreeUsage::default()),
             limits: Mutex::new(None),
+            ctx_limits: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// Learn each model's context window where the provider publishes one.
+    ///
+    /// Only OpenRouter does: its catalog carries `context_length`, and it rejects a
+    /// request outright when prompt + max_tokens exceeds it. bu0y's catalog is
+    /// prices only, so its models stay unknown here — which is correct, because it
+    /// clamps an oversized ceiling instead of failing.
+    ///
+    /// Best effort by design. A failure leaves the map empty, and an empty map
+    /// means every caller keeps its own default.
+    pub async fn discover_context_limits(&self, cfg: &Config) {
+        let Some(prov) = cfg.providers.iter().find(|p| p.base_url.contains("openrouter.ai")) else {
+            return;
+        };
+        let url = format!("{}/models", prov.base_url.trim_end_matches('/'));
+        let Ok(resp) = self.http.get(&url).send().await else { return };
+        let Ok(v) = resp.json::<Value>().await else { return };
+        let Some(list) = v["data"].as_array() else { return };
+        let mut map = self.ctx_limits.lock().unwrap();
+        for m in list {
+            let (Some(id), Some(ctx)) = (m["id"].as_str(), m["context_length"].as_u64()) else {
+                continue;
+            };
+            if ctx > 0 {
+                map.insert(format!("{}/{id}", prov.name), ctx.min(u32::MAX as u64) as u32);
+            }
+        }
+    }
+
+    /// Context window for a "provider/model", if the provider published one.
+    pub fn context_limit(&self, model: &str) -> Option<u32> {
+        self.ctx_limits.lock().unwrap().get(model).copied()
     }
 
     /// Ask OpenRouter what caps this key actually gets rather than assuming.
