@@ -5,10 +5,16 @@
 <p align="center"><b>An autonomous AI company in a single Rust binary — a CEO agent that hires, delegates, self-evolves, and never stops.</b></p>
 
 <p align="center">
+  <a href="https://khanbot.fun"><img src="https://img.shields.io/badge/watch_it_live-khanbot.fun-9ece6a.svg" alt="Watch it live"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-d4a017.svg" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/Rust-2021-orange.svg?logo=rust" alt="Rust 2021">
   <a href="https://railway.com?referralCode=SCj9lN"><img src="https://img.shields.io/badge/Deploy-Railway-blueviolet.svg?logo=railway" alt="Deploy on Railway"></a>
   <a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs welcome"></a>
+</p>
+
+<p align="center">
+  <b>🔴 Live instance: <a href="https://khanbot.fun">khanbot.fun</a></b><br>
+  <sub>A khan running unattended with one directive — grow a crypto treasury. Everything it does streams to that page in real time.</sub>
 </p>
 
 Give khan one base directive and it works on it forever: the CEO agent hires
@@ -90,6 +96,9 @@ viewer gives you a live window into what the company is doing from anywhere.
   cap** (by design) — a cloud worker keeps calling the API until you stop it.
 
 ## Live log viewer
+
+**See it in action: [khanbot.fun](https://khanbot.fun)** — a live khan instance,
+streaming as you read.
 
 While running, khan serves a web log viewer on `PORT` (default 8080 —
 `http://localhost:8080` locally, your service URL on Railway). It streams the
