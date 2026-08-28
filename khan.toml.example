@@ -16,6 +16,11 @@ workspace = "workspace"
 reflect_every = 10
 # Max loop iterations per delegated employee task
 employee_max_iters = 30
+# Output ceiling sent on EVERY request. Always send one: gateways impose a small
+# default when it is omitted (bu0y uses 4096), and a reasoning model will spend
+# that entire budget thinking and hand back an empty answer with
+# finish_reason "length". 8192-32768 suits an agent loop.
+max_tokens = 16384
 
 [[providers]]
 name = "bu0y"

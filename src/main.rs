@@ -172,8 +172,12 @@ mod tests {
     fn request_matches_openai_shape() {
         let msgs = vec![Message::text("system", "s"), Message::text("user", "hi")];
         let schemas = crate::tools::work_schemas();
-        let body = Client::build_request("gpt-x", &msgs, &schemas);
+        let body = Client::build_request("gpt-x", &msgs, &schemas, 16_384);
         assert_eq!(body["model"], "gpt-x");
+        // Must always be sent: gateways impose a small ceiling when it is omitted,
+        // and a reasoning model then spends the whole budget thinking and returns
+        // an empty answer with finish_reason "length".
+        assert_eq!(body["max_tokens"], 16_384);
         assert_eq!(body["messages"][1]["role"], "user");
         assert_eq!(body["messages"][1]["content"], "hi");
         // messages must not serialize null tool fields

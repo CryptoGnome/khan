@@ -171,8 +171,13 @@ impl Client {
         None
     }
 
-    pub fn build_request(model_id: &str, messages: &[Message], tools: &[Value]) -> Value {
-        let mut body = serde_json::json!({ "model": model_id, "messages": messages });
+    pub fn build_request(model_id: &str, messages: &[Message], tools: &[Value], max_tokens: u32) -> Value {
+        // max_tokens is always sent. Omitting it lets the gateway impose its own
+        // small ceiling, and a reasoning model will burn the lot thinking and
+        // return an empty answer.
+        let mut body = serde_json::json!({
+            "model": model_id, "messages": messages, "max_tokens": max_tokens
+        });
         if !tools.is_empty() {
             body["tools"] = Value::Array(tools.to_vec());
         }
@@ -197,7 +202,7 @@ impl Client {
             bail!("{model} hit its free-tier request cap; paused for {}s", wait.as_secs());
         }
         let url = format!("{}/chat/completions", prov.base_url.trim_end_matches('/'));
-        let body = Self::build_request(&model_id, messages, tools);
+        let body = Self::build_request(&model_id, messages, tools, cfg.max_tokens);
 
         let mut last_err = String::new();
         for attempt in 0..4u32 {
@@ -257,6 +262,23 @@ impl Client {
                 prompt_tokens: v["usage"]["prompt_tokens"].as_u64().unwrap_or(0),
                 completion_tokens: v["usage"]["completion_tokens"].as_u64().unwrap_or(0),
             };
+            // A reasoning model can spend its whole output budget thinking and stop
+            // before it answers: HTTP 200, empty content, finish_reason "length".
+            // Providers say so plainly; not reading it is what made these look like
+            // silent empty replies.
+            let finish = v["choices"][0]["finish_reason"].as_str().unwrap_or("");
+            let nothing = msg.content.as_deref().is_none_or(|c| c.trim().is_empty())
+                && msg.tool_calls.as_ref().is_none_or(|t| t.is_empty());
+            if nothing && finish == "length" {
+                let think = v["usage"]["completion_tokens_details"]["reasoning_tokens"]
+                    .as_u64()
+                    .unwrap_or(0);
+                bail!(
+                    "{model} used its entire {}-token output budget on reasoning ({think} reasoning tokens) \
+and never reached an answer (finish_reason=length) — raise max_tokens in khan.toml",
+                    cfg.max_tokens
+                );
+            }
             return Ok((msg, usage));
         }
         bail!("{model} failed after retries: {last_err}")

@@ -29,6 +29,12 @@ pub struct Config {
     /// Max agent-loop iterations for a delegated employee task.
     #[serde(default = "default_employee_max_iters")]
     pub employee_max_iters: u64,
+    /// Output ceiling sent on every request. Must be set explicitly: gateways
+    /// impose a small default (bu0y uses 4096) when it is omitted, and a
+    /// reasoning model can spend that entire budget thinking and return an empty
+    /// answer with finish_reason "length".
+    #[serde(default = "default_max_tokens")]
+    pub max_tokens: u32,
     /// Provider API keys, read from the environment once at load and held only
     /// here. Never deserialized from the config file — keys never live on disk.
     #[serde(skip)]
@@ -43,6 +49,10 @@ fn default_reflect_every() -> u64 {
 }
 fn default_employee_max_iters() -> u64 {
     30
+}
+
+fn default_max_tokens() -> u32 {
+    16_384
 }
 
 impl Config {
