@@ -247,6 +247,38 @@ mod tests {
     }
 
     #[test]
+    fn compaction_keeps_recent_turns_and_never_orphans_a_tool_result() {
+        use crate::agent::split_point;
+        use crate::llm::Message;
+        let m = |role: &str, n: usize| Message::text(role, "x".repeat(n));
+
+        // System prompt plus 10 exchanges of 1000 chars each. Keeping 2500 chars
+        // should retain the last few messages and cut the rest.
+        let mut h = vec![m("system", 500)];
+        for _ in 0..10 {
+            h.push(m("assistant", 1000));
+            h.push(m("user", 1000));
+        }
+        let s = split_point(&h, 2500);
+        assert!(s > 1, "must never summarize away the system prompt");
+        assert!(s < h.len(), "must keep some recent context");
+        let kept: usize = h[s..].iter().map(|x| x.content.as_deref().unwrap().len()).sum();
+        assert!(kept >= 2500, "should bank at least the requested recency, got {kept}");
+
+        // A tool result must not become the first kept message — it would be an
+        // answer to a call the model can no longer see.
+        let mut h2 = vec![m("system", 100), m("user", 5000), m("assistant", 100)];
+        h2.push(Message::tool_result("c1", "y".repeat(50)));
+        h2.push(m("assistant", 50));
+        let s2 = split_point(&h2, 100);
+        assert_ne!(h2[s2].role, "tool", "kept tail must not open on a tool result");
+
+        // A history shorter than the budget keeps everything after the system prompt.
+        let h3 = vec![m("system", 10), m("user", 10), m("assistant", 10)];
+        assert_eq!(split_point(&h3, 100_000), 1);
+    }
+
+    #[test]
     fn rate_limit_reset_header_is_understood() {
         use reqwest::header::{HeaderMap, HeaderValue};
         let hm = |k: &'static str, v: String| {

@@ -45,6 +45,27 @@ fn ceo_schemas() -> Vec<Value> {
     ]
 }
 
+/// Marks the running brief that replaces compacted history, so a later compaction
+/// can carry it forward instead of summarizing a summary.
+const BRIEF_TAG: &str = "[Earlier history, summarized]";
+
+/// First index of the tail to keep verbatim: walk back from the newest message
+/// until `keep_recent` characters are banked, then step forward off any orphaned
+/// tool result, since a `role: "tool"` message is meaningless without the
+/// assistant turn whose call it answers.
+pub(crate) fn split_point(history: &[Message], keep_recent: usize) -> usize {
+    let mut split = history.len();
+    let mut kept = 0usize;
+    while split > 1 && kept < keep_recent {
+        split -= 1;
+        kept += history[split].content.as_deref().map_or(0, |c| c.len());
+    }
+    while split < history.len() && history[split].role == "tool" {
+        split += 1;
+    }
+    split
+}
+
 const CEO_TOOL_NAMES: &[&str] = &[
     "hire", "delegate", "delegate_parallel", "rate_work", "fire", "list_team",
     "update_prompt", "rollback_prompt", "save_playbook", "finish",
@@ -108,35 +129,91 @@ impl Orchestrator {
         }
     }
 
-    /// Rough char-count based history compaction: summarize the older half via the utility model.
+    /// Compact once the history passes this many characters. Every character here is
+    /// re-sent and re-billed on EVERY iteration: the CEO runs on a marketplace router
+    /// that picks the cheapest pod per request, so there is no prompt cache to hit and
+    /// nothing is amortised. It is also paid again in latency on the first call after
+    /// a restart, which is what made resumes take minutes rather than seconds.
+    const COMPACT_AT: usize = 100_000;
+    /// Characters of the most recent turns kept verbatim. Recency is what the agent
+    /// needs to continue the exact thing it was doing; older detail goes to the brief.
+    const KEEP_RECENT: usize = 40_000;
+
+    fn history_chars(history: &[Message]) -> usize {
+        history.iter().map(|m| m.content.as_deref().map_or(0, |c| c.len())).sum()
+    }
+
     async fn maybe_compact(&self, name: &str, history: &mut Vec<Message>) {
-        let chars: usize = history.iter().map(|m| m.content.as_deref().map_or(0, |c| c.len())).sum();
-        if chars < 200_000 || history.len() < 20 {
+        if Self::history_chars(history) < Self::COMPACT_AT || history.len() < 20 {
             return;
         }
-        let keep_from = history.len() / 2;
-        // Don't split a tool-call/tool-result pair.
-        let mut split = keep_from;
-        while split < history.len() && history[split].role == "tool" {
-            split += 1;
+        self.compact(name, history).await;
+    }
+
+    /// Replace everything between the system prompt and the most recent
+    /// KEEP_RECENT characters with a running brief.
+    ///
+    /// The brief is *updated*, not regenerated: the previous one is handed to the
+    /// model as-is alongside only the new events. Feeding a summary back in to be
+    /// re-summarized loses a little fidelity every time, and over a long-lived run
+    /// that compounds into an agent that has forgotten why it decided things.
+    async fn compact(&self, name: &str, history: &mut Vec<Message>) {
+        if history.len() < 4 {
+            return;
         }
-        let old: Vec<String> = history[1..split]
+        let split = split_point(history, Self::KEEP_RECENT);
+        // Carry the existing brief forward verbatim rather than re-summarizing it.
+        let prior = history
+            .get(1)
+            .and_then(|m| m.content.as_deref())
+            .filter(|c| c.starts_with(BRIEF_TAG))
+            .map(|c| c.trim_start_matches(BRIEF_TAG).trim().to_string());
+        let start = if prior.is_some() { 2 } else { 1 };
+        if split <= start {
+            return; // nothing old enough to be worth a summarization call
+        }
+        let old: Vec<String> = history[start..split]
             .iter()
             .map(|m| format!("{}: {}", m.role, m.content.as_deref().unwrap_or("[tool calls]")))
             .collect();
         let req = vec![
-            Message::text("system", "Summarize this agent conversation history into a dense brief the agent can continue working from. Keep concrete facts, file paths, decisions, open tasks."),
-            Message::text("user", old.join("\n")),
+            Message::text(
+                "system",
+                "You maintain a running brief for an autonomous agent whose older conversation is \
+being dropped to save context. Update the existing brief with the new events and return the \
+updated brief only. Preserve every concrete fact that is still live: decisions and the reasoning \
+behind them, file paths, addresses and identifiers, tools and skills built, work in progress and \
+what remains to do, what has been verified on-chain or by running it, and mistakes not to repeat. \
+Drop superseded detail, resolved dead ends, and chatter.",
+            ),
+            Message::text(
+                "user",
+                format!(
+                    "EXISTING BRIEF:\n{}\n\nNEW EVENTS:\n{}",
+                    prior.as_deref().unwrap_or("(none yet)"),
+                    old.join("\n")
+                ),
+            ),
         ];
         match self.chat_fb(name, &self.ctx.cfg.utility_model(), &req, &[]).await {
             Ok((msg, u)) => {
                 self.add_usage(u);
                 let summary = msg.content.unwrap_or_default();
+                if summary.trim().is_empty() {
+                    self.log_line(name, "compact-failed", "summary came back empty; history kept");
+                    return;
+                }
+                let before = Self::history_chars(history);
                 let system = history[0].clone();
                 let tail = history.split_off(split);
-                *history = vec![system, Message::text("user", format!("[Earlier history, summarized]\n{summary}"))];
+                *history = vec![system, Message::text("user", format!("{BRIEF_TAG}\n{summary}"))];
                 history.extend(tail);
-                self.log_line(name, "compacted", "history summarized");
+                let after = Self::history_chars(history);
+                self.log_line(
+                    name,
+                    "compacted",
+                    &format!("history summarized: {before} -> {after} chars"),
+                );
             }
             Err(e) => self.log_line(name, "compact-failed", &format!("{e:#}")),
         }
@@ -457,7 +534,21 @@ Save one-off lessons with save_playbook. Then continue the mission.\n\n{log}{sta
                 );
             }
         }
+        // Save the real history FIRST, so nothing is lost if the platform kills us
+        // during the summarization below.
         self.persist_ceo(&history);
+        // Then shrink what the next boot has to load. A resume re-sends the whole
+        // history in one uncached call before it can act, which is the difference
+        // between coming back in seconds and coming back in minutes. Bounded, because
+        // a shutdown that overruns the platform's grace period gets SIGKILLed.
+        if Self::history_chars(&history) > Self::KEEP_RECENT {
+            let _ = tokio::time::timeout(
+                std::time::Duration::from_secs(60),
+                self.compact("CEO", &mut history),
+            )
+            .await;
+            self.persist_ceo(&history);
+        }
         self.ctx.store.log("khan", "shutdown", "state saved — resumes on next start");
         println!("\nState saved. Resume with: khan resume");
         Ok(())
