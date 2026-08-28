@@ -178,12 +178,15 @@ impl Orchestrator {
         }
     }
 
-    /// Compact once the history passes this many characters. Every character here is
-    /// re-sent and re-billed on EVERY iteration: the CEO runs on a marketplace router
-    /// that picks the cheapest pod per request, so there is no prompt cache to hit and
-    /// nothing is amortised. It is also paid again in latency on the first call after
-    /// a restart, which is what made resumes take minutes rather than seconds.
-    const COMPACT_AT: usize = 100_000;
+    /// Compact once the history passes this many characters.
+    ///
+    /// Not a context-window limit — the configured models hold far more than this.
+    /// It is a cost and latency dial: every character here is re-sent on EVERY
+    /// iteration, and the CEO runs on a marketplace router that picks a different
+    /// pod per request, so there is no prompt cache to amortise it against. Raise
+    /// it to let the agent keep more raw history; lower it to spend less per turn
+    /// and come back faster after a restart.
+    const COMPACT_AT: usize = 200_000;
     /// Characters of the most recent turns kept verbatim. Recency is what the agent
     /// needs to continue the exact thing it was doing; older detail goes to the brief.
     const KEEP_RECENT: usize = 40_000;
