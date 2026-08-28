@@ -51,12 +51,27 @@ async fn handle(mut sock: TcpStream, store: Arc<Store>, page_path: PathBuf) -> s
     let head = String::from_utf8_lossy(&req);
     let path = head.split_whitespace().nth(1).unwrap_or("/");
 
+    // HSTS, but only on requests that actually arrived over TLS. Without it, typing
+    // the bare domain always hits http:// first and leans on the redirect, so there
+    // is an insecure hop every time. The proto check matters: this server speaks
+    // plain HTTP (the platform terminates TLS and sets X-Forwarded-Proto), and
+    // sending HSTS from a local `khan run` on http://localhost would be a nasty
+    // surprise to pin into a developer's browser.
+    let secure = head.lines().any(|l| {
+        let l = l.to_ascii_lowercase();
+        l.starts_with("x-forwarded-proto:") && l.contains("https")
+    });
+    // One year, no includeSubDomains: apex and www each get their own header when
+    // visited, and nothing here should speak for subdomains that may not have TLS.
+    let hsts = if secure { "Strict-Transport-Security: max-age=31536000\r\n" } else { "" };
+
     if path.starts_with("/logs") {
         // Subscribe before replaying history so no event can fall in the gap;
         // the frontend dedupes by row id.
         let mut rx = store.subscribe_log();
         sock.write_all(
-            b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n",
+            format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\n{hsts}Connection: close\r\n\r\n")
+                .as_bytes(),
         )
         .await?;
         for row in store.log_tail(300) {
@@ -76,11 +91,11 @@ async fn handle(mut sock: TcpStream, store: Arc<Store>, page_path: PathBuf) -> s
     } else if path == "/" {
         // Read per-request so agent edits to the page show up on refresh.
         let body = std::fs::read_to_string(&page_path).unwrap_or_else(|_| PAGE.to_string());
-        let head = format!(
-            "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        let resp = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\n{hsts}Connection: close\r\n\r\n",
             body.len()
         );
-        sock.write_all(head.as_bytes()).await?;
+        sock.write_all(resp.as_bytes()).await?;
         sock.write_all(body.as_bytes()).await
     } else {
         sock.write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
