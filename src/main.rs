@@ -128,7 +128,17 @@ async fn main() -> Result<()> {
     store.log("khan", "startup", &format!("CEO model {} | directive: {directive}", cfg.ceo_model));
 
     let orch = Orchestrator {
-        ctx: tools::ToolCtx { cfg, store, workspace, http: reqwest::Client::new() },
+        // Timeout is essential: a hung web_fetch/web_search would otherwise stall
+        // the agent loop forever (search engines throttle datacenter IPs).
+        ctx: tools::ToolCtx {
+            cfg,
+            store,
+            workspace,
+            http: reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(30))
+                .build()
+                .unwrap_or_default(),
+        },
         llm: llm::Client::new(),
         stop,
         tokens: Default::default(),
