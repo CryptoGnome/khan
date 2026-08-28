@@ -1,4 +1,5 @@
 use crate::state::Store;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -8,7 +9,16 @@ const PAGE: &str = include_str!("viewer.html");
 
 /// Minimal HTTP server for the live log viewer: `/` serves the page,
 /// `/logs` is an SSE stream (recent history replay, then live events).
-pub async fn serve(store: Arc<Store>, port: u16) {
+///
+/// The page is served from workspace/viewer.html (seeded from the built-in
+/// page on first boot) so agents can redesign the frontend freely with their
+/// normal file tools — changes go live on the next page load. The server has
+/// NO write endpoints: viewers can never send anything to the company.
+pub async fn serve(store: Arc<Store>, port: u16, workspace: PathBuf) {
+    let page_path = workspace.join("viewer.html");
+    if !page_path.exists() {
+        let _ = std::fs::write(&page_path, PAGE);
+    }
     let listener = match TcpListener::bind(("0.0.0.0", port)).await {
         Ok(l) => l,
         Err(e) => {
@@ -20,14 +30,15 @@ pub async fn serve(store: Arc<Store>, port: u16) {
     loop {
         if let Ok((sock, _)) = listener.accept().await {
             let store = store.clone();
+            let page_path = page_path.clone();
             tokio::spawn(async move {
-                let _ = handle(sock, store).await;
+                let _ = handle(sock, store, page_path).await;
             });
         }
     }
 }
 
-async fn handle(mut sock: TcpStream, store: Arc<Store>) -> std::io::Result<()> {
+async fn handle(mut sock: TcpStream, store: Arc<Store>, page_path: PathBuf) -> std::io::Result<()> {
     let mut req = Vec::new();
     let mut buf = [0u8; 2048];
     while !req.windows(4).any(|w| w == b"\r\n\r\n") && req.len() < 8192 {
@@ -63,12 +74,14 @@ async fn handle(mut sock: TcpStream, store: Arc<Store>) -> std::io::Result<()> {
         }
         Ok(())
     } else if path == "/" {
+        // Read per-request so agent edits to the page show up on refresh.
+        let body = std::fs::read_to_string(&page_path).unwrap_or_else(|_| PAGE.to_string());
         let head = format!(
             "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-            PAGE.len()
+            body.len()
         );
         sock.write_all(head.as_bytes()).await?;
-        sock.write_all(PAGE.as_bytes()).await
+        sock.write_all(body.as_bytes()).await
     } else {
         sock.write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
             .await

@@ -124,7 +124,7 @@ async fn main() -> Result<()> {
 
     // Live log viewer (web page + SSE stream). Railway sets PORT for public services.
     let port: u16 = std::env::var("PORT").ok().and_then(|p| p.parse().ok()).unwrap_or(8080);
-    tokio::spawn(viewer::serve(store.clone(), port));
+    tokio::spawn(viewer::serve(store.clone(), port, workspace.clone()));
     store.log("khan", "startup", &format!("CEO model {} | directive: {directive}", cfg.ceo_model));
 
     let orch = Orchestrator {

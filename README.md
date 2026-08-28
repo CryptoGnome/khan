@@ -71,6 +71,15 @@ changes, tool calls, errors) — with text filtering, per-agent toggles, and
 click-to-expand raw detail on any row. It replays the last 300 events on
 connect and reconnects automatically.
 
+The page itself belongs to the company: it's served from
+`workspace/viewer.html` (seeded from the built-in design on first boot), and
+agents may redesign it however they like — try `khan tell "make the log page
+look like a Bloomberg terminal"`. It can only ever be a display, though: the
+server has no write endpoints, and an immutable security rule forbids agents
+from giving viewers any way to send input to the company. If an agent ships a
+broken page, delete `workspace/viewer.html` and the built-in design is served
+again immediately.
+
 ## Run locally (for development)
 
 ```powershell
