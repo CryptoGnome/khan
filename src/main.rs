@@ -127,6 +127,24 @@ async fn main() -> Result<()> {
     tokio::spawn(viewer::serve(store.clone(), port, workspace.clone()));
     store.log("khan", "startup", &format!("CEO model {} | directive: {directive}", cfg.ceo_model));
 
+    // Learn the real free-model caps for this key rather than assuming them: the
+    // daily limit is 50 or 1000 depending on whether credits were ever purchased,
+    // and khan paces itself against whichever it actually has.
+    let llm = llm::Client::new();
+    if let Some(l) = llm.discover_limits(&cfg).await {
+        let tier = if l.is_free_tier {
+            "free tier (no credits ever purchased)"
+        } else {
+            "paid tier (credits purchased)"
+        };
+        let msg = format!(
+            "OpenRouter {tier}: free models allow {} requests/min and {} requests/day",
+            l.rpm, l.rpd
+        );
+        println!("{msg}");
+        store.log("khan", "limits", &msg);
+    }
+
     let orch = Orchestrator {
         // Timeout is essential: a hung web_fetch/web_search would otherwise stall
         // the agent loop forever (search engines throttle datacenter IPs).
@@ -139,7 +157,7 @@ async fn main() -> Result<()> {
                 .build()
                 .unwrap_or_default(),
         },
-        llm: llm::Client::new(),
+        llm,
         stop,
         tokens: Default::default(),
     };
@@ -226,6 +244,33 @@ mod tests {
         let out = r(&format!("confirmed {sig}"));
         assert!(out.contains("4vAync"), "signature prefix must survive: {out}");
         assert!(!out.contains(sig), "full 88-char token must not survive: {out}");
+    }
+
+    #[test]
+    fn rate_limit_reset_header_is_understood() {
+        use reqwest::header::{HeaderMap, HeaderValue};
+        let hm = |k: &'static str, v: String| {
+            let mut h = HeaderMap::new();
+            h.insert(k, HeaderValue::from_str(&v).unwrap());
+            h
+        };
+        let secs = |h: HeaderMap| crate::llm::retry_after(&h).map(|d| d.as_secs() as i64);
+        let now_ms = chrono::Utc::now().timestamp_millis();
+
+        // Retry-After is plain seconds.
+        assert_eq!(secs(hm("retry-after", "30".into())), Some(30));
+        // X-RateLimit-Reset arrives as an epoch in ms, an epoch in seconds, or a delta.
+        let ms = secs(hm("x-ratelimit-reset", (now_ms + 60_000).to_string())).unwrap();
+        assert!((58..=61).contains(&ms), "epoch ms should be ~60s, got {ms}");
+        let s = secs(hm("x-ratelimit-reset", (now_ms / 1000 + 120).to_string())).unwrap();
+        assert!((118..=121).contains(&s), "epoch seconds should be ~120s, got {s}");
+        assert_eq!(secs(hm("x-ratelimit-reset", "45".into())), Some(45));
+        // A reset already in the past, and no header at all, mean no wait.
+        assert_eq!(secs(hm("x-ratelimit-reset", (now_ms - 60_000).to_string())), None);
+        assert_eq!(secs(HeaderMap::new()), None);
+        // Never park a model for longer than a day on a bogus value.
+        let huge = secs(hm("retry-after", "999999999".into())).unwrap();
+        assert_eq!(huge, 86_400);
     }
 
     #[test]
