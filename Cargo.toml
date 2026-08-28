@@ -2,6 +2,10 @@
 name = "khan"
 version = "0.1.0"
 edition = "2021"
+description = "Autonomous AI agent company: a CEO agent that hires, delegates, self-evolves, and never stops"
+license = "MIT"
+repository = "https://github.com/CryptoGnome/khan"
+readme = "README.md"
 
 [dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "process", "time", "net", "io-util", "sync"] }

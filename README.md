@@ -1,16 +1,42 @@
 <p align="center"><img src="assets/banner.png" alt="khan — an autonomous AI agent company" width="100%"></p>
 
-# khan
+<h1 align="center">khan</h1>
 
-A lightweight autonomous agent orchestrator in Rust. One CEO agent gets a base
-directive and works on it forever — hiring specialist employee agents, delegating
-tasks, picking models per task (free models for easy work), remembering what it
-learns, and evolving its own prompts over time.
+<p align="center"><b>An autonomous AI company in a single Rust binary — a CEO agent that hires, delegates, self-evolves, and never stops.</b></p>
 
-Works with any OpenAI-compatible API: [bu0y](https://bu0y.com/), OpenRouter,
-local servers, anything with a `/v1/chat/completions` endpoint. Designed to be
-deployed on [Railway](https://railway.com?referralCode=SCj9lN) and left running 24/7 — see
-[Deploy on Railway](#deploy-on-railway-the-intended-way-to-run-khan).
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-d4a017.svg" alt="License: MIT"></a>
+  <img src="https://img.shields.io/badge/Rust-2021-orange.svg?logo=rust" alt="Rust 2021">
+  <a href="https://railway.com?referralCode=SCj9lN"><img src="https://img.shields.io/badge/Deploy-Railway-blueviolet.svg?logo=railway" alt="Deploy on Railway"></a>
+  <a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs welcome"></a>
+</p>
+
+Give khan one base directive and it works on it forever: the CEO agent hires
+specialist employees, delegates tasks in parallel, rates the results, picks
+models by price and intelligence, remembers what it learns, and rewrites its
+own prompts, tools, and skills as it goes. You watch it all happen on a live
+web log — and steer it with a single message, without ever stopping it.
+
+Works with any OpenAI-compatible API ([bu0y](https://bu0y.com/), OpenRouter,
+local servers — anything with `/v1/chat/completions`). Designed to be deployed
+on [Railway](https://railway.com?referralCode=SCj9lN) and left running 24/7.
+
+**Contents:** [Highlights](#highlights) ·
+[Requirements](#requirements) ·
+[Deploy on Railway](#deploy-on-railway-the-intended-way-to-run-khan) ·
+[Live log viewer](#live-log-viewer) ·
+[Run locally](#run-locally-for-development) ·
+[How it works](#how-it-works) ·
+[Contributing](#contributing--security--license)
+
+## Highlights
+
+- **Never idles** — an unbounded CEO loop: finish a milestone, verify it, find the next most valuable thing.
+- **Builds its own company** — hires/fires employee agents, each on the model its task deserves, and manages its API budget against live prices.
+- **Self-evolving** — prompts, custom tools, and skills are versioned in SQLite; the CEO improves them from outcome ratings and can roll back bad changes.
+- **Live and steerable** — real-time color-coded web log viewer; redirect the whole company with `khan tell "..."` or by editing one env var.
+- **Survives everything** — state lives in `khan.db`; restarts and redeploys resume mid-mission.
+- **Security-conscious** — immutable prompt rules, secret-scrubbed shells, injection-hardened web content, read-only public page. See [SECURITY.md](SECURITY.md).
 
 ## Requirements
 
@@ -159,3 +185,14 @@ token count is printed. **There is no spend cap — watch it.**
 - `khan.toml` — config (providers, models)
 - `khan.db` — internal state (do not hand-edit while running)
 - `workspace/` — the agents' working directory, including their `workspace.db`
+
+## Contributing · Security · License
+
+- **Contributing:** PRs welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for
+  the ground rules (keep it lean, match the style, don't weaken the security
+  layers).
+- **Security:** the threat model and private vulnerability reporting are in
+  [SECURITY.md](SECURITY.md). Short version: khan is not a sandbox and the log
+  viewer is unauthenticated — deploy it in a container and keep the URL
+  private.
+- **License:** [MIT](LICENSE).
