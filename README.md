@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/banner.png" alt="khan — an autonomous AI agent company" width="100%"></p>
+
 # khan
 
 A lightweight autonomous agent orchestrator in Rust. One CEO agent gets a base
