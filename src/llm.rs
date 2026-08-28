@@ -85,6 +85,10 @@ impl Client {
         let mut last_err = String::new();
         for attempt in 0..4u32 {
             if attempt > 0 {
+                // Announce every retry. Each attempt can block for the full 300s
+                // timeout, so without this the loop sits silent for up to ~20
+                // minutes and a slow provider is indistinguishable from a hang.
+                eprintln!("llm: {model} attempt {}/4 failed, retrying — {last_err}", attempt);
                 tokio::time::sleep(Duration::from_secs(2u64.pow(attempt))).await;
             }
             // App attribution (used by OpenRouter's dashboard; harmless elsewhere).

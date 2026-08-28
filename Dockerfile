@@ -10,10 +10,13 @@ RUN touch src/main.rs && cargo build --release
 
 # --- runtime stage ---
 FROM debian:bookworm-slim
-# git (local version control), python3 + pip/venv (custom tools and the
-# libraries agents install for themselves), ca-certificates (TLS)
+# git (local version control), python3 + pip/venv and nodejs + npm (custom
+# tools, and the SDKs agents install for themselves), ca-certificates (TLS).
+# Both runtimes are baked in because only /data survives a restart: an agent
+# that apt-installs a toolchain loses it on the next deploy and pays for the
+# install again.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        ca-certificates git python3 python3-pip python3-venv \
+        ca-certificates git python3 python3-pip python3-venv nodejs npm \
     && rm -rf /var/lib/apt/lists/*
 # Debian marks its python "externally managed" (PEP 668), which blocks plain
 # `pip install`. The container is the sandbox, so let agents install freely.
