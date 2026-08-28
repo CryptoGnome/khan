@@ -21,6 +21,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Debian marks its python "externally managed" (PEP 668), which blocks plain
 # `pip install`. The container is the sandbox, so let agents install freely.
 ENV PIP_BREAK_SYSTEM_PACKAGES=1
+# Send pip installs to the volume instead of the container filesystem, which is
+# thrown away on every deploy. Without this an agent reinstalls its libraries
+# after each restart, and pays for the round trip that discovers they are gone.
+# PYTHONUSERBASE is read by python itself, so the packages are importable with
+# no PYTHONPATH juggling and no change to how agents call pip.
+# Caveat: `pip install` inside a virtualenv refuses --user; there, pass
+# PIP_USER=0 (the venv already keeps its own packages).
+ENV PYTHONUSERBASE=/data/.python
+ENV PIP_USER=1
 
 COPY --from=build /src/target/release/khan /usr/local/bin/khan
 # Baked default config; override by putting khan.toml on the volume and setting KHAN_CONFIG=/data/khan.toml.
