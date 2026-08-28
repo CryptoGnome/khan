@@ -89,10 +89,10 @@ impl Config {
         let mut s = String::new();
         for p in &self.providers {
             for m in &p.free_models {
-                s.push_str(&format!("- {}/{} (FREE — use for easy/bulk work)\n", p.name, m));
+                s.push_str(&format!("- {}/{} (FREE)\n", p.name, m));
             }
             for m in &p.paid_models {
-                s.push_str(&format!("- {}/{} (paid — use for hard reasoning)\n", p.name, m));
+                s.push_str(&format!("- {}/{} (paid)\n", p.name, m));
             }
         }
         s

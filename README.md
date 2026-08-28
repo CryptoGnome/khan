@@ -7,7 +7,7 @@ learns, and evolving its own prompts over time.
 
 Works with any OpenAI-compatible API: [bu0y](https://bu0y.com/), OpenRouter,
 local servers, anything with a `/v1/chat/completions` endpoint. Designed to be
-deployed on [Railway](https://railway.com) and left running 24/7 — see
+deployed on [Railway](https://railway.com?referralCode=SCj9lN) and left running 24/7 — see
 [Deploy on Railway](#deploy-on-railway-the-intended-way-to-run-khan).
 
 ## Requirements
@@ -26,7 +26,7 @@ Before first run you need:
 
 ## Deploy on Railway (the intended way to run khan)
 
-khan is built to live on [Railway](https://railway.com) as a 24/7 worker: the
+khan is built to live on [Railway](https://railway.com?referralCode=SCj9lN) as a 24/7 worker: the
 `Dockerfile` has everything preinstalled (Rust build, `git`, `python3`),
 a volume keeps the mission alive across redeploys, and the built-in web log
 viewer gives you a live window into what the company is doing from anywhere.

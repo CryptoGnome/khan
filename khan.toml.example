@@ -1,9 +1,9 @@
 # Copy to khan.toml and edit. API keys come from env vars, never this file.
 
-# Model the CEO runs on, as "provider/model"
-ceo_model = "bu0y/anthropic/claude-sonnet-4"
+# Model the CEO runs on, as "provider/model" (glm53flash: cheap and capable)
+ceo_model = "bu0y/glm53flash"
 # Cheap model for internal work like history summarization (defaults to ceo_model)
-utility_model = "openrouter/meta-llama/llama-3.3-70b-instruct:free"
+utility_model = "openrouter/free"
 
 # Directory agents work in (created automatically)
 workspace = "workspace"
@@ -17,10 +17,11 @@ employee_max_iters = 30
 name = "bu0y"
 base_url = "https://api.bu0y.com/v1"
 api_key_env = "BU0Y_API_KEY"
+# Only the default is listed — the CEO fetches the full live catalog + prices
+# itself (https://bu0y.com/llms.txt, https://api.bu0y.com/v1/models) and can
+# hire onto ANY catalog slug as "bu0y/<slug>".
 paid_models = [
-  "anthropic/claude-sonnet-4",
-  "openai/gpt-5.4",
-  "google/gemini-2.5-pro",
+  "glm53flash",
 ]
 
 [[providers]]
@@ -28,11 +29,9 @@ name = "openrouter"
 base_url = "https://openrouter.ai/api/v1"
 api_key_env = "OPENROUTER_API_KEY"
 # "free" auto-routes to whatever free model is currently available — good default
-# for easy/bulk work. List specific models too if you want the CEO to pick deliberately.
+# for easy/bulk work.
 free_models = [
   "free",
-  "meta-llama/llama-3.3-70b-instruct:free",
-  "deepseek/deepseek-chat-v3-0324:free",
 ]
 
 # Add any other OpenAI-compatible endpoint the same way:

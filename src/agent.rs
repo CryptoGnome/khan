@@ -355,6 +355,12 @@ impl Orchestrator {
             // Reflection cadence: ask the CEO to evolve itself.
             if iter % self.ctx.cfg.reflect_every == 0 {
                 let log = self.ctx.store.recent_log(40);
+                let toks = format!(
+                    "Cumulative token usage since last restart (all agents): {} in / {} out. \
+Use this with live model prices to estimate spend and rebalance the team's model mix.",
+                    self.tokens.prompt.load(Ordering::Relaxed),
+                    self.tokens.completion.load(Ordering::Relaxed)
+                );
                 let stats = self.ctx.store.rating_stats_text();
                 let stats_block = if stats.is_empty() {
                     String::new()
@@ -367,7 +373,7 @@ If a prompt (yours or an employee's) is causing weak results, improve it with up
 or rollback_prompt if a recent change hurt. If a custom tool erred or is missing, improve or build it with \
 create_tool (rollback_tool reverts a bad version). If you or employees keep re-figuring-out the same procedure, \
 capture it as a skill with create_skill; improve skills that led agents astray (rollback_skill reverts). \
-Save one-off lessons with save_playbook. Then continue the mission.\n\n{log}{stats_block}"
+Save one-off lessons with save_playbook. Then continue the mission.\n\n{log}{stats_block}\n\n{toks}"
                 )));
             }
 
