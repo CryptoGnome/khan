@@ -130,6 +130,12 @@ async fn main() -> Result<()> {
     // Learn the real free-model caps for this key rather than assuming them: the
     // daily limit is 50 or 1000 depending on whether credits were ever purchased,
     // and khan paces itself against whichever it actually has.
+    // Teach the redactor the endpoint's actual value before anything can be logged.
+    // It is an ordinary URL, so nothing about its shape gives it away - the log
+    // scrubber can only strike it if it knows what it is looking for.
+    if let Ok(rpc) = std::env::var("SOLANA_RPC") {
+        state::redact_value(&rpc, "RPC");
+    }
     let llm = llm::Client::new();
     llm.discover_context_limits(&cfg).await;
     if let Some(l) = llm.discover_limits(&cfg).await {
@@ -428,5 +434,36 @@ mod tests {
                 assert!(got > O::KEEP_RECENT, "ctx {ctx} mt {mt}: would thrash");
             }
         }
+    }
+
+    #[test]
+    fn registered_endpoint_never_survives_into_the_log() {
+        use crate::state::{redact as r, redact_value};
+        // Shaped exactly like a paid RPC endpoint: the secret is the key in the query.
+        let rpc = "https://mainnet.example-rpc.com/?api-key=9fK2xQ7bLp4RtY8wZ3nA6vC1mS0dJhGe";
+        let key = "9fK2xQ7bLp4RtY8wZ3nA6vC1mS0dJhGe";
+        redact_value(rpc, "RPC");
+
+        // The obvious leak: the agent echoes the variable.
+        assert!(!r(&format!("$ echo $SOLANA_RPC
+{rpc}")).contains(rpc));
+        // Buried in a command line, which is what actually reaches the log.
+        assert!(!r(&format!("{{\"command\": \"curl -s {rpc} -d '{{}}'\"}}")).contains(rpc));
+        // And the key alone, without the URL around it.
+        assert!(!r(&format!("using key {key} for the call")).contains(key));
+        // A stack trace or error text quoting the endpoint back at us.
+        assert!(!r(&format!("ConnectionError: failed to reach {rpc} after 3 tries")).contains(rpc));
+
+        // The label is what shows instead, so the log still reads sensibly.
+        assert!(r(rpc).contains("[REDACTED-RPC]"));
+
+        // The host is NOT secret and must stay legible - blanking every mention of
+        // a hostname would gut the log without protecting anything.
+        assert!(r("connected to mainnet.example-rpc.com").contains("mainnet.example-rpc.com"));
+
+        // Too-short values are refused outright: registering one would redact
+        // ordinary English out of every line.
+        redact_value("abc", "NOPE");
+        assert_eq!(r("abc is a normal word fragment"), "abc is a normal word fragment");
     }
 }

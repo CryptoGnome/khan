@@ -60,6 +60,53 @@ fn byte_array(b: &[char], i: usize) -> Option<(usize, usize)> {
     }
 }
 
+/// Exact values to strike from log text, paired with what to show instead.
+///
+/// The shape matcher below can only catch things that *look* like key material.
+/// A private endpoint does not: it is an ordinary URL, and the only thing that
+/// distinguishes it from a public one is that we know its value. So we register
+/// the value.
+static LITERALS: std::sync::OnceLock<std::sync::RwLock<Vec<(String, String)>>> =
+    std::sync::OnceLock::new();
+
+fn literals() -> &'static std::sync::RwLock<Vec<(String, String)>> {
+    LITERALS.get_or_init(|| std::sync::RwLock::new(Vec::new()))
+}
+
+/// Register a value that must never appear in the public log, shown as
+/// `[REDACTED-<label>]` wherever it occurs.
+///
+/// Registers the whole value and, for a URL, the long opaque tokens inside it —
+/// so printing just the key out of an endpoint is caught as well as printing the
+/// endpoint. Tokens containing a dot are skipped: those are hostnames, and
+/// blanking every mention of a host makes the log unreadable without hiding
+/// anything that is actually secret.
+///
+/// Short values are ignored outright. A 4-character "secret" is a substring of
+/// ordinary English, and redacting it would shred the log while protecting
+/// nothing.
+pub fn redact_value(value: &str, label: &str) {
+    let v = value.trim();
+    if v.len() < 12 {
+        return;
+    }
+    let mut lits = literals().write().unwrap();
+    let mut add = |t: &str| {
+        if t.len() >= 12 && !lits.iter().any(|(x, _)| x == t) {
+            lits.push((t.to_string(), format!("[REDACTED-{label}]")));
+        }
+    };
+    add(v);
+    for tok in v.split(['/', '?', '&', '=', '@', ':']) {
+        if tok.len() >= 20 && !tok.contains('.') {
+            add(tok);
+        }
+    }
+    // Longest first, so a full URL is replaced as a unit rather than being left
+    // as a shell of punctuation around an already-redacted inner token.
+    lits.sort_by_key(|(v, _)| std::cmp::Reverse(v.len()));
+}
+
 /// Strip secret-shaped strings out of activity-log text.
 ///
 /// The activity log is served to anyone on the internet by the web viewer, so
@@ -72,7 +119,15 @@ fn byte_array(b: &[char], i: usize) -> Option<(usize, usize)> {
 /// mnemonic seed phrases — those are ordinary words and cannot be matched
 /// without a wordlist.
 pub fn redact(s: &str) -> String {
-    let b: Vec<char> = s.chars().collect();
+    // Exact known values first. Shape matching cannot help with something like a
+    // private RPC endpoint - it is just a URL - so those are struck by literal.
+    let mut cow = std::borrow::Cow::Borrowed(s);
+    for (v, label) in literals().read().unwrap().iter() {
+        if cow.contains(v.as_str()) {
+            cow = std::borrow::Cow::Owned(cow.replace(v.as_str(), label));
+        }
+    }
+    let b: Vec<char> = cow.chars().collect();
     let mut out = String::with_capacity(s.len());
     let mut i = 0;
     while i < b.len() {
