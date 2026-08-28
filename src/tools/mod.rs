@@ -1,3 +1,4 @@
+pub mod credits;
 pub mod custom;
 pub mod skills;
 mod fs;
@@ -97,6 +98,7 @@ pub async fn execute(ctx: &ToolCtx, agent: &str, name: &str, args: &Value) -> St
             let hits = ctx.store.recall(s(args, "query"), 8);
             Ok(if hits.is_empty() { "no memories found".into() } else { hits.join("\n---\n") })
         }
+        "credits" => credits::run(ctx).await,
         "create_tool" => custom::create(ctx, args),
         "create_skill" => skills::create(ctx, args),
         "use_skill" => Ok(skills::load(ctx, s(args, "name"))),

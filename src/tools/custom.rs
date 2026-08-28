@@ -6,7 +6,7 @@ use std::collections::HashMap;
 /// Tool names reserved by the built-in and control tools — custom tools cannot shadow them.
 pub const RESERVED: &[&str] = &[
     "read_file", "write_file", "list_files", "shell", "web_fetch", "web_search", "sql",
-    "remember", "recall", "finish", "hire", "delegate", "fire", "list_team",
+    "remember", "recall", "credits", "finish", "hire", "delegate", "fire", "list_team",
     "update_prompt", "rollback_prompt", "save_playbook", "create_tool", "rollback_tool",
     "create_skill", "use_skill", "rollback_skill",
 ];

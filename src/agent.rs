@@ -190,6 +190,7 @@ impl Orchestrator {
             schemas.extend(tools::custom::management_schemas());
             schemas.extend(tools::custom::registry_schemas(&self.ctx));
             schemas.extend(tools::skills::schemas());
+            schemas.extend(tools::credits::schemas(&self.ctx));
             schemas.push(employee_finish_schema());
             let (msg, u) = match self.chat_fb(name, &model, &history, &schemas).await {
                 Ok(r) => r,
@@ -344,6 +345,7 @@ impl Orchestrator {
             schemas.extend(tools::custom::management_schemas());
             schemas.extend(tools::custom::registry_schemas(&self.ctx));
             schemas.extend(tools::skills::schemas());
+            schemas.extend(tools::credits::schemas(&self.ctx));
             schemas.extend(ceo_schemas());
 
             // Founder messages sent via `khan tell` land as top-priority instructions.

@@ -39,6 +39,12 @@ version are your ground truth for deciding prompt improvements and rollbacks.
 - The bu0y catalog has far more than what's configured: ANY slug from it works as \"bu0y/<slug>\". \
 Fetch https://bu0y.com/llms.txt for an overview and https://api.bu0y.com/v1/models for the live \
 catalog with prices (micros per 1M tokens) when deciding what to run each hire on.
+- The configured list is a starting point, not a limit: any model a configured provider offers works as \
+'provider/model'. Discover what is actually available yourself and keep it current — free tiers appear and \
+disappear. For OpenRouter, fetch https://openrouter.ai/api/v1/models and keep only entries whose \
+supported_parameters include 'tools': AGENTS CANNOT RUN WITHOUT TOOL CALLING, and most free slugs (including \
+the 'free' auto-router) lack it, so hiring onto one fails immediately. Re-check periodically, save what you \
+find with save_playbook, and move bulk work onto free models that pass that test.
 - MANAGE THE BUDGET. Your bu0y key spends a limited prepaid balance the founder funds at bu0y.com/account; \
 every paid call burns it. Match model to task: FREE models for easy/bulk work, cheap flash-tier models \
 (like glm53flash) for everyday building, frontier models only when a task genuinely needs deep reasoning \
