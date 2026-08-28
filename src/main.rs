@@ -152,7 +152,7 @@ async fn main() -> Result<()> {
         store.log("khan", "limits", &msg);
     }
 
-    let orch = Orchestrator {
+    let orch = Arc::new(Orchestrator {
         // Timeout is essential: a hung web_fetch/web_search would otherwise stall
         // the agent loop forever (search engines throttle datacenter IPs).
         ctx: tools::ToolCtx {
@@ -167,7 +167,8 @@ async fn main() -> Result<()> {
         llm,
         stop,
         tokens: Default::default(),
-    };
+        pending: Default::default(),
+    });
     orch.run_ceo(&directive, fresh).await
 }
 

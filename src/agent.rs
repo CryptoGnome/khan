@@ -25,6 +25,10 @@ fn ceo_schemas() -> Vec<Value> {
                 "agent": {"type": "string"}, "task": {"type": "string"}},
                 "required": ["agent", "task"]}}}),
             json!(["tasks"])),
+        tool("dispatch", "Send an employee off to work in the BACKGROUND and return immediately — you keep orchestrating while they work. Their report is delivered to you automatically when they finish. Prefer this over delegate for substantial work; call it several times to keep many employees busy at once.", json!({
+            "agent": {"type": "string"}, "task": {"type": "string"}}),
+            json!(["agent", "task"])),
+        tool("team_status", "List background tasks started with dispatch: who is still working and on what.", json!({}), json!([])),
         tool("rate_work", "Rate a just-reviewed delegated report 1 (useless) to 5 (excellent). Ratings are tracked per agent and prompt version — they are the ground truth for deciding prompt improvements and rollbacks.", json!({
             "agent": {"type": "string"}, "score": {"type": "integer", "minimum": 1, "maximum": 5},
             "note": {"type": "string", "description": "One line on why"}}),
@@ -131,7 +135,7 @@ pub(crate) fn compact_threshold(ctx: Option<u32>, max_tokens: u32) -> usize {
 }
 
 const CEO_TOOL_NAMES: &[&str] = &[
-    "hire", "delegate", "delegate_parallel", "rate_work", "fire", "list_team",
+    "hire", "delegate", "delegate_parallel", "dispatch", "team_status", "rate_work", "fire", "list_team",
     "update_prompt", "rollback_prompt", "save_playbook", "finish",
 ];
 
@@ -154,11 +158,20 @@ pub struct Tokens {
     pub completion: AtomicU64,
 }
 
+/// An employee running in the background via dispatch: name, one-line task
+/// summary for team_status, and the handle to reap the report from.
+pub struct BackgroundTask {
+    agent: String,
+    task: String,
+    handle: tokio::task::JoinHandle<String>,
+}
+
 pub struct Orchestrator {
     pub ctx: ToolCtx,
     pub llm: Client,
     pub stop: Arc<AtomicBool>,
     pub tokens: Tokens,
+    pub pending: tokio::sync::Mutex<Vec<BackgroundTask>>,
 }
 
 impl Orchestrator {
@@ -430,7 +443,7 @@ Drop superseded detail, resolved dead ends, and chatter.",
     }
 
     /// Execute a CEO control tool.
-    async fn ceo_tool(&self, name: &str, a: &Value) -> String {
+    async fn ceo_tool(self: &Arc<Self>, name: &str, a: &Value) -> String {
         match name {
             "hire" => {
                 let (n, role, model) = (s(a, "name"), s(a, "role"), s(a, "model"));
@@ -463,6 +476,38 @@ Drop superseded detail, resolved dead ends, and chatter.",
                     }
                 });
                 futures::future::join_all(futs).await.join("\n\n")
+            }
+            "dispatch" => {
+                let (agent, task) = (s(a, "agent").to_string(), s(a, "task").to_string());
+                if self.ctx.store.load_agent(&agent).is_none() {
+                    return format!("ERROR: no such employee '{agent}'. hire them first or check list_team.");
+                }
+                let mut pending = self.pending.lock().await;
+                // Two concurrent runs of one employee would race on their saved
+                // history; make the CEO wait for the report or pick someone else.
+                if pending.iter().any(|t| t.agent == agent) {
+                    return format!("ERROR: {agent} is already working on a background task (see team_status). Wait for their report or dispatch someone else.");
+                }
+                let me = Arc::clone(self);
+                let (a2, t2) = (agent.clone(), task.clone());
+                let handle = tokio::spawn(async move { me.run_employee(&a2, &t2).await });
+                pending.push(BackgroundTask { agent: agent.clone(), task, handle });
+                format!("{agent} dispatched — working in the background; their report will reach you automatically. Keep orchestrating.")
+            }
+            "team_status" => {
+                let pending = self.pending.lock().await;
+                if pending.is_empty() {
+                    "no background tasks running".into()
+                } else {
+                    pending
+                        .iter()
+                        .map(|t| {
+                            let state = if t.handle.is_finished() { "finished — report arrives next iteration" } else { "working" };
+                            format!("- {} [{state}]: {}", t.agent, glimpse(&t.task))
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                }
             }
             "rate_work" => {
                 let agent = s(a, "agent");
@@ -509,8 +554,31 @@ Drop superseded detail, resolved dead ends, and chatter.",
         }
     }
 
+    /// Deliver reports from finished background dispatches into the CEO's
+    /// history, the same way founder messages arrive.
+    async fn harvest_dispatches(&self, history: &mut Vec<Message>) {
+        let mut pending = self.pending.lock().await;
+        let mut i = 0;
+        while i < pending.len() {
+            if !pending[i].handle.is_finished() {
+                i += 1;
+                continue;
+            }
+            let t = pending.remove(i);
+            let report = t
+                .handle
+                .await
+                .unwrap_or_else(|e| format!("(background task crashed: {e})"));
+            self.log_line("CEO", "background-report", &format!("{} finished their dispatched task", t.agent));
+            history.push(Message::text(
+                "user",
+                format!("[Background report from {} — task: {}]\n{report}\n\nReview it and rate_work.", t.agent, glimpse(&t.task)),
+            ));
+        }
+    }
+
     /// The unbounded CEO loop. Runs until the stop flag is set (Ctrl+C).
-    pub async fn run_ceo(&self, directive: &str, fresh: bool) -> Result<()> {
+    pub async fn run_ceo(self: &Arc<Self>, directive: &str, fresh: bool) -> Result<()> {
         let sys = self.ctx.store.get_prompt("CEO").unwrap_or_default() + crate::prompts::SECURITY + &crate::prompts::environment();
         let mut history: Vec<Message> = if fresh {
             vec![
@@ -546,6 +614,9 @@ Drop superseded detail, resolved dead ends, and chatter.",
             schemas.extend(tools::skills::schemas());
             schemas.extend(tools::credits::schemas(&self.ctx));
             schemas.extend(ceo_schemas());
+
+            // Reports from finished background dispatches land first.
+            self.harvest_dispatches(&mut history).await;
 
             // Founder messages sent via `khan tell` land as top-priority instructions.
             for m in self.ctx.store.drain_messages() {
@@ -667,6 +738,20 @@ Save one-off lessons with save_playbook. Then continue the mission.\n\n{log}{sta
                     self.tokens.prompt.load(Ordering::Relaxed),
                     self.tokens.completion.load(Ordering::Relaxed)
                 );
+            }
+        }
+        // Give in-flight background employees a moment to notice the stop flag and
+        // save their own state; bank any reports that make it back in time.
+        {
+            let mut pending = self.pending.lock().await;
+            for t in pending.drain(..) {
+                match tokio::time::timeout(std::time::Duration::from_secs(30), t.handle).await {
+                    Ok(Ok(report)) => history.push(Message::text(
+                        "user",
+                        format!("[Background report from {} — task: {}]\n{report}", t.agent, glimpse(&t.task)),
+                    )),
+                    _ => self.log_line("CEO", "shutdown", &format!("{} did not finish before shutdown; their saved state resumes next start", t.agent)),
+                }
             }
         }
         // Save the real history FIRST, so nothing is lost if the platform kills us
