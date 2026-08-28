@@ -2,7 +2,7 @@ use crate::llm::{Client, Message, Usage};
 use crate::tools::{self, ToolCtx};
 use anyhow::Result;
 use serde_json::{json, Value};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 
 fn tool(name: &str, desc: &str, props: Value, required: Value) -> Value {
@@ -48,6 +48,38 @@ fn ceo_schemas() -> Vec<Value> {
 /// Marks the running brief that replaces compacted history, so a later compaction
 /// can carry it forward instead of summarizing a summary.
 const BRIEF_TAG: &str = "[Earlier history, summarized]";
+
+/// Shown while an agent is waiting on a model. A model call is the one thing that
+/// takes minutes and produced no trace at all, so the public page looked frozen
+/// exactly when something was worth watching.
+const THINKING: &[&str] = &[
+    "thinking it over",
+    "consulting the war council",
+    "asking the oracle",
+    "reading the steppe winds",
+    "sharpening the arrows",
+    "conferring with the generals",
+    "summoning a thought",
+    "plotting the next move",
+    "counting the horses",
+    "weighing the odds",
+    "pacing the yurt",
+    "studying the maps",
+    "listening for distant drums",
+    "turning it over",
+    "doing the arithmetic",
+    "scanning the horizon",
+    "drawing up the battle plan",
+    "taking counsel",
+    "staring into the fire",
+    "waiting on the messenger",
+];
+
+/// Rotate rather than randomise: consecutive lines differ, and a run is reproducible.
+fn thinking_phrase() -> &'static str {
+    static N: AtomicUsize = AtomicUsize::new(0);
+    THINKING[N.fetch_add(1, Ordering::Relaxed) % THINKING.len()]
+}
 
 /// First index of the tail to keep verbatim: walk back from the newest message
 /// until `keep_recent` characters are banked, then step forward off any orphaned
@@ -112,16 +144,33 @@ impl Orchestrator {
     /// Chat with automatic failover: if the requested model keeps failing (429/404/down),
     /// try each configured free model once before giving up.
     async fn chat_fb(&self, agent: &str, model: &str, messages: &[Message], tools: &[Value]) -> Result<(Message, Usage)> {
+        let started = std::time::Instant::now();
+        self.log_line(agent, "thinking", &format!("{} ({model})", thinking_phrase()));
         match self.llm.chat(&self.ctx.cfg, model, messages, tools).await {
-            Ok(r) => Ok(r),
+            Ok(r) => {
+                // Say so when a model is dragging. Without this a slow provider and a
+                // hung one look identical from the outside.
+                let secs = started.elapsed().as_secs();
+                if secs >= 60 {
+                    self.log_line(agent, "slow-model", &format!("{model} took {secs}s to answer"));
+                }
+                Ok(r)
+            }
             Err(e) => {
+                self.log_line(agent, "llm-error", &format!("{model} failed: {e:#}"));
                 for alt in self.ctx.cfg.free_model_ids() {
                     if alt == model {
                         continue;
                     }
-                    if let Ok(r) = self.llm.chat(&self.ctx.cfg, &alt, messages, tools).await {
-                        self.log_line(agent, "model-fallback", &format!("{model} failed, answered by {alt}"));
-                        return Ok(r);
+                    self.log_line(agent, "thinking", &format!("{} ({alt})", thinking_phrase()));
+                    match self.llm.chat(&self.ctx.cfg, &alt, messages, tools).await {
+                        Ok(r) => {
+                            self.log_line(agent, "model-fallback", &format!("{model} failed, answered by {alt}"));
+                            return Ok(r);
+                        }
+                        Err(alt_err) => {
+                            self.log_line(agent, "llm-error", &format!("{alt} failed too: {alt_err:#}"));
+                        }
                     }
                 }
                 Err(e)

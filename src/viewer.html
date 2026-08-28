@@ -9,6 +9,7 @@
     --bg:#14141b; --panel:#1a1b26; --line:#262738; --text:#c0caf5; --dim:#565f89;
     --says:#7aa2f7; --report:#bb9af7; --milestone:#9ece6a; --founder:#ff79c6;
     --team:#ff9e64; --evolve:#2ac3de; --sys:#565f89; --error:#f7768e; --tool:#8f98c9;
+    --think:#7a86b8;
   }
   *{box-sizing:border-box; margin:0}
   html,body{height:100%}
@@ -45,6 +46,8 @@
   .cat-says{--c:var(--says)} .cat-report{--c:var(--report)} .cat-milestone{--c:var(--milestone)}
   .cat-founder{--c:var(--founder)} .cat-team{--c:var(--team)} .cat-evolve{--c:var(--evolve)}
   .cat-sys{--c:var(--sys)} .cat-error{--c:var(--error)}
+  .cat-think{--c:var(--think)}
+  .cat-think .detail{color:var(--think); font-style:italic}
   .cat-sys .detail{color:var(--dim)}
   .cat-error{border-left-color:var(--error)}
   .cat-error .detail{color:var(--error)}
@@ -97,7 +100,8 @@ const CATS = {
   update_prompt:'evolve', rollback_prompt:'evolve', save_playbook:'evolve',
   create_tool:'evolve', rollback_tool:'evolve', create_skill:'evolve',
   rollback_skill:'evolve', use_skill:'evolve', compacted:'evolve',
-  startup:'sys', shutdown:'sys', 'model-fallback':'sys',
+  startup:'sys', shutdown:'sys', 'model-fallback':'sys', limits:'sys',
+  thinking:'think', 'slow-model':'think',
 };
 const catOf = ev => CATS[ev] || (/error|fail/i.test(ev) ? 'error' : 'tool');
 
