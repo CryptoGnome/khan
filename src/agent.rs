@@ -367,6 +367,13 @@ Use this with live model prices to estimate spend and rebalance the team's model
                 } else {
                     format!("\n\nEmployee performance ratings (use these — not vibes — to judge prompt changes):\n{stats}")
                 };
+                // The catalog is baked into the seeded prompt, so a config change would
+                // otherwise never reach a running company. Re-state it each reflection.
+                let catalog = format!(
+                    "\n\nModels available right now (config may have changed since you were hired — \
+re-read this list before choosing models):\n{}",
+                    self.ctx.cfg.model_catalog()
+                );
                 let health = self.ctx.store.tool_health_text();
                 let health_block = if health.is_empty() {
                     String::new()
@@ -383,7 +390,7 @@ If a prompt (yours or an employee's) is causing weak results, improve it with up
 or rollback_prompt if a recent change hurt. If a custom tool erred or is missing, improve or build it with \
 create_tool (rollback_tool reverts a bad version). If you or employees keep re-figuring-out the same procedure, \
 capture it as a skill with create_skill; improve skills that led agents astray (rollback_skill reverts). \
-Save one-off lessons with save_playbook. Then continue the mission.\n\n{log}{stats_block}{health_block}\n\n{toks}"
+Save one-off lessons with save_playbook. Then continue the mission.\n\n{log}{stats_block}{health_block}{catalog}\n\n{toks}"
                 )));
             }
 

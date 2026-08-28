@@ -28,10 +28,17 @@ paid_models = [
 name = "openrouter"
 base_url = "https://openrouter.ai/api/v1"
 api_key_env = "OPENROUTER_API_KEY"
-# "free" auto-routes to whatever free model is currently available — good default
-# for easy/bulk work.
+# IMPORTANT: agents need tool calling, and the "free" auto-router slug routes to
+# whatever free model is up — which usually can't call tools ("No endpoints found
+# that support tool use"). List free models that DO support tools, so the CEO can
+# hire employees onto them. Check the current set with:
+#   curl -s https://openrouter.ai/api/v1/models | jq '.data[]
+#     | select(.id|endswith(":free")) | select(.supported_parameters|index("tools")) | .id'
+# ("openrouter/free" is still fine as utility_model — summarization needs no tools.)
 free_models = [
-  "free",
+  "z-ai/glm-5.2:free",
+  "minimax/minimax-m3:free",
+  "nvidia/nemotron-3-ultra-550b-a55b:free",
 ]
 
 # Add any other OpenAI-compatible endpoint the same way:
