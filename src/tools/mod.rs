@@ -37,8 +37,9 @@ pub fn work_schemas() -> Vec<Value> {
             "properties": {"path": {"type": "string", "description": "Relative dir, '' for workspace root"}},
             "required": []})),
         tool("shell", &format!("Run a command in the workspace directory using the system shell ({}). 120s timeout.", shell::SHELL_NAME), json!({
-            "properties": {"command": {"type": "string"}},
-            "required": ["command"]})),
+            "properties": {"command": {"type": "string"},
+                           "purpose": {"type": "string", "description": "REQUIRED. One short plain-English sentence saying what this command is for, written for a non-technical person watching the public activity log — e.g. 'checking the treasury balance on-chain' or 'installing the Solana python library'. Never restate the code; say the goal."}},
+            "required": ["command", "purpose"]})),
         tool("web_fetch", "Fetch a URL and return its text content.", json!({
             "properties": {"url": {"type": "string"}},
             "required": ["url"]})),
@@ -46,8 +47,9 @@ pub fn work_schemas() -> Vec<Value> {
             "properties": {"query": {"type": "string"}},
             "required": ["query"]})),
         tool("sql", "Run SQL against the company scratch database workspace.db (SQLite). Use it for any structured data you want to keep and query.", json!({
-            "properties": {"query": {"type": "string"}},
-            "required": ["query"]})),
+            "properties": {"query": {"type": "string"},
+                           "purpose": {"type": "string", "description": "REQUIRED. One short plain-English sentence saying what this query is for, written for a non-technical person watching the public activity log — e.g. 'recording today's profit in the ledger'. Never restate the SQL; say the goal."}},
+            "required": ["query", "purpose"]})),
         tool("remember", "Store a memory (fact, decision, lesson) in long-term memory.", json!({
             "properties": {"key": {"type": "string", "description": "Short title"},
                            "content": {"type": "string"},

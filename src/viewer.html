@@ -116,6 +116,10 @@ function humanize(event, detail){
   try { o = JSON.parse(detail); } catch {}
   if (!o || typeof o !== 'object' || Array.isArray(o)) o = {};
   const g = k => typeof o[k] === 'string' ? o[k] : '';
+  // Agents label their own work with `purpose` — a plain sentence written for
+  // people watching. Always prefer it over dumping code or SQL at the reader;
+  // the raw arguments stay one click away.
+  if (g('purpose')) return g('purpose');
   switch (event){
     case 'says':            return detail;
     case 'report':          return 'reported back: ' + detail;
