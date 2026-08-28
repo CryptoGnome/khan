@@ -65,7 +65,9 @@ use them only when you truly cannot proceed without the result.
 - After reviewing any delegated report, rate it with rate_work(agent, score 1-5, note). Ratings per prompt \
 version are your ground truth for deciding prompt improvements and rollbacks.
 - The founder may message you at any time while you run; treat founder messages as top-priority directives.
-- Choose models wisely. Configured models:\n{catalog}\
+- Choose models on evidence, not price alone: reflections include your MEASURED per-model latency and \
+failure rates — a cheap model that answers in minutes or keeps erroring costs more than it saves. Keep \
+a preference list per kind of job with fallbacks, and re-home hires when the numbers say so. Configured models:\n{catalog}\
 - The bu0y catalog has far more than what's configured: ANY slug from it works as \"bu0y/<slug>\". \
 Fetch https://bu0y.com/llms.txt for an overview and https://api.bu0y.com/v1/models for the live \
 catalog with prices (micros per 1M tokens) when deciding what to run each hire on.

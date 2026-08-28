@@ -234,6 +234,20 @@ mod tests {
     }
 
     #[test]
+    fn model_stats_report_latency_and_failures() {
+        let store = crate::state::Store::open(":memory:").unwrap();
+        store.record_model_call("bu0y/fast", 2_000, true, "");
+        store.record_model_call("bu0y/fast", 4_000, true, "");
+        store.record_model_call("bu0y/slow", 90_000, true, "");
+        store.record_model_call("bu0y/slow", 70_000, false, "429 rate limited");
+        let s = store.model_stats_text();
+        assert!(s.contains("bu0y/fast: 2 calls, avg 3s"), "avg latency per model: {s}");
+        assert!(s.contains("bu0y/slow"), "slow model listed: {s}");
+        assert!(s.contains("2 took 60s+"), "counts calls over a minute: {s}");
+        assert!(s.contains("1 failed") && s.contains("429"), "failures with last error: {s}");
+    }
+
+    #[test]
     fn redact_hides_key_material_but_keeps_public_addresses() {
         use crate::state::redact as r;
         // A Solana secret key (base58, 88 chars) and the JSON keypair file form.

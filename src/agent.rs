@@ -199,21 +199,26 @@ impl Orchestrator {
                 if secs >= 60 {
                     self.log_line(agent, "slow-model", &format!("{model} took {secs}s to answer"));
                 }
+                self.ctx.store.record_model_call(model, started.elapsed().as_millis() as u64, true, "");
                 Ok(r)
             }
             Err(e) => {
+                self.ctx.store.record_model_call(model, started.elapsed().as_millis() as u64, false, &format!("{e:#}"));
                 self.log_line(agent, "llm-error", &format!("{model} failed: {e:#}"));
                 for alt in self.ctx.cfg.free_model_ids() {
                     if alt == model {
                         continue;
                     }
                     self.log_line(agent, "thinking", &format!("{} ({alt})", thinking_phrase()));
+                    let alt_started = std::time::Instant::now();
                     match self.llm.chat(&self.ctx.cfg, &alt, messages, tools).await {
                         Ok(r) => {
+                            self.ctx.store.record_model_call(&alt, alt_started.elapsed().as_millis() as u64, true, "");
                             self.log_line(agent, "model-fallback", &format!("{model} failed, answered by {alt}"));
                             return Ok(r);
                         }
                         Err(alt_err) => {
+                            self.ctx.store.record_model_call(&alt, alt_started.elapsed().as_millis() as u64, false, &format!("{alt_err:#}"));
                             self.log_line(agent, "llm-error", &format!("{alt} failed too: {alt_err:#}"));
                         }
                     }
@@ -646,6 +651,17 @@ Use this with live model prices to estimate spend and rebalance the team's model
 re-read this list before choosing models):\n{}",
                     self.ctx.cfg.model_catalog()
                 );
+                let model_stats = self.ctx.store.model_stats_text();
+                let model_block = if model_stats.is_empty() {
+                    String::new()
+                } else {
+                    format!(
+                        "\n\nMEASURED MODEL PERFORMANCE (recent calls, all agents — your own data, not the vendor's claims):\n{model_stats}\n\
+Weigh this against live prices when hiring or rebalancing: a cheap model that averages 60s+ per call or keeps failing \
+is expensive in wall-clock and retries. Maintain your own model preferences per kind of job (planning, coding, bulk \
+scraping) with explicit fallbacks, record them with save_playbook, and move existing hires when the data says so."
+                    )
+                };
                 let health = self.ctx.store.tool_health_text();
                 let health_block = if health.is_empty() {
                     String::new()
@@ -662,7 +678,7 @@ If a prompt (yours or an employee's) is causing weak results, improve it with up
 or rollback_prompt if a recent change hurt. If a custom tool erred or is missing, improve or build it with \
 create_tool (rollback_tool reverts a bad version). If you or employees keep re-figuring-out the same procedure, \
 capture it as a skill with create_skill; improve skills that led agents astray (rollback_skill reverts). \
-Save one-off lessons with save_playbook. Then continue the mission.\n\n{log}{stats_block}{health_block}{catalog}\n\n{toks}"
+Save one-off lessons with save_playbook. Then continue the mission.\n\n{log}{stats_block}{health_block}{catalog}{model_block}\n\n{toks}"
                 )));
             }
 

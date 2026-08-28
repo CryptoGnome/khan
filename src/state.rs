@@ -195,6 +195,9 @@ impl Store {
              CREATE TABLE IF NOT EXISTS tool_calls (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL,
                 tool TEXT NOT NULL, ok INTEGER NOT NULL, err TEXT);
+             CREATE TABLE IF NOT EXISTS model_calls (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL,
+                model TEXT NOT NULL, ms INTEGER NOT NULL, ok INTEGER NOT NULL, err TEXT);
              CREATE TABLE IF NOT EXISTS tool_defs (
                 name TEXT NOT NULL, version INTEGER NOT NULL, description TEXT NOT NULL,
                 params TEXT NOT NULL, lang TEXT NOT NULL, script TEXT NOT NULL,
@@ -318,6 +321,50 @@ impl Store {
                     "- {tool}: {fails} of {calls} recent calls FAILED — last error: {}",
                     err.unwrap_or_default().chars().take(160).collect::<String>()
                 ))
+            })
+            .map(|it| it.filter_map(|x| x.ok()).collect())
+            .unwrap_or_default();
+        rows.join("\n")
+    }
+
+    // --- model performance (so hiring runs on measured speed and reliability, not price alone) ---
+
+    pub fn record_model_call(&self, model: &str, ms: u64, ok: bool, err: &str) {
+        let c = self.conn.lock().unwrap();
+        let _ = c.execute(
+            "INSERT INTO model_calls(ts, model, ms, ok, err) VALUES(?1,?2,?3,?4,?5)",
+            params![chrono::Utc::now().to_rfc3339(), model, ms as i64, ok as i64, err],
+        );
+    }
+
+    /// Measured per-model performance over the recent window, busiest first, for
+    /// the reflection step. Unlike tool health this always reports: a model being
+    /// slow-but-working is exactly the signal a hiring decision needs.
+    pub fn model_stats_text(&self) -> String {
+        let c = self.conn.lock().unwrap();
+        let mut stmt = match c.prepare(
+            "SELECT model, COUNT(*) AS calls, SUM(1-ok) AS fails,
+                    ROUND(AVG(ms)/1000.0,1), ROUND(MAX(ms)/1000.0,1),
+                    SUM(CASE WHEN ms >= 60000 THEN 1 ELSE 0 END),
+                    (SELECT err FROM model_calls e WHERE e.model=m.model AND e.ok=0 ORDER BY e.id DESC LIMIT 1)
+             FROM model_calls m
+             WHERE m.id > (SELECT COALESCE(MAX(id),0) - 500 FROM model_calls)
+             GROUP BY m.model ORDER BY calls DESC",
+        ) {
+            Ok(s) => s,
+            Err(_) => return String::new(),
+        };
+        let rows: Vec<String> = stmt
+            .query_map([], |r| {
+                let (model, calls, fails, avg_s, max_s, slow, err): (String, i64, i64, f64, f64, i64, Option<String>) =
+                    (r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?);
+                let mut line = format!(
+                    "- {model}: {calls} calls, avg {avg_s}s, worst {max_s}s, {slow} took 60s+, {fails} failed"
+                );
+                if let Some(e) = err.filter(|e| !e.is_empty()) {
+                    line.push_str(&format!(" (last error: {})", e.chars().take(120).collect::<String>()));
+                }
+                Ok(line)
             })
             .map(|it| it.filter_map(|x| x.ok()).collect())
             .unwrap_or_default();
