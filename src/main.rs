@@ -555,6 +555,32 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// The live failure this guards: ten self-rewrites had compressed the CEO's
+    /// prompt to an operations manual that kept "re-home a slow hire" and had lost
+    /// every word about growing the company — so a directive demanding an org
+    /// chart met a CEO whose own prompt never mentioned hiring anyone new.
+    #[test]
+    fn ceo_mandate_survives_a_prompt_that_evolved_it_away() {
+        use crate::prompts::ceo_system;
+        let evolved = "You are the CEO. Re-home hires whose latency >60s avg or failures rise.";
+        let sys = ceo_system(evolved);
+        assert!(sys.contains(evolved), "the CEO's own prompt still comes first");
+        for must in [
+            "ORCHESTRATOR",
+            "a team of four is not a company",
+            "hire(manager: true)",
+            "PROGRESS",
+            "never park it for",
+        ] {
+            assert!(sys.contains(must), "mandate lost {must}");
+        }
+        // The two code-sourced blocks must coexist; neither displaces the other.
+        assert!(sys.contains("SECURITY RULES"), "security must still apply");
+        // A wiped or missing prompt still carries the mandate: get_prompt returns
+        // the empty string when the row is gone, and that path must not be bare.
+        assert!(ceo_system("").contains("STANDING MANDATE"));
+    }
+
     #[test]
     fn tool_call_roundtrip() {
         let raw = r#"{"role":"assistant","content":null,

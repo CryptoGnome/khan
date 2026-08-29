@@ -755,7 +755,11 @@ Drop superseded detail, resolved dead ends, and chatter.",
 
     /// The unbounded CEO loop. Runs until the stop flag is set (Ctrl+C).
     pub async fn run_ceo(self: &Arc<Self>, directive: &str, fresh: bool) -> Result<()> {
-        let sys = self.ctx.store.get_prompt("CEO").unwrap_or_default() + crate::prompts::SECURITY + &crate::prompts::environment();
+        // MANDATE rides alongside SECURITY: both come from code every turn, so
+        // neither a prompt rewrite nor a rollback can leave the CEO without them.
+        let sys = crate::prompts::ceo_system(
+            &self.ctx.store.get_prompt("CEO").unwrap_or_default(),
+        );
         let mut history: Vec<Message> = if fresh {
             vec![
                 Message::text("system", sys),
