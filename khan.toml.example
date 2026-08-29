@@ -39,9 +39,29 @@ api_key_env = "BU0Y_API_KEY"
 # Only the default is listed — the CEO fetches the full live catalog + prices
 # itself (https://bu0y.com/llms.txt, https://api.bu0y.com/v1/models) and can
 # hire onto ANY catalog slug as "bu0y/<slug>".
+# This list is now two things: what the CEO is shown when hiring, AND the ladder a
+# PAID agent falls back through when its model fails (a free agent keeps the free
+# list). So order matters — cheapest and fastest first.
+#
+# Every entry below was probed with a real tool-calling request on 2026-08-29 and
+# returned a correct tool_call. The catalog's own `tools` field marks only 3 of
+# 531 models "verified" and the rest "unknown", which is missing metadata rather
+# than missing support — 15 of 16 models tested answered fine, all in 3.4-10.7s
+# against the 20.9s the default model averages in production. Re-probe before
+# adding more; do not trust the catalog flag.
+#
+# Multiples are input/output cost against deepseekv4flash0731. Input dominates
+# the bill here (roughly 40x more input than output tokens), so the input figure
+# is the one to weigh.
 paid_models = [
-  "deepseekv4flash0731",
-  "glm53flash",
+  "deepseekv4flash0731",        # 1.0x / 1.0x  — default, 20.9s avg over 3480 calls
+  "qwen3235ba22b2507",          # 0.5x / 1.1x  — cheaper than the default, 3.4s
+  "deepseekv32",                # 1.5x / 1.1x  — stronger reasoning, 4.4s
+  "minimaxm25",                 # 1.6x / 2.9x  — 3.6s
+  "glm5",                       # 3.6x / 5.8x  — 4.8s
+  "kimik2thinking",             # 3.6x / 7.6x  — reasoning model for hard calls, 5.2s
+  "qwen3235ba22bthinking2507",  # 3.5x / 17.4x — deep reasoning; output cost is steep
+  "glm53flash",                 # 18.1x / 30.2x — 0 failures in 203 calls, but pricey
 ]
 
 [[providers]]
@@ -56,10 +76,18 @@ api_key_env = "OPENROUTER_API_KEY"
 #     | select(.id|endswith(":free")) | select(.supported_parameters|index("tools")) | .id'
 # Don't use "openrouter/free" anywhere, including utility_model: in practice it
 # fails on every call and only appears to work because khan falls back.
+# Measured before editing this list: nvidia/nemotron-3-ultra-550b-a55b:free was
+# removed after failing 3 of 3 calls with a 404 from the provider - it advertises
+# tool support and simply is not routable, so every fallback through it was dead
+# wall-clock at the exact moment the primary model had already failed.
+# z-ai/glm-5.2:free stays despite failing 12 of 12: those are upstream 429s
+# ("temporarily rate-limited, retry shortly"), which is congestion rather than a
+# broken model, and a 429 is parked on a cooldown in half a second rather than
+# retried - so keeping it costs nothing and it earns its place again when the
+# upstream frees up. Check failures with model_stats before cutting either one.
 free_models = [
   "z-ai/glm-5.2:free",
   "minimax/minimax-m3:free",
-  "nvidia/nemotron-3-ultra-550b-a55b:free",
 ]
 
 # Add any other OpenAI-compatible endpoint the same way:

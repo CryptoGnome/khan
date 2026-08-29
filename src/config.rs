@@ -137,6 +137,34 @@ impl Config {
             .collect()
     }
 
+    pub fn paid_model_ids(&self) -> Vec<String> {
+        self.providers
+            .iter()
+            .flat_map(|p| p.paid_models.iter().map(move |m| format!("{}/{}", p.name, m)))
+            .collect()
+    }
+
+    /// Models to try after `model` fails, preserving the tier it was hired at.
+    ///
+    /// Putting an agent on a free model is already a judgement that the work is
+    /// cheap enough for one, so a free agent keeps the free ladder. Anything paid
+    /// falls back only to paid models: the old ladder sent everyone to the free
+    /// list on any failure, which silently demoted a job someone had deliberately
+    /// chosen an expensive model for, and nobody was told — the CEO just received
+    /// a worse report. For the CEO itself it landed at precisely the moments a
+    /// decision mattered, since a fallback only happens when the primary failed.
+    pub fn fallback_ids_for(&self, model: &str) -> Vec<String> {
+        let is_free = self
+            .providers
+            .iter()
+            .any(|p| p.free_models.iter().any(|m| format!("{}/{}", p.name, m) == model));
+        if is_free {
+            self.free_model_ids()
+        } else {
+            self.paid_model_ids()
+        }
+    }
+
     /// Human-readable model catalog for prompts.
     pub fn model_catalog(&self) -> String {
         let mut s = String::new();

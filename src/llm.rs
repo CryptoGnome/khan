@@ -160,13 +160,25 @@ impl Client {
     /// Best effort by design. A failure leaves the map empty, and an empty map
     /// means every caller keeps its own default.
     pub async fn discover_context_limits(&self, cfg: &Config) {
-        let Some(prov) = cfg.providers.iter().find(|p| p.base_url.contains("openrouter.ai")) else {
-            return;
-        };
+        for prov in &cfg.providers {
+            self.discover_from(cfg, prov).await;
+        }
+    }
+
+    /// Read one provider's catalog. Best effort per provider, so a gateway that
+    /// publishes nothing — or is simply down — leaves the others intact.
+    async fn discover_from(&self, cfg: &Config, prov: &crate::config::Provider) {
         let url = format!("{}/models", prov.base_url.trim_end_matches('/'));
-        let Ok(resp) = self.http.get(&url).send().await else { return };
+        let mut req = self.http.get(&url);
+        // OpenRouter serves this publicly; other gateways want the key. Sending it
+        // to the provider it belongs to is safe and costs nothing when unused.
+        if let Some(key) = cfg.key_for(&prov.name) {
+            req = req.bearer_auth(key);
+        }
+        let Ok(resp) = req.send().await else { return };
         let Ok(v) = resp.json::<Value>().await else { return };
-        let Some(list) = v["data"].as_array() else { return };
+        // Some gateways return a bare array rather than the OpenAI {"data": [...]}.
+        let Some(list) = v["data"].as_array().or_else(|| v.as_array()) else { return };
         let mut ctxs = self.ctx_limits.lock().unwrap();
         let mut outs = self.out_limits.lock().unwrap();
         for m in list {

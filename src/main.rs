@@ -641,6 +641,30 @@ mod tests {
         }
     }
 
+    /// The old ladder sent every failing agent to the free list, so the CEO — and
+    /// any employee deliberately put on an expensive model because the job was
+    /// hard — got silently demoted to a free model at the exact moment its own
+    /// model had just failed. Free models are for work already judged cheap.
+    #[test]
+    fn a_failing_paid_model_never_falls_back_to_a_free_one() {
+        let cfg: crate::config::Config = toml::from_str(
+            "ceo_model = \"pay/big\"\n\
+             [[providers]]\nname = \"pay\"\nbase_url = \"http://x\"\napi_key_env = \"X\"\n\
+             paid_models = [\"big\", \"small\"]\n\
+             [[providers]]\nname = \"or\"\nbase_url = \"http://y\"\napi_key_env = \"Y\"\n\
+             free_models = [\"cheap:free\"]\n",
+        )
+        .unwrap();
+        let paid = cfg.fallback_ids_for("pay/big");
+        assert!(!paid.iter().any(|m| m.contains(":free")), "paid must not fall to free: {paid:?}");
+        assert!(paid.contains(&"pay/small".to_string()), "{paid:?}");
+        // A free agent is already doing work judged cheap, so its ladder is unchanged.
+        let free = cfg.fallback_ids_for("or/cheap:free");
+        assert_eq!(free, vec!["or/cheap:free".to_string()]);
+        // A model hired off-catalog (the CEO may name any slug) counts as paid.
+        assert_eq!(cfg.fallback_ids_for("pay/unlisted"), cfg.paid_model_ids());
+    }
+
     #[test]
     fn tool_call_roundtrip() {
         let raw = r#"{"role":"assistant","content":null,

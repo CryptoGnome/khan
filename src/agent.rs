@@ -250,7 +250,7 @@ impl Orchestrator {
                 if truncation(&e).is_some() {
                     return Err(e);
                 }
-                for alt in self.ctx.cfg.free_model_ids() {
+                for alt in self.ctx.cfg.fallback_ids_for(model) {
                     if alt == model {
                         continue;
                     }
