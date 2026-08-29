@@ -767,6 +767,10 @@ Drop superseded detail, resolved dead ends, and chatter.",
                         }
                         let rank = a["rank"].as_i64().unwrap_or(100);
                         let id = self.ctx.store.add_objective(title, rank);
+                        // Plans and notes supplied at add time must not be dropped.
+                        if a["plan"].as_str().is_some() || a["note"].as_str().is_some() {
+                            self.ctx.store.update_objective(id, None, None, a["plan"].as_str(), a["note"].as_str(), None);
+                        }
                         format!("objective #{id} added at rank {rank}. Tag dispatches with objective:{id} so the board tracks its progress; if it needs more than one dispatch, get a plan onto it first.")
                     }
                     "update" => {
