@@ -584,6 +584,11 @@ mod tests {
             // "plan with power, execute cheap" line was compressed away long ago.
             "Match the model to the stakes",
             "untested, not bad",
+            // Skills and memories kept beating the mandate: a self-written
+            // procedure naming the CEO as the one who runs a step is specific,
+            // and specific was winning against a general rule every time.
+            "outranks anything you wrote yourself",
+            "REWRITE IT NOW",
         ] {
             assert!(sys.contains(must), "mandate lost {must}");
         }
