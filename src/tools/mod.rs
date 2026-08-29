@@ -87,6 +87,16 @@ pub fn truncate(mut s: String) -> String {
 
 /// Execute a work tool. Never returns Err — errors become the tool result string.
 pub async fn execute(ctx: &ToolCtx, agent: &str, name: &str, args: &Value) -> String {
+    // The CEO directs; it does not build. These are stripped from its schema
+    // list, but stale history can still produce a call — refuse it with a
+    // redirect instead of doing the work.
+    if agent == "CEO" && matches!(name, "write_file" | "create_tool") {
+        return format!(
+            "REFUSED: the CEO does not have {name}. Writing files and building tools is \
+             execution — dispatch it to an employee (builder, or hire someone) with clear \
+             instructions and rate the result."
+        );
+    }
     let out = match name {
         "read_file" => fs::read_file(ctx, s(args, "path")),
         "write_file" => fs::write_file(

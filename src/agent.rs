@@ -805,6 +805,14 @@ Drop superseded detail, resolved dead ends, and chatter.",
             schemas.extend(tools::skills::schemas());
             schemas.extend(tools::credits::schemas(&self.ctx));
             schemas.extend(ceo_schemas());
+            // The CEO directs; it does not build. Every time these tools were
+            // available it eventually rationalized an exception ("genuine
+            // correctness fix") and spent whole cycles writing code by hand, so
+            // the option is removed rather than discouraged. execute() refuses
+            // them too, in case a call is produced from stale history.
+            schemas.retain(|t| {
+                !matches!(t["function"]["name"].as_str(), Some("write_file" | "create_tool"))
+            });
 
             // Reports from finished background dispatches land first.
             self.harvest_dispatches(&mut history).await;
