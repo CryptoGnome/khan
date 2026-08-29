@@ -4,6 +4,16 @@ use std::path::{Component, Path, PathBuf};
 
 /// Resolve a workspace-relative path and refuse anything that escapes the workspace.
 fn resolve(ctx: &ToolCtx, rel: &str) -> Result<PathBuf> {
+    // Agents habitually pass the file's absolute path. When it points inside the
+    // workspace, accept it as the workspace-relative path it means — the old
+    // slash-stripping turned "/data/workspace/x" into "<ws>/data/workspace/x",
+    // a phantom ENOENT on a file that exists.
+    let ws_abs = ctx.workspace.canonicalize().context("workspace missing")?;
+    let rel = Path::new(rel)
+        .strip_prefix(&ws_abs)
+        .ok()
+        .and_then(|p| p.to_str())
+        .unwrap_or(rel);
     let rel = rel.trim_start_matches(['/', '\\']);
     if Path::new(rel).is_absolute() {
         bail!("absolute paths are not allowed; use paths relative to the workspace");
@@ -17,7 +27,7 @@ fn resolve(ctx: &ToolCtx, rel: &str) -> Result<PathBuf> {
     if Path::new(rel).components().any(|c| matches!(c, Component::ParentDir)) {
         bail!("`..` is not allowed in workspace paths");
     }
-    let ws = ctx.workspace.canonicalize().context("workspace missing")?;
+    let ws = ws_abs;
     let joined = ws.join(rel);
     // Canonicalize the deepest existing ancestor so `..` can't escape.
     let mut probe = joined.clone();
@@ -92,4 +102,39 @@ pub fn list_files(ctx: &ToolCtx, path: &str) -> Result<String> {
         }
     }
     Ok(if out.is_empty() { "(empty)".into() } else { out.join("\n") })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tools::ToolCtx;
+    use std::sync::Arc;
+
+    fn ctx(ws: &Path) -> ToolCtx {
+        ToolCtx {
+            cfg: toml::from_str(concat!(
+                "ceo_model = \"test/model\"\n",
+                "[[providers]]\nname = \"test\"\nbase_url = \"http://localhost\"\napi_key_env = \"TEST_KEY\"\n",
+            )).unwrap(),
+            store: Arc::new(crate::state::Store::open(":memory:").unwrap()),
+            workspace: ws.to_path_buf(),
+            http: reqwest::Client::new(),
+            http_proxy: None,
+        }
+    }
+
+    #[test]
+    fn absolute_path_inside_workspace_reads_the_file() {
+        let dir = std::env::temp_dir().join("khan-fs-test");
+        std::fs::create_dir_all(dir.join("vault")).unwrap();
+        std::fs::write(dir.join("vault/k.json"), "ok").unwrap();
+        let c = ctx(&dir);
+        // The shape agents actually send: the file's own absolute path.
+        let abs = dir.canonicalize().unwrap().join("vault").join("k.json");
+        assert_eq!(read_file(&c, abs.to_str().unwrap()).unwrap(), "ok");
+        // Workspace-relative still works.
+        assert_eq!(read_file(&c, "vault/k.json").unwrap(), "ok");
+        // Absolute paths OUTSIDE the workspace are still refused.
+        assert!(read_file(&c, "/etc/hostname").is_err());
+    }
 }
