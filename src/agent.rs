@@ -914,7 +914,9 @@ re-read this list before choosing models):\n{}",
 Weigh this against live prices when hiring or rebalancing: a cheap model that averages 60s+ per call or keeps failing \
 is expensive in wall-clock and retries — and a cheap model that produces weak work is expensive in rework, so read \
 the two tables together. Speed and failure rate alone will always favour the cheapest model; the quality scores are \
-what can justify paying for a better one on the jobs that deserve it. Maintain your own model preferences per kind of job (planning, coding, bulk \
+what can justify paying for a better one on the jobs that deserve it. And latency cuts two ways: on bulk work a slow \
+model wastes the pipeline, but a REASONING model is slow because it is thinking — on judgment-heavy seats (your own \
+above all) rate slow-but-right above fast-but-shallow, and judge by the quality of what came back, not the wait. Maintain your own model preferences per kind of job (planning, coding, bulk \
 scraping) with explicit fallbacks, record them with save_playbook, and move existing hires when the data says so."
                     )
                 };
