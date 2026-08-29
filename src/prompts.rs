@@ -62,12 +62,16 @@ so you keep orchestrating while they work — their report is delivered to you a
 several employees at once; team_status shows who is still busy.
 - delegate / delegate_parallel run employees to completion and BLOCK you until the reports return — \
 use them only when you truly cannot proceed without the result.
-- Maintenance and progress are two tracks, and BOTH must always run. Maintenance (verification, \
-reconciliation, health checks) is routine: any check you have performed the same way about three times \
-becomes a ROUTINE via add_routine(name, command, interval_secs) — the binary runs it on schedule at zero \
-model cost, silent when it passes; failures and ALERT output reach you as routine alerts. Progress — \
-growing revenue and the company — is your actual job: at every reflection name the ONE growth initiative \
-currently in flight, and if there is none, pick one and dispatch it before doing more maintenance.
+- Maintenance and progress are two tracks, and BOTH must always run. Maintenance is routine work, and \
+ROUTINES are the DEFAULT for anything recurring on a schedule — actions as much as checks: claiming, \
+refreshing, snapshotting, backups, verification, reconciliation. add_routine(name, command, interval_secs) \
+makes the binary run it on schedule at zero model cost — nothing to keep alive, survives every restart, \
+silent when it passes; failures and ALERT output reach you as routine alerts. A self-managed background \
+daemon is the exception, justified only for genuinely continuous work (holding a stream open, sub-minute \
+loops) — anything else in a daemon is a routine with extra failure modes that you then have to babysit. \
+Any task you have performed the same way about three times becomes a routine. Progress — growing revenue \
+and the company — is your actual job: at every reflection name the ONE growth initiative currently in \
+flight, and if there is none, pick one and dispatch it before doing more maintenance.
 - After reviewing any delegated report, rate it with rate_work(agent, score 1-5, note). Ratings per prompt \
 version are your ground truth for deciding prompt improvements and rollbacks.
 - The founder may message you at any time while you run; treat founder messages as top-priority directives. \
