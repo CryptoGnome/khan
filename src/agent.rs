@@ -363,7 +363,7 @@ Drop superseded detail, resolved dead ends, and chatter.",
     /// Run one employee's loop to completion on a task; returns their report.
     /// Takes &self so several employees can run concurrently (delegate_parallel).
     async fn run_employee(&self, name: &str, task: &str) -> String {
-        let Some((role, prompt_name, model, hist_json)) = self.ctx.store.load_agent(name) else {
+        let Some((mut role, mut prompt_name, mut model, hist_json)) = self.ctx.store.load_agent(name) else {
             return format!("ERROR: no such employee '{name}'. hire them first or check list_team.");
         };
         let sys = self
@@ -391,11 +391,23 @@ Drop superseded detail, resolved dead ends, and chatter.",
         history.push(Message::text("user", format!("New task from the CEO:\n{task}")));
 
         let mut report = String::from("(employee stopped without a report)");
+        let mut fired = false;
 
         for _ in 0..self.ctx.cfg.employee_max_iters {
             if self.stop.load(Ordering::Relaxed) {
                 report = "(interrupted by shutdown)".into();
                 break;
+            }
+            // A fire or re-hire mid-task takes effect at the next turn: re-read the
+            // live record so a stale in-memory copy can't keep running on the old
+            // model, and a fired employee's task ends instead of finishing as a zombie.
+            match self.ctx.store.load_agent(name) {
+                Some((r, p, m, _)) => (role, prompt_name, model) = (r, p, m),
+                None => {
+                    report = format!("(stopped mid-task: {name} was fired)");
+                    fired = true;
+                    break;
+                }
             }
             self.maybe_compact(name, &model, &mut history).await;
             // Rebuilt every iteration so custom tools created anywhere show up immediately.
@@ -450,8 +462,12 @@ Drop superseded detail, resolved dead ends, and chatter.",
                 break;
             }
         }
-        let h = serde_json::to_string(&history).unwrap_or_else(|_| "[]".into());
-        self.ctx.store.save_agent(name, &role, &prompt_name, &model, &h);
+        // A fired employee's task must not write back: save_agent would resurrect
+        // the record (active=1) and clobber any re-hire's fresh state.
+        if !fired {
+            let h = serde_json::to_string(&history).unwrap_or_else(|_| "[]".into());
+            self.ctx.store.save_agent(name, &role, &prompt_name, &model, &h);
+        }
         self.log_line(name, "report", &report);
         report
     }
@@ -561,7 +577,26 @@ Drop superseded detail, resolved dead ends, and chatter.",
                 format!("rated {agent}: {score}/5")
             }
             "fire" => {
-                if self.ctx.store.fire_agent(s(a, "name")) { "fired".into() } else { "no such employee".into() }
+                let name = s(a, "name");
+                let fired = self.ctx.store.fire_agent(name);
+                // Cancel their in-flight background task too — otherwise it keeps
+                // running as a zombie on the model it loaded at dispatch time.
+                let mut aborted = false;
+                self.pending.lock().await.retain(|t| {
+                    if t.agent == name {
+                        t.handle.abort();
+                        aborted = true;
+                        false
+                    } else {
+                        true
+                    }
+                });
+                match (fired, aborted) {
+                    (true, true) => "fired; their in-flight background task was cancelled".into(),
+                    (true, false) => "fired".into(),
+                    (false, true) => "no such employee, but a stale background task under that name was cancelled".into(),
+                    (false, false) => "no such employee".into(),
+                }
             }
             "list_team" => {
                 let team = self.ctx.store.list_agents();
