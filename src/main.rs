@@ -274,13 +274,52 @@ mod tests {
         let mut inflight = std::collections::HashMap::new();
         inflight.insert(listings, 2usize);
         let board = store.objectives_board(&inflight);
+        // Ordered by rank under the READY header; the done objective is off the board.
         let lines: Vec<&str> = board.lines().collect();
-        // Ordered by rank; the done objective is off the board.
-        assert_eq!(lines.len(), 2);
-        assert!(lines[0].contains("company email") && lines[0].contains("rank 1"));
-        assert!(lines[0].contains("0 task(s) in flight") && lines[0].contains("NO PLAN YET"));
-        assert!(lines[1].contains("2 task(s) in flight") && !lines[1].contains("NO PLAN YET"));
+        assert_eq!(lines.len(), 3);
+        assert!(lines[0].starts_with("READY"));
+        assert!(lines[1].contains("company email") && lines[1].contains("rank 1"));
+        assert!(lines[1].contains("0 task(s) in flight") && lines[1].contains("UNSTAFFED") && lines[1].contains("NO PLAN YET"));
+        assert!(lines[2].contains("2 task(s) in flight") && !lines[2].contains("NO PLAN YET") && !lines[2].contains("UNSTAFFED"));
+        assert!(!board.contains("BLOCKED"));
         let _ = email;
+    }
+
+    #[test]
+    fn blocked_objectives_render_apart_and_unblock_when_done() {
+        let store = crate::state::Store::open(":memory:").unwrap();
+        let phone = store.add_objective("buy phone number", 1);
+        let email = store.add_objective("company email", 2);
+        let press = store.add_objective("press send", 3);
+        assert!(store.set_objective_blockers(email, &format!("#{phone}")));
+        assert!(store.set_objective_blockers(press, &format!("{phone},{email}")));
+        let board = store.objectives_board(&std::collections::HashMap::new());
+        // Blocked section lists both dependents with their blockers; no pressure
+        // warnings on blocked lines despite zero staffing.
+        assert!(board.contains("BLOCKED"));
+        let blocked_part = board.split("BLOCKED").nth(1).unwrap();
+        assert!(blocked_part.contains("company email") && blocked_part.contains("buy phone number"));
+        assert!(blocked_part.contains("press send"));
+        assert!(!blocked_part.contains("UNSTAFFED"));
+        // Garbage blockers are ignored rather than blocking forever.
+        let junk = store.add_objective("junk-blocked", 4);
+        assert!(store.set_objective_blockers(junk, "999,abc"));
+        let board = store.objectives_board(&std::collections::HashMap::new());
+        assert!(board.split("BLOCKED").next().unwrap().contains("junk-blocked"));
+        // Completing phone frees email (its only blocker) but not press (still waits on email).
+        assert!(store.update_objective(phone, None, None, None, None, Some("done")));
+        let freed = store.newly_ready(phone);
+        assert_eq!(freed.len(), 1);
+        assert_eq!(freed[0].0, email);
+        let board = store.objectives_board(&std::collections::HashMap::new());
+        let ready_part = board.split("BLOCKED").next().unwrap().to_string();
+        assert!(ready_part.contains("company email"));
+        assert!(board.split("BLOCKED").nth(1).unwrap().contains("press send"));
+        // Completing email then frees press.
+        assert!(store.update_objective(email, None, None, None, None, Some("done")));
+        let freed = store.newly_ready(email);
+        assert_eq!(freed.len(), 1);
+        assert_eq!(freed[0].0, press);
     }
 
     #[test]

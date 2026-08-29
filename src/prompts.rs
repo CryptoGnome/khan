@@ -82,7 +82,10 @@ objective is never unstaffed while lower-ranked work runs. Any objective that ne
 plan first, produced by a thinking model (dispatch a planner on bu0y/grok46 or better, or step your own seat up): \
 the premise verified per clause 9, the milestones, who does each part, and who must be hired. Store the plan on \
 the objective. Jumping straight into building feels fast and is how a false premise or a dead end eats a whole \
-day.";
+day. Declare dependencies on the board instead of discovering them at walls: work that needs an account or \
+artifact another objective produces is BLOCKED, not hard — mark it blocked_by and spend zero hands on it. The \
+allocation rule is breadth-first: every READY objective staffed before any one gets a second team, and the \
+moment a blocker falls, its dependents get planned and staffed the same turn.";
 
 /// Private infrastructure the company has been given, described by env-var name
 /// only. Appended to every agent's system prompt next to SECURITY, so it survives

@@ -30,13 +30,14 @@ fn ceo_schemas() -> Vec<Value> {
             "agent": {"type": "string"}, "task": {"type": "string"},
             "objective": {"type": "integer", "description": "Objective id from the board this task advances — tag every dispatch so the board shows where the company's hands actually are"}}),
             json!(["agent", "task"])),
-        tool("objectives", "Maintain the OBJECTIVE BOARD — the standing, restart-proof list of every live bet, ranked. It is shown to you every iteration with in-flight counts and staleness, and it is the source of truth for allocation. Actions: add (title, rank — lower rank = more important, 1 is P0), update (id + any of title/rank/plan/note), done (id), drop (id). Store each objective's plan with update once a planner has produced one.", json!({
+        tool("objectives", "Maintain the OBJECTIVE BOARD — the standing, restart-proof list of every live bet, ranked. It is shown to you every iteration with in-flight counts and staleness, and it is the source of truth for allocation. Actions: add (title, rank — lower rank = more important, 1 is P0), update (id + any of title/rank/plan/note/blocked_by), done (id), drop (id). Store each objective's plan with update once a planner has produced one. Declare dependencies honestly with blocked_by — blocked objectives are exempt from staffing pressure, and completing a blocker automatically surfaces its dependents as READY.", json!({
             "action": {"type": "string", "enum": ["add", "update", "done", "drop"]},
             "id": {"type": "integer"},
             "title": {"type": "string"},
             "rank": {"type": "integer", "description": "1 = most important. Rank every live bet honestly; ties are fine."},
             "plan": {"type": "string", "description": "The current plan: premise check, milestones, staffing. Written by a planning dispatch on a reasoning model, stored here."},
-            "note": {"type": "string", "description": "One-line status note shown on the board"}}),
+            "note": {"type": "string", "description": "One-line status note shown on the board"},
+            "blocked_by": {"type": "string", "description": "Comma-separated objective ids this waits on (e.g. '3' or '2,3'); empty string clears. Work that needs an account or artifact another objective produces is BLOCKED, not hard."}}),
             json!(["action"])),
         tool("team_status", "List background tasks started with dispatch: who is still working and on what.", json!({}), json!([])),
         tool("add_routine", "Schedule a shell command the binary runs itself, forever, at zero model cost. Silent when it passes; if it exits nonzero, times out, or prints ALERT, the output lands in your inbox as a routine alert. Any check you have performed the same way roughly three times belongs here — verification scripts, health checks, reconciliation. Same name = replace.", json!({
@@ -767,15 +768,18 @@ Drop superseded detail, resolved dead ends, and chatter.",
                         }
                         let rank = a["rank"].as_i64().unwrap_or(100);
                         let id = self.ctx.store.add_objective(title, rank);
-                        // Plans and notes supplied at add time must not be dropped.
+                        // Plans, notes and blockers supplied at add time must not be dropped.
                         if a["plan"].as_str().is_some() || a["note"].as_str().is_some() {
                             self.ctx.store.update_objective(id, None, None, a["plan"].as_str(), a["note"].as_str(), None);
+                        }
+                        if let Some(b) = a["blocked_by"].as_str() {
+                            self.ctx.store.set_objective_blockers(id, b);
                         }
                         format!("objective #{id} added at rank {rank}. Tag dispatches with objective:{id} so the board tracks its progress; if it needs more than one dispatch, get a plan onto it first.")
                     }
                     "update" => {
                         let Some(id) = a["id"].as_i64() else { return "ERROR: update needs id".into() };
-                        let ok = self.ctx.store.update_objective(
+                        let mut ok = self.ctx.store.update_objective(
                             id,
                             a["title"].as_str(),
                             a["rank"].as_i64(),
@@ -783,13 +787,29 @@ Drop superseded detail, resolved dead ends, and chatter.",
                             a["note"].as_str(),
                             None,
                         );
+                        if let Some(b) = a["blocked_by"].as_str() {
+                            ok |= self.ctx.store.set_objective_blockers(id, b);
+                        }
                         if ok { format!("objective #{id} updated") } else { format!("ERROR: no objective #{id} (or nothing to change)") }
                     }
                     "done" | "drop" => {
                         let Some(id) = a["id"].as_i64() else { return "ERROR: needs id".into() };
                         let status = if s(a, "action") == "done" { "done" } else { "dropped" };
                         if self.ctx.store.update_objective(id, None, None, None, None, Some(status)) {
-                            format!("objective #{id} marked {status}")
+                            // The unblock is an event, delivered the turn it happens.
+                            let freed = self.ctx.store.newly_ready(id);
+                            if freed.is_empty() {
+                                format!("objective #{id} marked {status}")
+                            } else {
+                                let list = freed
+                                    .iter()
+                                    .map(|(fid, t)| format!("#{fid} ({t})"))
+                                    .collect::<Vec<_>>()
+                                    .join(", ");
+                                format!(
+                                    "objective #{id} marked {status} — UNBLOCKED: {list}. These are now READY and unstaffed; plan and staff them now."
+                                )
+                            }
                         } else {
                             format!("ERROR: no objective #{id}")
                         }
@@ -1109,11 +1129,12 @@ history does not."
                 } else {
                     format!(
                         "[Objective board — source of truth for allocation]\n{board}\n\
-Allocate by rank: the top objective is never at 0 tasks in flight while lower-ranked work has hands. \
-NO PLAN YET on a multi-step objective means plan first — dispatch a planner on a reasoning model \
-(bu0y/grok46 or better) to produce premise check, milestones and staffing, then store it with \
-objectives(update, plan). Tag every dispatch with objective:<id>. Keep the board honest: add new bets, \
-mark done what is done."
+Staff every READY objective before adding more hands to any one of them — parallel bets, not a queue. \
+BLOCKED objectives cost nothing and need nothing; finishing their blocker is how they start, and the \
+moment one falls its dependents surface as READY. NO PLAN YET on a multi-step objective means plan \
+first — dispatch a planner on a reasoning model (bu0y/grok46 or better) to produce premise check, \
+milestones and staffing, then store it with objectives(update, plan). Tag every dispatch with \
+objective:<id>. Keep the board honest: add new bets, declare blocked_by, mark done what is done."
                     )
                 };
                 req.push(Message::text("user", body));
