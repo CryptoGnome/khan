@@ -617,6 +617,30 @@ mod tests {
         assert!(store.team_capacity_text(40).contains("39 seats free"));
     }
 
+    /// The CEO having the no-handoff rule was not enough: it dispatched "build a
+    /// founder-followable day-of runbook" and the webmaster built it, having
+    /// nothing in its own context to object with.
+    #[test]
+    fn employees_are_told_they_have_no_founder_to_hand_work_to() {
+        use crate::prompts::{ceo_system, employee_system};
+        let sys = employee_system("You are {name}, a webmaster.");
+        for must in [
+            "no founder to hand work to",
+            "never deliver a checklist",
+            "A wall counts only once you have actually hit it",
+        ] {
+            assert!(sys.contains(must), "worker mandate lost {must}");
+        }
+        assert!(sys.contains("SECURITY RULES"), "employees keep the security rules");
+        // The employee mandate is not the CEO's: an employee must not be told to
+        // hire, staff up or run two tracks — that is the CEO's job, and handing it
+        // to everyone would have the whole company trying to run the company.
+        for ceo_only in ["hire(manager: true)", "a team of four is not a company", "You DIRECT"] {
+            assert!(!sys.contains(ceo_only), "employee must not get CEO clause {ceo_only}");
+            assert!(ceo_system("x").contains(ceo_only), "CEO must still have {ceo_only}");
+        }
+    }
+
     #[test]
     fn tool_call_roundtrip() {
         let raw = r#"{"role":"assistant","content":null,

@@ -94,10 +94,31 @@ skill so nobody rediscovers it.",
     s
 }
 
+/// The employee counterpart to MANDATE, appended from code the same way.
+///
+/// The CEO having the rule was not enough: it dispatched "build a founder-
+/// followable day-of runbook" and the webmaster built it, because nothing in an
+/// employee's context said that work whose last step belongs to a person outside
+/// the company is unfinished work. Employees also get the memory that called
+/// those levers founder-walled injected next to every matching task, so they need
+/// the counterweight in the same place the CEO has it.
+pub const WORKER_MANDATE: &str = "\n\n--- STANDING MANDATE (system-enforced; survives every prompt rewrite) ---\n\
+1. You have no founder to hand work to. Work that only completes when someone outside the company acts on it is \
+not finished work. Do the thing itself, or report exactly what stopped you — never deliver a checklist, a runbook \
+or a ready-to-paste asset for a person to execute as though it were the result.\n\
+2. A wall counts only once you have actually hit it. Record what you tried and what came back. Assuming something \
+needs an account, a credential or a human is a guess, not a block — test it first. If the company genuinely lacks \
+an account or a tool you need, say so plainly in your report so it can be obtained.";
+
 /// The CEO's full system prompt: its own evolvable prompt first, then the parts
 /// that come from code on every turn and cannot be edited away.
 pub fn ceo_system(stored: &str) -> String {
     stored.to_string() + MANDATE + SECURITY + &environment()
+}
+
+/// An employee's full system prompt, assembled the same way as the CEO's.
+pub fn employee_system(stored: &str) -> String {
+    stored.to_string() + WORKER_MANDATE + SECURITY + &environment()
 }
 
 /// Seed the prompts table on first run. Live prompts are read from the DB and

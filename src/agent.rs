@@ -419,14 +419,15 @@ Drop superseded detail, resolved dead ends, and chatter.",
         let Some((mut role, mut prompt_name, mut model, hist_json)) = self.ctx.store.load_agent(name) else {
             return format!("ERROR: no such employee '{name}'. hire them first or check list_team.");
         };
-        let sys = self
-            .ctx
-            .store
-            .get_prompt(&prompt_name)
-            .unwrap_or_default()
-            .replace("{name}", name)
-            .replace("{role}", &role)
-            + crate::prompts::SECURITY + &crate::prompts::environment();
+        let sys = crate::prompts::employee_system(
+            &self
+                .ctx
+                .store
+                .get_prompt(&prompt_name)
+                .unwrap_or_default()
+                .replace("{name}", name)
+                .replace("{role}", &role),
+        );
         let mut history: Vec<Message> = serde_json::from_str(&hist_json).unwrap_or_default();
         if history.is_empty() {
             history.push(Message::text("system", sys));
