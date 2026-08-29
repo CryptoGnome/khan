@@ -316,6 +316,18 @@ impl Client {
             "model": model_id, "messages": messages, "max_tokens": max_tokens,
             "stream": true, "stream_options": {"include_usage": true}
         });
+        // A message with neither content nor tool_calls (a model that returned
+        // nothing) serializes without a content field, and strict providers
+        // reject the whole request: "message.content must be a string (null is
+        // only valid with tool_calls)". Histories already hold such messages,
+        // so patch at request time rather than at message creation.
+        if let Some(msgs) = body["messages"].as_array_mut() {
+            for m in msgs {
+                if m.get("content").is_none() && m.get("tool_calls").is_none() {
+                    m["content"] = Value::String(String::new());
+                }
+            }
+        }
         if !tools.is_empty() {
             body["tools"] = Value::Array(tools.to_vec());
         }

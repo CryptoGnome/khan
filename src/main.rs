@@ -231,6 +231,17 @@ mod tests {
     }
 
     #[test]
+    fn empty_assistant_message_gets_string_content() {
+        // A model that returns nothing leaves content and tool_calls both None.
+        // Strict providers reject the omitted field ("message.content must be a
+        // string"), and such messages already sit in persisted histories — so
+        // build_request must backfill "" at request time.
+        let empty = Message { role: "assistant".into(), content: None, tool_calls: None, tool_call_id: None, reasoning: None };
+        let body = Client::build_request("gpt-x", &[Message::text("user", "hi"), empty], &[], 1024);
+        assert_eq!(body["messages"][1]["content"], "");
+    }
+
+    #[test]
     fn sensitive_env_vars_are_scrubbed() {
         use crate::tools::shell::is_sensitive_env as sens;
         for name in ["OPENROUTER_API_KEY", "BU0Y_API_KEY", "MY_TOKEN", "MY_SECRET", "DB_PASSWORD", "aws_credential_file"] {
