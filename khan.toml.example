@@ -22,11 +22,12 @@ ceo_models = [
   "bu0y/claudeopus5",    # ~54x — deepest reasoning, slow; for high-stakes stretches
 ]
 # Cheap model for internal work like history summarization (defaults to ceo_model).
-# NOT the "free" auto-router: it fails on essentially every call and only works
-# because khan then falls back, which wastes a round trip each time. Name a
-# concrete free model instead. minimax-m3 has a 1M context, which suits
-# summarizing a long history in one pass.
-utility_model = "openrouter/minimax/minimax-m3:free"
+# Never a free model here: compaction is what keeps every other call cheap, and
+# free-tier 429s were blocking it at exactly the moment histories were longest —
+# uncompacted history then multiplies the cost of every premium-seat call it
+# feeds into. deepseekv4flash costs ~$0.002/call, fills from two marketplaces,
+# and has a 1M context, which suits summarizing a long history in one pass.
+utility_model = "bu0y/deepseekv4flash"
 
 # Directory agents work in (created automatically)
 workspace = "workspace"
