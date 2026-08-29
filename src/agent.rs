@@ -250,7 +250,13 @@ impl Orchestrator {
                 if truncation(&e).is_some() {
                     return Err(e);
                 }
-                for alt in self.ctx.cfg.fallback_ids_for(model) {
+                // Bounded on purpose. The paid ladder grew from two entries to
+                // seven, and during a provider outage every rung fails slowly — up
+                // to four attempts each against a 300s timeout — so walking the whole
+                // list turns one bad call into a very long stall. Three is enough to
+                // route around a single sick model; a wider outage is better handled
+                // by the loop coming back fresh than by one call grinding through it.
+                for alt in self.ctx.cfg.fallback_ids_for(model).into_iter().take(3) {
                     if alt == model {
                         continue;
                     }

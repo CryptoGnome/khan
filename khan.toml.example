@@ -1,7 +1,14 @@
 # Copy to khan.toml and edit. API keys come from env vars, never this file.
 
 # Model the CEO runs on, as "provider/model". It must support tool calling.
-ceo_model = "bu0y/deepseekv4flash0731"
+#
+# Deliberately the UNPINNED slug. A dated pin like deepseekv4flash0731 fills from
+# a single marketplace, and when that book empties every request returns "no seller
+# is currently offering this model" — measured 0/8 during one such window while the
+# unpinned slug scored 8/8 in the same minute. The router can only fail over
+# between marketplaces when the model is priced on more than one. Worth 1.37x the
+# per-token cost: the pinned variant took the whole company offline.
+ceo_model = "bu0y/deepseekv4flash"
 # Cheap model for internal work like history summarization (defaults to ceo_model).
 # NOT the "free" auto-router: it fails on essentially every call and only works
 # because khan then falls back, which wastes a round trip each time. Name a
@@ -54,15 +61,22 @@ api_key_env = "BU0Y_API_KEY"
 # the bill here (roughly 40x more input than output tokens), so the input figure
 # is the one to weigh.
 paid_models = [
-  "deepseekv4flash0731",        # 1.0x / 1.0x  — default, 20.9s avg over 3480 calls
-  "qwen3235ba22b2507",          # 0.5x / 1.1x  — cheaper than the default, 3.4s
-  "deepseekv32",                # 1.5x / 1.1x  — stronger reasoning, 4.4s
+  "deepseekv4flash",            # 1.37x — default. Priced on two marketplaces, so the
+                                #   router can fail over; the pinned -0731 cannot.
+  "deepseekv32",                # 1.5x / 1.1x  — stronger reasoning, 4.4s, 0 failures
   "minimaxm25",                 # 1.6x / 2.9x  — 3.6s
   "glm5",                       # 3.6x / 5.8x  — 4.8s
   "kimik2thinking",             # 3.6x / 7.6x  — reasoning model for hard calls, 5.2s
-  "qwen3235ba22bthinking2507",  # 3.5x / 17.4x — deep reasoning; output cost is steep
+  "deepseekv4flash0731",        # 1.0x — cheapest, but single-marketplace: it is the
+                                #   one that stalled the company, so it sits late.
   "glm53flash",                 # 18.1x / 30.2x — 0 failures in 203 calls, but pricey
 ]
+# Removed after measurement, not on principle:
+#   qwen3235ba22b2507 answered a toy prompt in 3.4s and looked like the bargain of
+#   the list, then failed 3 of 4 real dispatches with 524 timeouts averaging 96.8s.
+#   Streaming does not save it — a large agent context takes longer to first token
+#   than the edge will wait. Its sibling qwen3235ba22bthinking2507 is untested under
+#   real load and is left out for the same reason until something measures it.
 
 [[providers]]
 name = "openrouter"

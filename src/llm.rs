@@ -432,13 +432,20 @@ impl Client {
         let body = Self::build_request(&model_id, messages, tools, max_out);
 
         let mut last_err = String::new();
+        // A 503 during a bad window means "retry shortly", and the gateway names how
+        // long. Honouring that beats guessing at an exponential curve.
+        let mut backoff: Option<Duration> = None;
         for attempt in 0..4u32 {
             if attempt > 0 {
                 // Announce every retry. Each attempt can block for the full 300s
                 // timeout, so without this the loop sits silent for up to ~20
                 // minutes and a slow provider is indistinguishable from a hang.
                 eprintln!("llm: {model} attempt {}/4 failed, retrying — {last_err}", attempt);
-                tokio::time::sleep(Duration::from_secs(2u64.pow(attempt))).await;
+                let wait = backoff
+                    .take()
+                    .unwrap_or_else(|| Duration::from_secs(2u64.pow(attempt)))
+                    .min(Duration::from_secs(30));
+                tokio::time::sleep(wait).await;
             }
             // App attribution (used by OpenRouter's dashboard; harmless elsewhere).
             let resp = self
@@ -488,6 +495,11 @@ impl Client {
                             "{model} upstream timed out mid-generation — not retried, the request may already be billed: {}",
                             text.chars().take(200).collect::<String>()
                         );
+                    }
+                    // 503 is the gateway saying the market is thin right now and to
+                    // come back in a moment — a wait, not a fault to diagnose.
+                    if status.as_u16() == 503 {
+                        backoff = reset;
                     }
                     last_err = format!("{status}: {}", text.chars().take(300).collect::<String>());
                     continue;
