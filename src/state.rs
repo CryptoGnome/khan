@@ -242,6 +242,9 @@ impl Store {
         // Migration: objectives can declare what blocks them; blockedness is
         // derived at render time so it can never go stale.
         let _ = conn.execute("ALTER TABLE objectives ADD COLUMN blocked_by TEXT NOT NULL DEFAULT ''", []);
+        // Migration: objectives can have an owning manager; their workers'
+        // reports route to the owner instead of the CEO.
+        let _ = conn.execute("ALTER TABLE objectives ADD COLUMN owner TEXT NOT NULL DEFAULT ''", []);
         Ok(Store { conn: Mutex::new(conn), log_tx: broadcast::channel(512).0 })
     }
 
@@ -332,6 +335,34 @@ impl Store {
         changed > 0
     }
 
+    /// Assign (or clear, with "") the manager who owns an objective. Workers'
+    /// reports on an owned objective route to the owner instead of the CEO.
+    pub fn set_objective_owner(&self, id: i64, owner: &str) -> bool {
+        let now = chrono::Utc::now().to_rfc3339();
+        let c = self.conn.lock().unwrap();
+        c.execute("UPDATE objectives SET owner=?2, updated_at=?3 WHERE id=?1", params![id, owner, now])
+            .unwrap_or(0)
+            > 0
+    }
+
+    /// Owner of an active objective, if it has one.
+    pub fn objective_owner(&self, id: i64) -> Option<String> {
+        let c = self.conn.lock().unwrap();
+        c.query_row(
+            "SELECT owner FROM objectives WHERE id=?1 AND status='active'",
+            params![id],
+            |r| r.get::<_, String>(0),
+        )
+        .ok()
+        .filter(|o| !o.is_empty())
+    }
+
+    /// A manager left the company: their objectives revert to CEO routing.
+    pub fn clear_objective_owner(&self, name: &str) -> usize {
+        let c = self.conn.lock().unwrap();
+        c.execute("UPDATE objectives SET owner='' WHERE owner=?1", params![name]).unwrap_or(0)
+    }
+
     /// Set what an objective waits on. Normalized to digits-and-commas; empty clears.
     pub fn set_objective_blockers(&self, id: i64, blocked_by: &str) -> bool {
         let clean: String = blocked_by
@@ -391,14 +422,14 @@ impl Store {
     pub fn objectives_board(&self, inflight: &std::collections::HashMap<i64, usize>) -> String {
         let c = self.conn.lock().unwrap();
         let Ok(mut stmt) = c.prepare(
-            "SELECT id, title, rank, plan, note, blocked_by, updated_at FROM objectives
+            "SELECT id, title, rank, plan, note, blocked_by, updated_at, owner FROM objectives
              WHERE status='active' ORDER BY rank, id",
         ) else {
             return String::new();
         };
-        let rows: Vec<(i64, String, i64, String, String, String, String)> = stmt
+        let rows: Vec<(i64, String, i64, String, String, String, String, String)> = stmt
             .query_map([], |r| {
-                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?))
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?))
             })
             .map(|it| it.filter_map(|x| x.ok()).collect())
             .unwrap_or_default();
@@ -408,7 +439,7 @@ impl Store {
             rows.iter().map(|r| (r.0, r.1.as_str())).collect();
         let now = chrono::Utc::now();
         let (mut ready, mut blocked) = (Vec::new(), Vec::new());
-        for (id, title, rank, plan, note, blocked_by, updated) in &rows {
+        for (id, title, rank, plan, note, blocked_by, updated, owner) in &rows {
             let waiting = Self::unresolved(blocked_by, &active);
             if waiting.is_empty() {
                 // Warnings live only here: a blocked objective is exempt from
@@ -420,6 +451,9 @@ impl Store {
                 let mut line = format!(
                     "#{id} [rank {rank}] {title} — {busy} task(s) in flight, last advanced {mins}m ago"
                 );
+                if !owner.is_empty() {
+                    line.push_str(&format!(" — owned by {owner}"));
+                }
                 if busy == 0 {
                     line.push_str(" — UNSTAFFED");
                 }

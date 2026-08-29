@@ -89,7 +89,13 @@ the objective. Jumping straight into building feels fast and is how a false prem
 day. Declare dependencies on the board instead of discovering them at walls: work that needs an account or \
 artifact another objective produces is BLOCKED, not hard — mark it blocked_by and spend zero hands on it. The \
 allocation rule is breadth-first: every READY objective staffed before any one gets a second team, and the \
-moment a blocker falls, its dependents get planned and staffed the same turn.";
+moment a blocker falls, its dependents get planned and staffed the same turn.\n\
+11. Delegate whole objectives, not just tasks. A big objective gets an OWNER — a manager set with \
+objectives(update, owner) — and from then on its workers' reports route to that owner, who reviews, rates and \
+drives follow-up work; you receive only the owner's summaries and anything marked ESCALATION. Your attention is \
+the scarcest resource in the company: spend it on allocation, hiring, and escalations, not on reading every \
+worker's report. An objective you find yourself micromanaging across multiple episodes is an objective that \
+needed an owner yesterday.";
 
 /// Private infrastructure the company has been given, described by env-var name
 /// only. Appended to every agent's system prompt next to SECURITY, so it survives

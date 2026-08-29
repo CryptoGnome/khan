@@ -37,7 +37,8 @@ fn ceo_schemas() -> Vec<Value> {
             "rank": {"type": "integer", "description": "1 = most important. Rank every live bet honestly; ties are fine."},
             "plan": {"type": "string", "description": "The current plan: premise check, milestones, staffing. Written by a planning dispatch on a reasoning model, stored here."},
             "note": {"type": "string", "description": "One-line status note shown on the board"},
-            "blocked_by": {"type": "string", "description": "Comma-separated objective ids this waits on (e.g. '3' or '2,3'); empty string clears. Work that needs an account or artifact another objective produces is BLOCKED, not hard."}}),
+            "blocked_by": {"type": "string", "description": "Comma-separated objective ids this waits on (e.g. '3' or '2,3'); empty string clears. Work that needs an account or artifact another objective produces is BLOCKED, not hard."},
+            "owner": {"type": "string", "description": "Manager who OWNS this objective; empty string clears. Workers' reports on an owned objective route to the owner, who reviews, rates and drives follow-up work — you get their summary and escalations only. Give every big objective an owner so your attention stays on allocation."}}),
             json!(["action"])),
         tool("team_status", "List background tasks started with dispatch: who is still working and on what.", json!({}), json!([])),
         tool("add_routine", "Schedule a shell command the binary runs itself, forever, at zero model cost. Silent when it passes; if it exits nonzero, times out, or prints ALERT, the output lands in your inbox as a routine alert. Any check you have performed the same way roughly three times belongs here — verification scripts, health checks, reconciliation. Same name = replace.", json!({
@@ -738,6 +739,9 @@ Drop superseded detail, resolved dead ends, and chatter.",
             "fire" => {
                 let name = s(a, "name");
                 let fired = self.ctx.store.fire_agent(name);
+                // Their objectives revert to CEO routing — a dead owner must
+                // never silently swallow reports.
+                let orphaned = self.ctx.store.clear_objective_owner(name);
                 // Cancel their in-flight background task too — otherwise it keeps
                 // running as a zombie on the model it loaded at dispatch time.
                 let mut aborted = false;
@@ -750,12 +754,16 @@ Drop superseded detail, resolved dead ends, and chatter.",
                         true
                     }
                 });
-                match (fired, aborted) {
-                    (true, true) => "fired; their in-flight background task was cancelled".into(),
-                    (true, false) => "fired".into(),
-                    (false, true) => "no such employee, but a stale background task under that name was cancelled".into(),
-                    (false, false) => "no such employee".into(),
+                let mut out = match (fired, aborted) {
+                    (true, true) => "fired; their in-flight background task was cancelled".to_string(),
+                    (true, false) => "fired".to_string(),
+                    (false, true) => "no such employee, but a stale background task under that name was cancelled".to_string(),
+                    (false, false) => "no such employee".to_string(),
+                };
+                if orphaned > 0 {
+                    out.push_str(&format!("; {orphaned} objective(s) they owned now route to you — reassign or run them yourself"));
                 }
+                out
             }
             "list_team" => {
                 let team = self.ctx.store.list_agents();
@@ -805,6 +813,11 @@ Drop superseded detail, resolved dead ends, and chatter.",
                         if let Some(b) = a["blocked_by"].as_str() {
                             self.ctx.store.set_objective_blockers(id, b);
                         }
+                        if let Some(o) = a["owner"].as_str() {
+                            if let Err(e) = self.assign_owner(id, o) {
+                                return e;
+                            }
+                        }
                         format!("objective #{id} added at rank {rank}. Tag dispatches with objective:{id} so the board tracks its progress; if it needs more than one dispatch, get a plan onto it first.")
                     }
                     "update" => {
@@ -819,6 +832,12 @@ Drop superseded detail, resolved dead ends, and chatter.",
                         );
                         if let Some(b) = a["blocked_by"].as_str() {
                             ok |= self.ctx.store.set_objective_blockers(id, b);
+                        }
+                        if let Some(o) = a["owner"].as_str() {
+                            match self.assign_owner(id, o) {
+                                Ok(changed) => ok |= changed,
+                                Err(e) => return e,
+                            }
                         }
                         if ok { format!("objective #{id} updated") } else { format!("ERROR: no objective #{id} (or nothing to change)") }
                     }
@@ -916,8 +935,12 @@ Drop superseded detail, resolved dead ends, and chatter.",
     /// dispatch, a founder message, a routine alert — or the heartbeat deadline,
     /// which fires a proactive strategy turn even in total silence. Returns true
     /// when the wake reason was the heartbeat. When nothing at all is dispatched
-    /// the wait is skipped: an idle company should be staffing, not sleeping.
-    async fn wait_for_event(self: &Arc<Self>) -> bool {
+    /// AND `empty_wake` is set the wait is skipped: an idle company should be
+    /// staffing, not sleeping. The caller arms `empty_wake` only once per idle
+    /// stretch — an episode that just declined to dispatch anything must not be
+    /// re-woken instantly to be asked the same question (measured live: a
+    /// re-orientation spin, one full episode every ~30s).
+    async fn wait_for_event(self: &Arc<Self>, empty_wake: bool) -> bool {
         let mut announced = false;
         loop {
             if self.stop.load(Ordering::Relaxed) {
@@ -928,7 +951,7 @@ Drop superseded detail, resolved dead ends, and chatter.",
             }
             {
                 let p = self.pending.lock().await;
-                if p.is_empty() || p.iter().any(|t| t.handle.is_finished()) {
+                if (empty_wake && p.is_empty()) || p.iter().any(|t| t.handle.is_finished()) {
                     return false;
                 }
             }
@@ -947,9 +970,25 @@ Drop superseded detail, resolved dead ends, and chatter.",
         }
     }
 
-    /// Deliver reports from finished background dispatches into the CEO's
-    /// history, the same way founder messages arrive.
-    async fn harvest_dispatches(&self, history: &mut Vec<Message>) {
+    /// Validate and set an objective's owner. Empty clears; anyone else must be
+    /// an existing manager. Ok(changed) or Err(message-for-the-model).
+    fn assign_owner(&self, id: i64, owner: &str) -> std::result::Result<bool, String> {
+        if !owner.is_empty() {
+            if self.ctx.store.load_agent(owner).is_none() {
+                return Err(format!("ERROR: no such employee '{owner}' to own objective #{id}. hire them first (manager: true)."));
+            }
+            if !self.ctx.store.is_manager(owner) {
+                return Err(format!("ERROR: {owner} is not a manager — only managers can own objectives. Hire a manager for this, or promote by hiring a new manager."));
+            }
+        }
+        Ok(self.ctx.store.set_objective_owner(id, owner))
+    }
+
+    /// Deliver reports from finished background dispatches. A worker's report
+    /// on an objective with an owning manager routes to that manager (as a new
+    /// background review task) instead of the CEO; everything else — including
+    /// the manager's own reports and escalations — lands in the CEO's history.
+    async fn harvest_dispatches(self: &Arc<Self>, history: &mut Vec<Message>) {
         let mut pending = self.pending.lock().await;
         let mut i = 0;
         while i < pending.len() {
@@ -962,6 +1001,41 @@ Drop superseded detail, resolved dead ends, and chatter.",
                 .handle
                 .await
                 .unwrap_or_else(|e| format!("(background task crashed: {e})"));
+            // Ownership routing. Guards keep it bounded and safe: never route a
+            // manager's own report (that goes up, not sideways), never route to
+            // an owner who no longer exists or is already mid-task (their saved
+            // history would race), and only to actual managers.
+            let owner = t
+                .objective
+                .and_then(|o| self.ctx.store.objective_owner(o))
+                .filter(|o| {
+                    *o != t.agent
+                        && self.ctx.store.is_manager(o)
+                        && self.ctx.store.load_agent(o).is_some()
+                        && !pending.iter().any(|p| p.agent == *o)
+                });
+            if let (Some(owner), Some(oid)) = (owner, t.objective) {
+                self.log_line(
+                    "CEO",
+                    "routed-report",
+                    &format!("{}'s report on objective #{oid} routed to its owner {owner}", t.agent),
+                );
+                let review = format!(
+                    "[Report on objective #{oid}, which YOU own] {} finished this task: {}\n\nTHEIR REPORT:\n{report}\n\n\
+                     You are the owner: review the work, rate_work it, and drive the objective forward yourself — \
+                     delegate follow-up tasks to your team without waiting for the CEO. \
+                     Your own final report goes to the CEO: keep it a SHORT summary of state and next steps. \
+                     Start it with 'ESCALATION:' only if you need the CEO — spending money, hiring beyond your reach, \
+                     work rated 2 or below, or a decision above your mandate.",
+                    t.agent,
+                    glimpse(&t.task)
+                );
+                let me = Arc::clone(self);
+                let (o2, r2) = (owner.clone(), review.clone());
+                let handle = tokio::spawn(async move { me.run_employee(&o2, &r2).await });
+                pending.push(BackgroundTask { agent: owner, task: review, objective: t.objective, handle });
+                continue;
+            }
             self.log_line("CEO", "background-report", &format!("{} finished their dispatched task", t.agent));
             history.push(Message::text(
                 "user",
@@ -1004,6 +1078,11 @@ Drop superseded detail, resolved dead ends, and chatter.",
 
         let mut iter: u64 = self.ctx.store.kv_get("iteration").and_then(|v| v.parse().ok()).unwrap_or(0);
         let mut first_episode = true;
+        // The nothing-dispatched instant wake is single-shot per idle stretch:
+        // it fires once so an idle company staffs itself, then disarms until
+        // something is actually in flight again. Without this, an episode that
+        // ends without dispatching is re-opened immediately, forever.
+        let mut empty_wake = true;
 
         'episodes: loop {
             if self.stop.load(Ordering::Relaxed) {
@@ -1012,11 +1091,11 @@ Drop superseded detail, resolved dead ends, and chatter.",
             // Between episodes the loop is event-driven: block until a report,
             // founder message or alert exists — or the heartbeat fires a
             // proactive strategy episode. Returns immediately when there is
-            // already something to react to, or when nothing is dispatched at
-            // all (an idle company should be staffing, not sleeping).
+            // already something to react to, or (once) when nothing is
+            // dispatched at all — an idle company should be staffing, not sleeping.
             let mut heartbeat = false;
             if !first_episode {
-                heartbeat = self.wait_for_event().await;
+                heartbeat = self.wait_for_event(empty_wake).await;
                 if self.stop.load(Ordering::Relaxed) {
                     break;
                 }
@@ -1310,7 +1389,10 @@ BLOCKED objectives cost nothing and need nothing; finishing their blocker is how
 moment one falls its dependents surface as READY. NO PLAN YET on a multi-step objective means plan \
 first — dispatch a planner on a reasoning model (bu0y/grok46 or better) to produce premise check, \
 milestones and staffing, then store it with objectives(update, plan). Tag every dispatch with \
-objective:<id>. Keep the board honest: add new bets, declare blocked_by, mark done what is done."
+objective:<id>. Give every big multi-dispatch objective an OWNER (a manager, via objectives(update, owner)): \
+workers' reports then route to the owner, who reviews and drives follow-ups, and you get only their summary \
+and escalations — that is how you run many bets at once without reading every report. \
+Keep the board honest: add new bets, declare blocked_by, mark done what is done."
                     )
                 };
                 req.push(Message::text("user", body));
@@ -1457,6 +1539,10 @@ objective:<id>. Keep the board honest: add new bets, declare blocked_by, mark do
                 )
             });
             self.ctx.store.add_episode(&episode_started, &event_kind, &note, steps as i64);
+            // Re-arm the instant empty wake only while work is in flight: the
+            // next time the company drains to zero it gets exactly one
+            // unprompted staffing episode, then holds for events or heartbeat.
+            empty_wake = !self.pending.lock().await.is_empty();
             self.ctx.store.kv_set("episode_scratch", "");
             self.ctx.store.save_agent("CEO", "CEO", "CEO", &self.current_ceo_model(), "[]");
             self.log_line("CEO", "episode-closed", &format!("[{event_kind}, {steps} step(s)] {}", glimpse(&note)));

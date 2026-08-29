@@ -356,6 +356,32 @@ mod tests {
     }
 
     #[test]
+    fn objective_owners_route_render_and_revert() {
+        let store = crate::state::Store::open(":memory:").unwrap();
+        let o = store.add_objective("email outreach", 1);
+        // No owner yet: routing lookup comes back empty.
+        assert_eq!(store.objective_owner(o), None);
+        assert!(store.set_objective_owner(o, "email-mgr"));
+        assert_eq!(store.objective_owner(o).as_deref(), Some("email-mgr"));
+        // The board shows who owns what.
+        let board = store.objectives_board(&std::collections::HashMap::new());
+        assert!(board.contains("owned by email-mgr"));
+        // A done objective must not route anywhere.
+        assert!(store.update_objective(o, None, None, None, None, Some("done")));
+        assert_eq!(store.objective_owner(o), None);
+        // A fired manager's objectives revert to CEO routing.
+        let o2 = store.add_objective("second bet", 2);
+        store.set_objective_owner(o2, "email-mgr");
+        // Clears every row they owned, the done one included.
+        assert_eq!(store.clear_objective_owner("email-mgr"), 2);
+        assert_eq!(store.objective_owner(o2), None);
+        // Empty owner clears explicitly too.
+        store.set_objective_owner(o2, "other-mgr");
+        assert!(store.set_objective_owner(o2, ""));
+        assert_eq!(store.objective_owner(o2), None);
+    }
+
+    #[test]
     fn tool_health_reports_only_failing_tools() {
         let store = crate::state::Store::open(":memory:").unwrap();
         for _ in 0..3 {
