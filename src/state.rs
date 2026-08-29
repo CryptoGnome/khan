@@ -198,6 +198,13 @@ impl Store {
              CREATE TABLE IF NOT EXISTS model_calls (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL,
                 model TEXT NOT NULL, ms INTEGER NOT NULL, ok INTEGER NOT NULL, err TEXT);
+             CREATE TABLE IF NOT EXISTS routines (
+                name TEXT PRIMARY KEY, command TEXT NOT NULL, interval_secs INTEGER NOT NULL,
+                purpose TEXT, enabled INTEGER NOT NULL DEFAULT 1,
+                last_run INTEGER NOT NULL DEFAULT 0, last_status TEXT);
+             CREATE TABLE IF NOT EXISTS routine_alerts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL,
+                name TEXT NOT NULL, detail TEXT NOT NULL, delivered INTEGER NOT NULL DEFAULT 0);
              CREATE TABLE IF NOT EXISTS tool_defs (
                 name TEXT NOT NULL, version INTEGER NOT NULL, description TEXT NOT NULL,
                 params TEXT NOT NULL, lang TEXT NOT NULL, script TEXT NOT NULL,
@@ -369,6 +376,85 @@ impl Store {
             .map(|it| it.filter_map(|x| x.ok()).collect())
             .unwrap_or_default();
         rows.join("\n")
+    }
+
+    // --- routines (scheduled checks the binary runs itself — zero model cost) ---
+
+    pub fn upsert_routine(&self, name: &str, command: &str, interval_secs: i64, purpose: &str) {
+        let c = self.conn.lock().unwrap();
+        let _ = c.execute(
+            "INSERT INTO routines(name, command, interval_secs, purpose, enabled, last_run)
+             VALUES(?1,?2,?3,?4,1,0)
+             ON CONFLICT(name) DO UPDATE SET command=?2, interval_secs=?3, purpose=?4, enabled=1",
+            params![name, command, interval_secs, purpose],
+        );
+    }
+
+    pub fn delete_routine(&self, name: &str) -> bool {
+        let c = self.conn.lock().unwrap();
+        c.execute("DELETE FROM routines WHERE name=?1", params![name]).map(|n| n > 0).unwrap_or(false)
+    }
+
+    /// (name, command, interval_secs, purpose, last_status) for every routine.
+    pub fn list_routines(&self) -> Vec<(String, String, i64, String, String)> {
+        let c = self.conn.lock().unwrap();
+        let mut stmt = match c.prepare(
+            "SELECT name, command, interval_secs, COALESCE(purpose,''), COALESCE(last_status,'never ran') FROM routines WHERE enabled=1 ORDER BY name",
+        ) {
+            Ok(s) => s,
+            Err(_) => return vec![],
+        };
+        stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))
+            .map(|it| it.filter_map(|x| x.ok()).collect())
+            .unwrap_or_default()
+    }
+
+    /// Routines whose interval has elapsed since their last run, as (name, command).
+    pub fn due_routines(&self, now_epoch: i64) -> Vec<(String, String)> {
+        let c = self.conn.lock().unwrap();
+        let mut stmt = match c.prepare(
+            "SELECT name, command FROM routines WHERE enabled=1 AND ?1 - last_run >= interval_secs ORDER BY name",
+        ) {
+            Ok(s) => s,
+            Err(_) => return vec![],
+        };
+        stmt.query_map(params![now_epoch], |r| Ok((r.get(0)?, r.get(1)?)))
+            .map(|it| it.filter_map(|x| x.ok()).collect())
+            .unwrap_or_default()
+    }
+
+    pub fn mark_routine_run(&self, name: &str, now_epoch: i64, status: &str) {
+        let c = self.conn.lock().unwrap();
+        let _ = c.execute(
+            "UPDATE routines SET last_run=?2, last_status=?3 WHERE name=?1",
+            params![name, now_epoch, status],
+        );
+    }
+
+    pub fn add_routine_alert(&self, name: &str, detail: &str) {
+        let c = self.conn.lock().unwrap();
+        let _ = c.execute(
+            "INSERT INTO routine_alerts(ts, name, detail) VALUES(?1,?2,?3)",
+            params![chrono::Utc::now().to_rfc3339(), name, redact(detail)],
+        );
+    }
+
+    /// Undelivered routine alerts, oldest first, as (name, detail); marks them delivered.
+    pub fn drain_routine_alerts(&self) -> Vec<(String, String)> {
+        let c = self.conn.lock().unwrap();
+        let mut stmt = match c.prepare("SELECT id, name, detail FROM routine_alerts WHERE delivered=0 ORDER BY id") {
+            Ok(s) => s,
+            Err(_) => return vec![],
+        };
+        let rows: Vec<(i64, String, String)> = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .map(|it| it.filter_map(|x| x.ok()).collect())
+            .unwrap_or_default();
+        drop(stmt);
+        for (id, _, _) in &rows {
+            let _ = c.execute("UPDATE routine_alerts SET delivered=1 WHERE id=?1", params![id]);
+        }
+        rows.into_iter().map(|(_, n, d)| (n, d)).collect()
     }
 
     // --- founder messages (khan tell) ---

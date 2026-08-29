@@ -24,21 +24,17 @@ fn interpreter(command: &str) -> (&'static str, Vec<String>) {
     ("sh", vec!["-c".into(), command.into()])
 }
 
-/// Run a shell command in the workspace with a 120s timeout.
-/// `extra_env` lets custom tools pass their JSON args via KHAN_TOOL_ARGS.
-pub async fn run_with_env(
-    ctx: &ToolCtx,
+/// Run one command in `dir` with the scrubbed env and 120s timeout — the same
+/// execution agents get from the shell tool. Returns the combined output and
+/// whether the command succeeded (routines key alerts off that flag).
+pub async fn run_in_dir(
+    dir: &std::path::Path,
     command: &str,
-    cwd: Option<&str>,
     extra_env: std::collections::HashMap<String, String>,
-) -> Result<String> {
-    let dir = match cwd {
-        Some(c) if !c.is_empty() => ctx.workspace.join(c),
-        _ => ctx.workspace.clone(),
-    };
+) -> Result<(String, bool)> {
     let (prog, prog_args) = interpreter(command);
     let mut cmd = Command::new(prog);
-    cmd.args(&prog_args).current_dir(&dir);
+    cmd.args(&prog_args).current_dir(dir);
     // Strip secrets from the child env so no command — however an agent was talked
     // into running it — can read or exfiltrate the founder's keys.
     for (name, _) in std::env::vars() {
@@ -65,12 +61,27 @@ pub async fn run_with_env(
         } else if !out.status.success() {
             text.push_str(&format!("\n[exit code {}]", out.status.code().unwrap_or(-1)));
         }
-        Ok::<String, anyhow::Error>(text)
+        Ok::<(String, bool), anyhow::Error>((text, out.status.success()))
     };
     match tokio::time::timeout(Duration::from_secs(120), fut).await {
         Ok(r) => r,
-        Err(_) => Ok("ERROR: command timed out after 120s and was killed".into()),
+        Err(_) => Ok(("ERROR: command timed out after 120s and was killed".into(), false)),
     }
+}
+
+/// Run a shell command in the workspace with a 120s timeout.
+/// `extra_env` lets custom tools pass their JSON args via KHAN_TOOL_ARGS.
+pub async fn run_with_env(
+    ctx: &ToolCtx,
+    command: &str,
+    cwd: Option<&str>,
+    extra_env: std::collections::HashMap<String, String>,
+) -> Result<String> {
+    let dir = match cwd {
+        Some(c) if !c.is_empty() => ctx.workspace.join(c),
+        _ => ctx.workspace.clone(),
+    };
+    run_in_dir(&dir, command, extra_env).await.map(|(text, _)| text)
 }
 
 /// True if a command line invokes gh/hub anywhere in it. Plain git is fine

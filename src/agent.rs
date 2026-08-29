@@ -29,6 +29,14 @@ fn ceo_schemas() -> Vec<Value> {
             "agent": {"type": "string"}, "task": {"type": "string"}}),
             json!(["agent", "task"])),
         tool("team_status", "List background tasks started with dispatch: who is still working and on what.", json!({}), json!([])),
+        tool("add_routine", "Schedule a shell command the binary runs itself, forever, at zero model cost. Silent when it passes; if it exits nonzero, times out, or prints ALERT, the output lands in your inbox as a routine alert. Any check you have performed the same way roughly three times belongs here — verification scripts, health checks, reconciliation. Same name = replace.", json!({
+            "name": {"type": "string", "description": "Short unique name, e.g. 'claim-cycle-verify'"},
+            "command": {"type": "string", "description": "Shell command, run from the workspace. Print ALERT plus details to flag a problem; print nothing special when healthy."},
+            "interval_secs": {"type": "integer", "description": "Seconds between runs, minimum 60"},
+            "purpose": {"type": "string", "description": "One line on what deviation this catches"}}),
+            json!(["name", "command", "interval_secs"])),
+        tool("remove_routine", "Delete a scheduled routine.", json!({"name": {"type": "string"}}), json!(["name"])),
+        tool("list_routines", "List scheduled routines with their interval and last status.", json!({}), json!([])),
         tool("rate_work", "Rate a just-reviewed delegated report 1 (useless) to 5 (excellent). Ratings are tracked per agent and prompt version — they are the ground truth for deciding prompt improvements and rollbacks.", json!({
             "agent": {"type": "string"}, "score": {"type": "integer", "minimum": 1, "maximum": 5},
             "note": {"type": "string", "description": "One line on why"}}),
@@ -136,6 +144,7 @@ pub(crate) fn compact_threshold(ctx: Option<u32>, max_tokens: u32) -> usize {
 
 const CEO_TOOL_NAMES: &[&str] = &[
     "hire", "delegate", "delegate_parallel", "dispatch", "team_status", "rate_work", "fire", "list_team",
+    "add_routine", "remove_routine", "list_routines",
     "update_prompt", "rollback_prompt", "save_playbook", "finish",
 ];
 
@@ -514,6 +523,34 @@ Drop superseded detail, resolved dead ends, and chatter.",
                         .join("\n")
                 }
             }
+            "add_routine" => {
+                let (name, command) = (s(a, "name"), s(a, "command"));
+                if name.is_empty() || command.is_empty() {
+                    return "ERROR: name and command are required".into();
+                }
+                if crate::tools::shell::touches_gh(command) {
+                    return "ERROR: gh is not available in routines (it would use the founder's personal GitHub login).".into();
+                }
+                let interval = a["interval_secs"].as_i64().unwrap_or(0).max(60);
+                self.ctx.store.upsert_routine(name, command, interval, s(a, "purpose"));
+                format!("routine '{name}' scheduled every {interval}s — silent on pass, alerts you on failure or ALERT output")
+            }
+            "remove_routine" => {
+                if self.ctx.store.delete_routine(s(a, "name")) { "routine removed".into() } else { "no such routine".into() }
+            }
+            "list_routines" => {
+                let rs = self.ctx.store.list_routines();
+                if rs.is_empty() {
+                    "no routines scheduled".into()
+                } else {
+                    rs.iter()
+                        .map(|(n, cmd, iv, purpose, status)| {
+                            format!("- {n} (every {iv}s, last: {status}) {purpose}\n    {}", glimpse(cmd))
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                }
+            }
             "rate_work" => {
                 let agent = s(a, "agent");
                 let score = a["score"].as_i64().unwrap_or(0);
@@ -622,6 +659,15 @@ Drop superseded detail, resolved dead ends, and chatter.",
 
             // Reports from finished background dispatches land first.
             self.harvest_dispatches(&mut history).await;
+
+            // Routine alerts: a scheduled check failed or printed ALERT. The
+            // runner already logged it publicly; here it enters the CEO's context.
+            for (name, detail) in self.ctx.store.drain_routine_alerts() {
+                history.push(Message::text(
+                    "user",
+                    format!("[Routine alert — {name}] The scheduled check failed or printed ALERT:\n{detail}\nInvestigate and fix the underlying problem; the routine stays scheduled."),
+                ));
+            }
 
             // Founder messages sent via `khan tell` land as top-priority instructions.
             for m in self.ctx.store.drain_messages() {

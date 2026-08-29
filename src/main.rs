@@ -2,6 +2,7 @@ mod agent;
 mod config;
 mod llm;
 mod prompts;
+mod routines;
 mod state;
 mod tools;
 mod viewer;
@@ -125,6 +126,9 @@ async fn main() -> Result<()> {
     // Live log viewer (web page + SSE stream). Railway sets PORT for public services.
     let port: u16 = std::env::var("PORT").ok().and_then(|p| p.parse().ok()).unwrap_or(8080);
     tokio::spawn(viewer::serve(store.clone(), port, workspace.clone()));
+    // Scheduled checks (add_routine) run inside the binary at zero model cost;
+    // only deviations reach the CEO, as routine alerts.
+    tokio::spawn(routines::serve(store.clone(), workspace.clone()));
     store.log("khan", "startup", &format!("CEO model {} | directive: {directive}", cfg.ceo_model));
 
     // Learn the real free-model caps for this key rather than assuming them: the
@@ -231,6 +235,26 @@ mod tests {
         assert!(h.contains("web_search"), "should flag the broken tool: {h}");
         assert!(h.contains("2 of 2"), "should report the failure ratio: {h}");
         assert!(!h.contains("shell"), "healthy tools must not add noise: {h}");
+    }
+
+    #[test]
+    fn routines_schedule_and_alert_flow() {
+        let store = crate::state::Store::open(":memory:").unwrap();
+        store.upsert_routine("claim-verify", "python3 check.py", 300, "claim rows match chain");
+        // Never ran → due immediately; not due again right after a run.
+        assert_eq!(store.due_routines(1000), vec![("claim-verify".into(), "python3 check.py".into())]);
+        store.mark_routine_run("claim-verify", 1000, "ok");
+        assert!(store.due_routines(1100).is_empty(), "not due 100s after a 300s-interval run");
+        assert_eq!(store.due_routines(1300).len(), 1, "due again once the interval elapses");
+        // Alerts queue for the CEO and drain exactly once.
+        store.add_routine_alert("claim-verify", "ALERT: pnl row 40 does not match chain");
+        let drained = store.drain_routine_alerts();
+        assert_eq!(drained.len(), 1);
+        assert!(drained[0].1.contains("row 40"));
+        assert!(store.drain_routine_alerts().is_empty(), "alerts deliver once");
+        // Removal unschedules.
+        assert!(store.delete_routine("claim-verify"));
+        assert!(store.due_routines(9999).is_empty());
     }
 
     #[test]
