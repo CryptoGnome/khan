@@ -615,7 +615,11 @@ Drop superseded detail, resolved dead ends, and chatter.",
                 // Two concurrent runs of one employee would race on their saved
                 // history; make the CEO wait for the report or pick someone else.
                 if pending.iter().any(|t| t.agent == agent) {
-                    return format!("ERROR: {agent} is already working on a background task (see team_status). Wait for their report or dispatch someone else.");
+                    // This fires exactly when the CEO has run out of hands, so it
+                    // is the moment to say that hiring is an option. It used to
+                    // offer only waiting or reusing someone, which quietly taught
+                    // the opposite lesson: serialise the work rather than grow.
+                    return format!("ERROR: {agent} is already working on a background task (see team_status). Wait for their report, dispatch someone else, or hire someone new for this — being short-handed is a reason to grow the team, not to queue the work behind one person.");
                 }
                 let me = Arc::clone(self);
                 let (a2, t2) = (agent.clone(), task.clone());
@@ -846,6 +850,18 @@ is expensive in wall-clock and retries. Maintain your own model preferences per 
 scraping) with explicit fallbacks, record them with save_playbook, and move existing hires when the data says so."
                     )
                 };
+                // Idle capacity is invisible in every other block: a company can
+                // sit at four people with thirty-six seats free and look healthy
+                // by every measure it already reports.
+                let busy = self.pending.lock().await.len();
+                let capacity_block = format!(
+                    "\n\nTEAM CAPACITY — {busy} background task(s) running right now.\n{}\n\
+An employee who has been silent for a long stretch is capacity you are already paying for: give them \
+progress work, re-home them to a job that matters, or fire them. If the work worth doing is bigger \
+than the people you have, hire — seats are not the constraint, and a project needing several people \
+gets a manager with their own crew rather than a queue behind you.",
+                    self.ctx.store.team_capacity_text(MAX_EMPLOYEES)
+                );
                 let health = self.ctx.store.tool_health_text();
                 let health_block = if health.is_empty() {
                     String::new()
@@ -862,7 +878,7 @@ If a prompt (yours or an employee's) is causing weak results, improve it with up
 or rollback_prompt if a recent change hurt. If a custom tool erred or is missing, improve or build it with \
 create_tool (rollback_tool reverts a bad version). If you or employees keep re-figuring-out the same procedure, \
 capture it as a skill with create_skill; improve skills that led agents astray (rollback_skill reverts). \
-Save one-off lessons with save_playbook. Then continue the mission.\n\n{log}{stats_block}{health_block}{catalog}{model_block}\n\n{toks}"
+Save one-off lessons with save_playbook. Then continue the mission.\n\n{log}{stats_block}{capacity_block}{health_block}{catalog}{model_block}\n\n{toks}"
                 )));
             }
 

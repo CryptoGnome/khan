@@ -566,7 +566,11 @@ mod tests {
         let sys = ceo_system(evolved);
         assert!(sys.contains(evolved), "the CEO's own prompt still comes first");
         for must in [
-            "ORCHESTRATOR",
+            "You DIRECT; you do not execute",
+            // Planning is the loophole the old wording left open: "quick checks
+            // and decisions are yours" grew until it covered every iteration.
+            "commission it and judge it",
+            "doing the job twice",
             "a team of four is not a company",
             "hire(manager: true)",
             "PROGRESS",
@@ -579,6 +583,38 @@ mod tests {
         // A wiped or missing prompt still carries the mandate: get_prompt returns
         // the empty string when the row is gone, and that path must not be bare.
         assert!(ceo_system("").contains("STANDING MANDATE"));
+    }
+
+    /// Idle capacity was the one thing no block reported: the company sat at four
+    /// employees with thirty-six seats free and read as healthy by every measure
+    /// it had. This makes headcount and silence measurable.
+    #[test]
+    fn team_capacity_reports_seats_free_and_who_has_gone_quiet() {
+        let store = crate::state::Store::open(":memory:").unwrap();
+        // No employees is itself worth saying — that is the CEO doing all the work.
+        assert!(store.team_capacity_text(40).contains("No employees at all"));
+        store.save_agent("scout", "researcher", "agent:scout", "m", "[]");
+        store.save_agent("idler", "does nothing yet", "agent:idler", "m", "[]");
+        store.log("scout", "shell", "looked something up");
+        let text = store.team_capacity_text(40);
+        assert!(text.contains("2 employees, ceiling 40 — 38 seats free"), "{text}");
+        assert!(text.contains("scout: silent 0m"), "{text}");
+        // A hire that has never run at all must not read as freshly active.
+        assert!(text.contains("idler: has never done anything"), "{text}");
+        // Handing out no work at all is the state worth naming, and it needs no
+        // judgement about what counts as progress.
+        assert!(text.contains("never started work through anyone"), "{text}");
+        store.log("CEO", "dispatch", "gave the scout a task");
+        assert!(
+            store.team_capacity_text(40).contains("started new work through anyone"),
+            "a dispatch must reset it to an elapsed time"
+        );
+        // The CEO is not an employee and never counts against the seats.
+        store.log("CEO", "says", "thinking");
+        assert!(!store.team_capacity_text(40).contains("CEO:"), "CEO is not a seat");
+        // Firing frees the seat back up.
+        store.fire_agent("idler");
+        assert!(store.team_capacity_text(40).contains("39 seats free"));
     }
 
     #[test]

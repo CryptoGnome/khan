@@ -715,6 +715,70 @@ impl Store {
     }
 
     /// Active employees, excluding the CEO — the number a hiring cap applies to.
+    /// Headcount against the ceiling, and how long each employee has been silent.
+    ///
+    /// Nothing else measures this. Ratings say how well an employee works and the
+    /// model stats say how fast, but neither says whether anyone is working at
+    /// all — so a company can sit at four people with thirty-six seats free and
+    /// read as healthy. Reported as data next to the other measured blocks,
+    /// because measurement is what changed model choice when instructions did not.
+    pub fn team_capacity_text(&self, ceiling: i64) -> String {
+        let c = self.conn.lock().unwrap();
+        let Ok(mut stmt) = c.prepare(
+            "SELECT a.name, (SELECT MAX(ts) FROM run_log WHERE agent = a.name)
+             FROM agents a WHERE a.active=1 AND a.name!='CEO' ORDER BY a.name",
+        ) else {
+            return String::new();
+        };
+        let rows: Vec<(String, Option<String>)> = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .map(|it| it.flatten().collect())
+            .unwrap_or_default();
+        if rows.is_empty() {
+            return format!("No employees at all (ceiling {ceiling}). Every task is yours by default.");
+        }
+        let now = chrono::Utc::now();
+        let lines: Vec<String> = rows
+            .iter()
+            .map(|(name, last)| {
+                match last
+                    .as_deref()
+                    .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
+                    .map(|t| (now - t.with_timezone(&chrono::Utc)).num_minutes().max(0))
+                {
+                    Some(m) => format!("  {name}: silent {m}m"),
+                    None => format!("  {name}: has never done anything"),
+                }
+            })
+            .collect();
+        // When work was last STARTED through someone else, which needs no
+        // judgement about what counts as progress: either the CEO has handed out
+        // new work recently or it has been doing everything itself.
+        let started: Option<String> = c
+            .query_row(
+                "SELECT MAX(ts) FROM run_log WHERE event IN ('dispatch','delegate','delegate_parallel','hire')",
+                [],
+                |r| r.get(0),
+            )
+            .ok()
+            .flatten();
+        let now = chrono::Utc::now();
+        let last_start = match started
+            .as_deref()
+            .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
+            .map(|t| (now - t.with_timezone(&chrono::Utc)).num_minutes().max(0))
+        {
+            Some(m) => format!("\nLast time you started new work through anyone (dispatch/delegate/hire): {m}m ago."),
+            None => "\nYou have never started work through anyone — everything so far has been you.".to_string(),
+        };
+        format!(
+            "{} employees, ceiling {ceiling} — {} seats free:\n{}{last_start}",
+            rows.len(),
+            (ceiling - rows.len() as i64).max(0),
+            lines.join("\n")
+        )
+    }
+
     pub fn count_active_agents(&self) -> i64 {
         let c = self.conn.lock().unwrap();
         c.query_row("SELECT COUNT(*) FROM agents WHERE active=1 AND name!='CEO'", [], |r| r.get(0))
