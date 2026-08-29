@@ -205,6 +205,11 @@ impl Store {
              CREATE TABLE IF NOT EXISTS routine_alerts (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL,
                 name TEXT NOT NULL, detail TEXT NOT NULL, delivered INTEGER NOT NULL DEFAULT 0);
+             CREATE TABLE IF NOT EXISTS objectives (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL,
+                rank INTEGER NOT NULL DEFAULT 100, status TEXT NOT NULL DEFAULT 'active',
+                plan TEXT NOT NULL DEFAULT '', note TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
              CREATE TABLE IF NOT EXISTS tool_defs (
                 name TEXT NOT NULL, version INTEGER NOT NULL, description TEXT NOT NULL,
                 params TEXT NOT NULL, lang TEXT NOT NULL, script TEXT NOT NULL,
@@ -239,6 +244,95 @@ impl Store {
     pub fn kv_get(&self, k: &str) -> Option<String> {
         let c = self.conn.lock().unwrap();
         c.query_row("SELECT v FROM kv WHERE k=?1", params![k], |r| r.get(0)).ok()
+    }
+
+    // --- objective board (standing priority structure; immune to compaction) ---
+
+    pub fn add_objective(&self, title: &str, rank: i64) -> i64 {
+        let now = chrono::Utc::now().to_rfc3339();
+        let c = self.conn.lock().unwrap();
+        let _ = c.execute(
+            "INSERT INTO objectives(title, rank, created_at, updated_at) VALUES(?1,?2,?3,?3)",
+            params![title, rank, now],
+        );
+        c.last_insert_rowid()
+    }
+
+    /// Update any provided field; bumping updated_at counts as activity.
+    pub fn update_objective(
+        &self,
+        id: i64,
+        title: Option<&str>,
+        rank: Option<i64>,
+        plan: Option<&str>,
+        note: Option<&str>,
+        status: Option<&str>,
+    ) -> bool {
+        let now = chrono::Utc::now().to_rfc3339();
+        let c = self.conn.lock().unwrap();
+        let mut changed = 0;
+        if let Some(v) = title {
+            changed += c.execute("UPDATE objectives SET title=?2, updated_at=?3 WHERE id=?1", params![id, v, now]).unwrap_or(0);
+        }
+        if let Some(v) = rank {
+            changed += c.execute("UPDATE objectives SET rank=?2, updated_at=?3 WHERE id=?1", params![id, v, now]).unwrap_or(0);
+        }
+        if let Some(v) = plan {
+            changed += c.execute("UPDATE objectives SET plan=?2, updated_at=?3 WHERE id=?1", params![id, v, now]).unwrap_or(0);
+        }
+        if let Some(v) = note {
+            changed += c.execute("UPDATE objectives SET note=?2, updated_at=?3 WHERE id=?1", params![id, v, now]).unwrap_or(0);
+        }
+        if let Some(v) = status {
+            changed += c.execute("UPDATE objectives SET status=?2, updated_at=?3 WHERE id=?1", params![id, v, now]).unwrap_or(0);
+        }
+        changed > 0
+    }
+
+    /// Stamp activity on an objective (a dispatch just went out against it).
+    pub fn touch_objective(&self, id: i64) {
+        let now = chrono::Utc::now().to_rfc3339();
+        let c = self.conn.lock().unwrap();
+        let _ = c.execute("UPDATE objectives SET updated_at=?2 WHERE id=?1", params![id, now]);
+    }
+
+    /// The board as shown to the CEO every iteration: active objectives by rank,
+    /// with in-flight counts (passed in from the orchestrator) and how long since
+    /// anything advanced each one. Facts only — the judgment is the model's job.
+    pub fn objectives_board(&self, inflight: &std::collections::HashMap<i64, usize>) -> String {
+        let c = self.conn.lock().unwrap();
+        let Ok(mut stmt) = c.prepare(
+            "SELECT id, title, rank, plan, note, updated_at FROM objectives
+             WHERE status='active' ORDER BY rank, id",
+        ) else {
+            return String::new();
+        };
+        let rows: Vec<(i64, String, i64, String, String, String)> = stmt
+            .query_map([], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?))
+            })
+            .map(|it| it.filter_map(|x| x.ok()).collect())
+            .unwrap_or_default();
+        let now = chrono::Utc::now();
+        rows.iter()
+            .map(|(id, title, rank, plan, note, updated)| {
+                let mins = chrono::DateTime::parse_from_rfc3339(updated)
+                    .map(|t| (now - t.with_timezone(&chrono::Utc)).num_minutes())
+                    .unwrap_or(0);
+                let busy = inflight.get(id).copied().unwrap_or(0);
+                let mut line = format!(
+                    "#{id} [rank {rank}] {title} — {busy} task(s) in flight, last advanced {mins}m ago"
+                );
+                if plan.is_empty() {
+                    line.push_str(" — NO PLAN YET");
+                }
+                if !note.is_empty() {
+                    line.push_str(&format!(" — note: {}", note.chars().take(120).collect::<String>()));
+                }
+                line
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 
     pub fn kv_set(&self, k: &str, v: &str) {

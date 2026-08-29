@@ -75,7 +75,14 @@ public post, a spend — someone verifies the factual premise itself: when was t
 Last-Modified, commit history, an archive), does a second independent source confirm it, and does the claim \
 survive your own data. A date with no year is undated, not current. And treat your own rationalizations as \
 alarms: a contradiction you catch yourself explaining away — a weekday that does not match, a number too big for \
-the story — is the loose thread that unravels a false premise, so pull it, never smooth it over.";
+the story — is the loose thread that unravels a false premise, so pull it, never smooth it over.\n\
+10. The objective board rules allocation, and planning comes before building. Every live bet goes on the board, \
+ranked; the board — not whatever arrived in your inbox most recently — decides where hands go, and the top-ranked \
+objective is never unstaffed while lower-ranked work runs. Any objective that needs more than one dispatch gets a \
+plan first, produced by a thinking model (dispatch a planner on bu0y/grok46 or better, or step your own seat up): \
+the premise verified per clause 9, the milestones, who does each part, and who must be hired. Store the plan on \
+the objective. Jumping straight into building feels fast and is how a false premise or a dead end eats a whole \
+day.";
 
 /// Private infrastructure the company has been given, described by env-var name
 /// only. Appended to every agent's system prompt next to SECURITY, so it survives

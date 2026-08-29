@@ -264,6 +264,26 @@ mod tests {
     }
 
     #[test]
+    fn objective_board_ranks_counts_and_flags_missing_plans() {
+        let store = crate::state::Store::open(":memory:").unwrap();
+        let email = store.add_objective("company email + phone", 1);
+        let listings = store.add_objective("listing submissions", 3);
+        assert!(store.update_objective(listings, None, None, Some("plan: submit CoinPaprika"), None, None));
+        let done = store.add_objective("old bet", 2);
+        assert!(store.update_objective(done, None, None, None, None, Some("done")));
+        let mut inflight = std::collections::HashMap::new();
+        inflight.insert(listings, 2usize);
+        let board = store.objectives_board(&inflight);
+        let lines: Vec<&str> = board.lines().collect();
+        // Ordered by rank; the done objective is off the board.
+        assert_eq!(lines.len(), 2);
+        assert!(lines[0].contains("company email") && lines[0].contains("rank 1"));
+        assert!(lines[0].contains("0 task(s) in flight") && lines[0].contains("NO PLAN YET"));
+        assert!(lines[1].contains("2 task(s) in flight") && !lines[1].contains("NO PLAN YET"));
+        let _ = email;
+    }
+
+    #[test]
     fn tool_health_reports_only_failing_tools() {
         let store = crate::state::Store::open(":memory:").unwrap();
         for _ in 0..3 {

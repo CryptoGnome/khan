@@ -27,8 +27,17 @@ fn ceo_schemas() -> Vec<Value> {
                 "required": ["agent", "task"]}}}),
             json!(["tasks"])),
         tool("dispatch", "Send an employee off to work in the BACKGROUND and return immediately — you keep orchestrating while they work. Their report is delivered to you automatically when they finish. Prefer this over delegate for substantial work; call it several times to keep many employees busy at once.", json!({
-            "agent": {"type": "string"}, "task": {"type": "string"}}),
+            "agent": {"type": "string"}, "task": {"type": "string"},
+            "objective": {"type": "integer", "description": "Objective id from the board this task advances — tag every dispatch so the board shows where the company's hands actually are"}}),
             json!(["agent", "task"])),
+        tool("objectives", "Maintain the OBJECTIVE BOARD — the standing, restart-proof list of every live bet, ranked. It is shown to you every iteration with in-flight counts and staleness, and it is the source of truth for allocation. Actions: add (title, rank — lower rank = more important, 1 is P0), update (id + any of title/rank/plan/note), done (id), drop (id). Store each objective's plan with update once a planner has produced one.", json!({
+            "action": {"type": "string", "enum": ["add", "update", "done", "drop"]},
+            "id": {"type": "integer"},
+            "title": {"type": "string"},
+            "rank": {"type": "integer", "description": "1 = most important. Rank every live bet honestly; ties are fine."},
+            "plan": {"type": "string", "description": "The current plan: premise check, milestones, staffing. Written by a planning dispatch on a reasoning model, stored here."},
+            "note": {"type": "string", "description": "One-line status note shown on the board"}}),
+            json!(["action"])),
         tool("team_status", "List background tasks started with dispatch: who is still working and on what.", json!({}), json!([])),
         tool("add_routine", "Schedule a shell command the binary runs itself, forever, at zero model cost. Silent when it passes; if it exits nonzero, times out, or prints ALERT, the output lands in your inbox as a routine alert. Any check you have performed the same way roughly three times belongs here — verification scripts, health checks, reconciliation. Same name = replace.", json!({
             "name": {"type": "string", "description": "Short unique name, e.g. 'claim-cycle-verify'"},
@@ -156,7 +165,7 @@ pub(crate) fn compact_threshold(ctx: Option<u32>, max_tokens: u32) -> usize {
 const CEO_TOOL_NAMES: &[&str] = &[
     "hire", "delegate", "delegate_parallel", "dispatch", "team_status", "rate_work", "fire", "list_team",
     "add_routine", "remove_routine", "list_routines",
-    "update_prompt", "rollback_prompt", "save_playbook", "finish", "set_ceo_model",
+    "update_prompt", "rollback_prompt", "save_playbook", "finish", "set_ceo_model", "objectives",
 ];
 
 /// Tools a manager employee gets on top of the normal employee set: they staff
@@ -204,6 +213,8 @@ pub struct Tokens {
 pub struct BackgroundTask {
     agent: String,
     task: String,
+    /// Board objective this task advances, when the CEO tagged it.
+    objective: Option<i64>,
     handle: tokio::task::JoinHandle<String>,
 }
 
@@ -631,10 +642,14 @@ Drop superseded detail, resolved dead ends, and chatter.",
                     // the opposite lesson: serialise the work rather than grow.
                     return format!("ERROR: {agent} is already working on a background task (see team_status). Wait for their report, dispatch someone else, or hire someone new for this — being short-handed is a reason to grow the team, not to queue the work behind one person.");
                 }
+                let objective = a["objective"].as_i64();
+                if let Some(o) = objective {
+                    self.ctx.store.touch_objective(o);
+                }
                 let me = Arc::clone(self);
                 let (a2, t2) = (agent.clone(), task.clone());
                 let handle = tokio::spawn(async move { me.run_employee(&a2, &t2).await });
-                pending.push(BackgroundTask { agent: agent.clone(), task, handle });
+                pending.push(BackgroundTask { agent: agent.clone(), task, objective, handle });
                 format!("{agent} dispatched — working in the background; their report will reach you automatically. Keep orchestrating.")
             }
             "team_status" => {
@@ -739,6 +754,44 @@ Drop superseded detail, resolved dead ends, and chatter.",
                 println!("\n\x1b[32m=== MILESTONE REPORT ===\x1b[0m\n{report}\n");
                 self.ctx.store.remember("CEO", "milestone", report, "milestone");
                 "Milestone recorded. Continue: verify your work, improve it, or pursue the next most valuable goal.".into()
+            }
+            "objectives" => {
+                if caller != "CEO" {
+                    return "ERROR: only the CEO maintains the objective board".into();
+                }
+                match s(a, "action") {
+                    "add" => {
+                        let title = s(a, "title");
+                        if title.is_empty() {
+                            return "ERROR: add needs a title".into();
+                        }
+                        let rank = a["rank"].as_i64().unwrap_or(100);
+                        let id = self.ctx.store.add_objective(title, rank);
+                        format!("objective #{id} added at rank {rank}. Tag dispatches with objective:{id} so the board tracks its progress; if it needs more than one dispatch, get a plan onto it first.")
+                    }
+                    "update" => {
+                        let Some(id) = a["id"].as_i64() else { return "ERROR: update needs id".into() };
+                        let ok = self.ctx.store.update_objective(
+                            id,
+                            a["title"].as_str(),
+                            a["rank"].as_i64(),
+                            a["plan"].as_str(),
+                            a["note"].as_str(),
+                            None,
+                        );
+                        if ok { format!("objective #{id} updated") } else { format!("ERROR: no objective #{id} (or nothing to change)") }
+                    }
+                    "done" | "drop" => {
+                        let Some(id) = a["id"].as_i64() else { return "ERROR: needs id".into() };
+                        let status = if s(a, "action") == "done" { "done" } else { "dropped" };
+                        if self.ctx.store.update_objective(id, None, None, None, None, Some(status)) {
+                            format!("objective #{id} marked {status}")
+                        } else {
+                            format!("ERROR: no objective #{id}")
+                        }
+                    }
+                    other => format!("ERROR: unknown action '{other}' (add/update/done/drop)"),
+                }
             }
             "set_ceo_model" => {
                 if caller != "CEO" {
@@ -1026,6 +1079,40 @@ Save one-off lessons with save_playbook. Then continue the mission.\n\n{log}{sta
             // Skill index rides along ephemerally (not persisted) so it never bloats history.
             if let Some(idx) = tools::skills::index(&self.ctx) {
                 req.push(Message::text("user", idx));
+            }
+            // The objective board rides along the same way, every iteration: the
+            // standing, restart-proof ranked list of live bets. Without it,
+            // priority lives only in chat history, where recency always wins and
+            // compaction eats anything parked — which is how a P0 keystone sat
+            // unstaffed for an hour while fresher interrupts held the floor.
+            {
+                let counts: std::collections::HashMap<i64, usize> = {
+                    let p = self.pending.lock().await;
+                    let mut c = std::collections::HashMap::new();
+                    for t in p.iter() {
+                        if let Some(o) = t.objective {
+                            *c.entry(o).or_insert(0) += 1;
+                        }
+                    }
+                    c
+                };
+                let board = self.ctx.store.objectives_board(&counts);
+                let body = if board.is_empty() {
+                    "[Objective board] EMPTY. Write it now with objectives(add, title, rank): every live bet the \
+company is pursuing, ranked (1 = most important). The board survives restarts and compaction; your chat \
+history does not."
+                        .to_string()
+                } else {
+                    format!(
+                        "[Objective board — source of truth for allocation]\n{board}\n\
+Allocate by rank: the top objective is never at 0 tasks in flight while lower-ranked work has hands. \
+NO PLAN YET on a multi-step objective means plan first — dispatch a planner on a reasoning model \
+(bu0y/grok46 or better) to produce premise check, milestones and staffing, then store it with \
+objectives(update, plan). Tag every dispatch with objective:<id>. Keep the board honest: add new bets, \
+mark done what is done."
+                    )
+                };
+                req.push(Message::text("user", body));
             }
 
             let (msg, u) = match self.chat_fb("CEO", &ceo_model, &req, &schemas).await {
