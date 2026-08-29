@@ -264,6 +264,22 @@ mod tests {
     }
 
     #[test]
+    fn observation_set_excludes_every_advancing_tool() {
+        use crate::agent::OBSERVATION_TOOLS as OBS;
+        // Advancing actions must never be classified as observation — that would
+        // make the loop sleep right after real work.
+        for t in ["dispatch", "delegate", "delegate_parallel", "hire", "fire", "rate_work",
+                  "objectives", "update_prompt", "save_playbook", "remember", "create_skill",
+                  "set_ceo_model", "finish", "add_routine", "remove_routine", "write_file", "create_tool"] {
+            assert!(!OBS.contains(&t), "{t} must count as advancing");
+        }
+        // The observed poll vectors must be in the set or the wait never engages.
+        for t in ["team_status", "shell", "sql", "read_file", "web_fetch"] {
+            assert!(OBS.contains(&t), "{t} must count as observation");
+        }
+    }
+
+    #[test]
     fn objective_board_ranks_counts_and_flags_missing_plans() {
         let store = crate::state::Store::open(":memory:").unwrap();
         let email = store.add_objective("company email + phone", 1);

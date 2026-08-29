@@ -169,6 +169,18 @@ const CEO_TOOL_NAMES: &[&str] = &[
     "update_prompt", "rollback_prompt", "save_playbook", "finish", "set_ceo_model", "objectives",
 ];
 
+/// Tools that read state without changing it. A CEO turn whose calls all come
+/// from this set advanced nothing — the loop treats the next iteration as idle
+/// and blocks on events instead of spinning. Unknown (custom) tools count as
+/// advancing: misclassification then merely preserves the old free-running
+/// behaviour instead of wrongly pausing real work. `shell` and `sql` CAN mutate,
+/// but they are the observed poll vectors — the short event wait (woken by any
+/// report or message within 2s) bounds the cost of counting them here.
+pub(crate) const OBSERVATION_TOOLS: &[&str] = &[
+    "team_status", "list_team", "list_routines", "recall", "read_file", "list_files",
+    "web_fetch", "web_search", "shell", "sql", "credits", "use_skill",
+];
+
 /// Tools a manager employee gets on top of the normal employee set: they staff
 /// and run their own crew. Deliberately excludes `dispatch` — a manager blocks
 /// while its crew runs, so no background task can outlive the manager that
@@ -878,6 +890,53 @@ Drop superseded detail, resolved dead ends, and chatter.",
             .unwrap_or_else(|| self.ctx.cfg.ceo_model.clone())
     }
 
+    /// Block until there is something for the CEO to react to: a finished
+    /// dispatch, a founder message, a routine alert — or the heartbeat deadline,
+    /// which fires a proactive strategy turn even in total silence. Returns true
+    /// when the wake reason was the heartbeat. When nothing at all is dispatched
+    /// the wait is skipped: an idle company should be staffing, not sleeping.
+    async fn wait_for_event(self: &Arc<Self>) -> bool {
+        let mut announced = false;
+        loop {
+            if self.stop.load(Ordering::Relaxed) {
+                return false;
+            }
+            if self.ctx.store.has_pending_input() {
+                return false;
+            }
+            {
+                let p = self.pending.lock().await;
+                if p.is_empty() || p.iter().any(|t| t.handle.is_finished()) {
+                    return false;
+                }
+            }
+            let last_hb: chrono::DateTime<chrono::Utc> = self
+                .ctx
+                .store
+                .kv_get("last_heartbeat")
+                .and_then(|v| chrono::DateTime::parse_from_rfc3339(&v).ok())
+                .map(|t| t.with_timezone(&chrono::Utc))
+                .unwrap_or_else(|| {
+                    let now = chrono::Utc::now();
+                    self.ctx.store.kv_set("last_heartbeat", &now.to_rfc3339());
+                    now
+                });
+            if (chrono::Utc::now() - last_hb).num_seconds() as u64 >= self.ctx.cfg.heartbeat_secs {
+                self.ctx.store.kv_set("last_heartbeat", &chrono::Utc::now().to_rfc3339());
+                return true;
+            }
+            if !announced {
+                announced = true;
+                self.log_line(
+                    "CEO",
+                    "waiting",
+                    "event-driven idle — waiting for a report, message, or alert (heartbeat keeps strategy alive)",
+                );
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        }
+    }
+
     /// Deliver reports from finished background dispatches into the CEO's
     /// history, the same way founder messages arrive.
     async fn harvest_dispatches(&self, history: &mut Vec<Message>) {
@@ -927,10 +986,25 @@ Drop superseded detail, resolved dead ends, and chatter.",
         };
 
         let mut iter: u64 = self.ctx.store.kv_get("iteration").and_then(|v| v.parse().ok()).unwrap_or(0);
+        // Whether the previous turn changed anything. Starts true so the first
+        // turn after boot always runs (it has the restart context to act on).
+        let mut last_advanced = true;
 
         loop {
             if self.stop.load(Ordering::Relaxed) {
                 break;
+            }
+            // Event-driven idle: a turn that only observed advanced nothing, so
+            // the next model call would look at the same world and say the same
+            // thing. Block until the world changes — a report, a founder message,
+            // a routine alert — or the heartbeat says it is time for a proactive
+            // strategy turn regardless.
+            let mut heartbeat = false;
+            if !last_advanced {
+                heartbeat = self.wait_for_event().await;
+                if self.stop.load(Ordering::Relaxed) {
+                    break;
+                }
             }
             iter += 1;
             self.ctx.store.kv_set("iteration", &iter.to_string());
@@ -975,8 +1049,9 @@ Drop superseded detail, resolved dead ends, and chatter.",
             // now, so delivered always means persisted.
             self.persist_ceo(&history);
 
-            // Reflection cadence: ask the CEO to evolve itself.
-            if iter % self.ctx.cfg.reflect_every == 0 {
+            // Reflection cadence: every N busy iterations, and on every
+            // heartbeat — a quiet company still reviews its strategy.
+            if iter % self.ctx.cfg.reflect_every == 0 || heartbeat {
                 let log = self.ctx.store.recent_log(40);
                 let toks = format!(
                     "Cumulative token usage since last restart (all agents): {} in / {} out. \
@@ -1228,13 +1303,15 @@ objective:<id>. Keep the board honest: add new bets, declare blocked_by, mark do
                     "user",
                     "Do not stop. Take the next concrete action with a tool call (or finish(report) if you hit a milestone).",
                 ));
+                // The nudge deserves an immediate retry, not an event wait.
+                last_advanced = true;
             } else {
-                let mut only_status = true;
+                let mut advanced = false;
                 for call in calls {
                     let a = args_of(&call);
                     let tname = call.function.name.clone();
-                    if !matches!(tname.as_str(), "team_status" | "list_team") {
-                        only_status = false;
+                    if !OBSERVATION_TOOLS.contains(&tname.as_str()) {
+                        advanced = true;
                     }
                     self.log_line("CEO", &tname, &call.function.arguments);
                     let out = if CEO_TOOL_NAMES.contains(&tname.as_str()) {
@@ -1244,39 +1321,7 @@ objective:<id>. Keep the board honest: add new bets, declare blocked_by, mark do
                     };
                     history.push(Message::tool_result(&call.id, out));
                 }
-                // A turn that only asked how the workers are doing, while work is
-                // still out, is a poll: nothing changes until a report lands, so
-                // the next model call repeats this one verbatim — at premium-seat
-                // prices, every few seconds. Reports, founder messages and routine
-                // alerts all arrive on their own; block on them for free instead
-                // of paying the model to keep asking.
-                if only_status {
-                    let t0 = std::time::Instant::now();
-                    let mut announced = false;
-                    loop {
-                        if self.stop.load(Ordering::Relaxed)
-                            || t0.elapsed() > std::time::Duration::from_secs(600)
-                            || self.ctx.store.has_pending_input()
-                        {
-                            break;
-                        }
-                        // Nothing dispatched, or a report is ready: iterate now.
-                        let p = self.pending.lock().await;
-                        if p.is_empty() || p.iter().any(|t| t.handle.is_finished()) {
-                            break;
-                        }
-                        drop(p);
-                        if !announced {
-                            announced = true;
-                            self.log_line(
-                                "CEO",
-                                "waiting",
-                                "all dispatched work is still running — holding for a report or message instead of polling",
-                            );
-                        }
-                        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-                    }
-                }
+                last_advanced = advanced;
             }
 
             self.persist_ceo(&history);
