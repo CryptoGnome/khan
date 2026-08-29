@@ -566,6 +566,24 @@ Drop superseded detail, resolved dead ends, and chatter.",
                 break;
             }
         }
+        // A silent stop (iteration cap, or the loop draining without finish) used
+        // to hand back the placeholder — the CEO then had to forensically read the
+        // disk to learn what happened, 33 times in one day. Synthesize the report
+        // from the transcript tail instead: partial truth beats silence.
+        if report == "(employee stopped without a report)" {
+            let tail: Vec<String> = history
+                .iter()
+                .rev()
+                .filter(|m| m.role == "assistant" || m.role == "tool")
+                .take(4)
+                .filter_map(|m| m.content.clone())
+                .map(|c| c.chars().take(700).collect())
+                .collect();
+            report = format!(
+                "[synthesized — {name} stopped without reporting; treat as PARTIAL and verify]\nLast activity, newest first:\n{}",
+                tail.join("\n---\n")
+            );
+        }
         // A fired employee's task must not write back: save_agent would resurrect
         // the record (active=1) and clobber any re-hire's fresh state.
         if !fired {
