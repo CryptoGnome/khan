@@ -35,7 +35,10 @@ workspace = "workspace"
 # Seconds of event silence before the CEO takes a proactive strategy episode
 # anyway. The loop is event-driven: turns fire on reports, founder messages and
 # routine alerts; reflection/evolution rides on these heartbeat episodes.
-heartbeat_secs = 900
+# 300 keeps the worst-case dead time short: the heartbeat only fires when the
+# company is fully idle, so a tighter cadence costs a few cheap episodes per
+# idle hour and nothing at all while work is in flight.
+heartbeat_secs = 300
 # Turn cap per CEO episode (backstop when it never calls finish_episode)
 episode_max_steps = 12
 # Max loop iterations per delegated employee task

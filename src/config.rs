@@ -55,7 +55,7 @@ fn default_workspace() -> String {
 }
 
 fn default_heartbeat_secs() -> u64 {
-    900
+    300
 }
 
 fn default_episode_max_steps() -> u64 {

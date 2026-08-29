@@ -1151,6 +1151,7 @@ keep the board honest, then close with finish_episode(note)."
             // reading before acting is investigation, reading after acting is
             // the poll disease. The step cap still bounds pure investigation.
             let mut did_advance = false;
+            let mut warned_idle_close = false;
 
             'turns: loop {
             if self.stop.load(Ordering::Relaxed) {
@@ -1507,6 +1508,21 @@ Keep the board honest: add new bets, declare blocked_by, mark done what is done.
                         !p.iter().any(|t| t.handle.is_finished())
                     };
                     if did_advance && obs_streak >= 2 && idle && !self.ctx.store.has_pending_input() {
+                        // Closing with NOTHING dispatched strands the company
+                        // until the next heartbeat — seen live: an episode was
+                        // cut off mid-"let me re-dispatch" because a read-only
+                        // custom tool had counted as advancing. One warning
+                        // turn converts that into a dispatch or a deliberate close.
+                        let nothing_running = self.pending.lock().await.is_empty();
+                        if nothing_running && !warned_idle_close {
+                            warned_idle_close = true;
+                            obs_streak = 0;
+                            history.push(Message::text(
+                                "user",
+                                "You are about to go idle with NOTHING dispatched — no work would be in flight until the next heartbeat. Dispatch the work this episode surfaced now, or close deliberately with finish_episode(note) if idling is truly right.",
+                            ));
+                            continue;
+                        }
                         break 'turns;
                     }
                 }
