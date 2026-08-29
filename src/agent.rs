@@ -12,10 +12,11 @@ fn tool(name: &str, desc: &str, props: Value, required: Value) -> Value {
 
 fn ceo_schemas() -> Vec<Value> {
     vec![
-        tool("hire", "Hire a new employee agent. Their role prompt persists and evolves across runs.", json!({
+        tool("hire", "Hire a new employee agent. Their role prompt persists and evolves across runs. Hire freely — staff up to the work, and give a substantial project a manager with their own crew rather than one overloaded generalist.", json!({
             "name": {"type": "string", "description": "Short unique name, e.g. 'researcher-1'"},
             "role": {"type": "string", "description": "What they do and how, in a paragraph"},
-            "model": {"type": "string", "description": "provider/model to run them on"}}),
+            "model": {"type": "string", "description": "provider/model to run them on"},
+            "manager": {"type": "boolean", "description": "Make them a manager: they can hire their own workers and run them in parallel, then report back as one. Use for a project that needs a team. Their hires are plain workers who cannot hire further."}}),
             json!(["name", "role", "model"])),
         tool("delegate", "Give an existing employee a task. Runs them to completion and returns their report.", json!({
             "agent": {"type": "string"}, "task": {"type": "string"}}),
@@ -147,6 +148,27 @@ const CEO_TOOL_NAMES: &[&str] = &[
     "add_routine", "remove_routine", "list_routines",
     "update_prompt", "rollback_prompt", "save_playbook", "finish",
 ];
+
+/// Tools a manager employee gets on top of the normal employee set: they staff
+/// and run their own crew. Deliberately excludes `dispatch` — a manager blocks
+/// while its crew runs, so no background task can outlive the manager that
+/// started it, and every report has somewhere to go.
+const MANAGER_TOOL_NAMES: &[&str] = &["hire", "delegate", "delegate_parallel", "list_team", "rate_work"];
+
+/// Ceiling on active employees. High enough to never bind a real org, low
+/// enough that a hiring loop cannot quietly drain the fuel budget.
+const MAX_EMPLOYEES: i64 = 40;
+
+fn manager_schemas() -> Vec<Value> {
+    ceo_schemas()
+        .into_iter()
+        .filter(|s| {
+            s["function"]["name"]
+                .as_str()
+                .is_some_and(|n| MANAGER_TOOL_NAMES.contains(&n))
+        })
+        .collect()
+}
 
 fn employee_finish_schema() -> Value {
     tool("finish", "Finish the delegated task and report the result to the CEO.", json!({
@@ -361,8 +383,18 @@ Drop superseded detail, resolved dead ends, and chatter.",
     }
 
     /// Run one employee's loop to completion on a task; returns their report.
-    /// Takes &self so several employees can run concurrently (delegate_parallel).
-    async fn run_employee(&self, name: &str, task: &str) -> String {
+    /// Takes an Arc so several employees can run concurrently (delegate_parallel)
+    /// and so a manager can run a crew of its own.
+    ///
+    /// Returns a boxed future rather than being an `async fn`: a manager can
+    /// delegate, which makes this mutually recursive with `ceo_tool`, and the
+    /// cycle only terminates if the future has a nameable, Send type.
+    fn run_employee<'a>(
+        self: &'a Arc<Self>,
+        name: &'a str,
+        task: &'a str,
+    ) -> futures::future::BoxFuture<'a, String> {
+        Box::pin(async move {
         let Some((mut role, mut prompt_name, mut model, hist_json)) = self.ctx.store.load_agent(name) else {
             return format!("ERROR: no such employee '{name}'. hire them first or check list_team.");
         };
@@ -416,6 +448,10 @@ Drop superseded detail, resolved dead ends, and chatter.",
             schemas.extend(tools::custom::registry_schemas(&self.ctx));
             schemas.extend(tools::skills::schemas());
             schemas.extend(tools::credits::schemas(&self.ctx));
+            let manages = self.ctx.store.is_manager(name);
+            if manages {
+                schemas.extend(manager_schemas());
+            }
             schemas.push(employee_finish_schema());
             let (msg, u) = match self.chat_fb(name, &model, &history, &schemas).await {
                 Ok(r) => r,
@@ -455,7 +491,15 @@ Drop superseded detail, resolved dead ends, and chatter.",
                     continue;
                 }
                 self.log_line(name, &call.function.name, &call.function.arguments);
-                let out = tools::execute(&self.ctx, name, &call.function.name, &a).await;
+                let out = if manages && MANAGER_TOOL_NAMES.contains(&call.function.name.as_str()) {
+                    // Boxed on both sides of the manager/crew cycle so the mutually
+                    // recursive futures have a nameable, Send type.
+                    let fut: futures::future::BoxFuture<'_, String> =
+                        Box::pin(self.ceo_tool(name, &call.function.name, &a));
+                    tools::truncate(fut.await)
+                } else {
+                    tools::execute(&self.ctx, name, &call.function.name, &a).await
+                };
                 history.push(Message::tool_result(&call.id, out));
             }
             if finished {
@@ -470,23 +514,40 @@ Drop superseded detail, resolved dead ends, and chatter.",
         }
         self.log_line(name, "report", &report);
         report
+        })
     }
 
-    /// Execute a CEO control tool.
-    async fn ceo_tool(self: &Arc<Self>, name: &str, a: &Value) -> String {
+    /// Execute a control tool. `caller` is "CEO" or a manager employee's name;
+    /// managers get a restricted subset (MANAGER_TOOL_NAMES) and cannot promote
+    /// their own hires to managers, which caps the org at CEO → manager → worker.
+    async fn ceo_tool(self: &Arc<Self>, caller: &str, name: &str, a: &Value) -> String {
         match name {
             "hire" => {
                 let (n, role, model) = (s(a, "name"), s(a, "role"), s(a, "model"));
                 if self.ctx.cfg.resolve(model).is_err() {
                     return format!("ERROR: model '{model}' is not available. Pick from the catalog in your instructions.");
                 }
+                // Re-hiring an existing name is a re-home, not growth, so only
+                // genuinely new employees count against the ceiling.
+                if self.ctx.store.load_agent(n).is_none()
+                    && self.ctx.store.count_active_agents() >= MAX_EMPLOYEES
+                {
+                    return format!(
+                        "ERROR: at the {MAX_EMPLOYEES}-employee ceiling. Fire someone who is not earning their seat before hiring again."
+                    );
+                }
+                let is_manager = caller == "CEO" && a["manager"].as_bool().unwrap_or(false);
                 let prompt_name = format!("agent:{n}");
                 if self.ctx.store.get_prompt(&prompt_name).is_none() {
-                    let base = self.ctx.store.get_prompt("employee_base").unwrap_or_default();
+                    let base_name = if is_manager { "manager_base" } else { "employee_base" };
+                    let base = self.ctx.store.get_prompt(base_name).unwrap_or_default();
                     self.ctx.store.seed_prompt(&prompt_name, &base);
                 }
                 self.ctx.store.save_agent(n, role, &prompt_name, model, "[]");
-                format!("hired {n} ({role}) on {model}")
+                self.ctx.store.set_manager(n, is_manager);
+                let kind = if is_manager { "manager" } else { "employee" };
+                let by = if caller == "CEO" { String::new() } else { format!(" (hired by {caller})") };
+                format!("hired {n} as {kind} ({role}) on {model}{by}")
             }
             "delegate" => {
                 let (agent, task) = (s(a, "agent").to_string(), s(a, "task").to_string());
@@ -820,7 +881,7 @@ Save one-off lessons with save_playbook. Then continue the mission.\n\n{log}{sta
                     let tname = call.function.name.clone();
                     self.log_line("CEO", &tname, &call.function.arguments);
                     let out = if CEO_TOOL_NAMES.contains(&tname.as_str()) {
-                        tools::truncate(self.ceo_tool(&tname, &a).await)
+                        tools::truncate(self.ceo_tool("CEO", &tname, &a).await)
                     } else {
                         tools::execute(&self.ctx, "CEO", &tname, &a).await
                     };

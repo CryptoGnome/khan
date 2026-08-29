@@ -222,6 +222,9 @@ impl Store {
                 INSERT INTO memories_fts(rowid, key, content, tags) VALUES (new.id, new.key, new.content, new.tags);
              END;",
         )?;
+        // Migration: managers are employees who may staff and run their own crew.
+        // Errors when the column already exists, which is the normal case.
+        let _ = conn.execute("ALTER TABLE agents ADD COLUMN manager INTEGER NOT NULL DEFAULT 0", []);
         Ok(Store { conn: Mutex::new(conn), log_tx: broadcast::channel(512).0 })
     }
 
@@ -694,6 +697,28 @@ impl Store {
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
         )
         .ok()
+    }
+
+    /// Mark an employee as a manager (may hire and run their own crew) or not.
+    pub fn set_manager(&self, name: &str, manager: bool) {
+        let c = self.conn.lock().unwrap();
+        let _ = c.execute("UPDATE agents SET manager=?2 WHERE name=?1", params![name, manager as i64]);
+    }
+
+    pub fn is_manager(&self, name: &str) -> bool {
+        let c = self.conn.lock().unwrap();
+        c.query_row("SELECT manager FROM agents WHERE name=?1 AND active=1", params![name], |r| {
+            r.get::<_, i64>(0)
+        })
+        .map(|m| m == 1)
+        .unwrap_or(false)
+    }
+
+    /// Active employees, excluding the CEO — the number a hiring cap applies to.
+    pub fn count_active_agents(&self) -> i64 {
+        let c = self.conn.lock().unwrap();
+        c.query_row("SELECT COUNT(*) FROM agents WHERE active=1 AND name!='CEO'", [], |r| r.get(0))
+            .unwrap_or(0)
     }
 
     pub fn fire_agent(&self, name: &str) -> bool {

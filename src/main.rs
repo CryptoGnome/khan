@@ -140,6 +140,29 @@ async fn main() -> Result<()> {
     if let Ok(rpc) = std::env::var("SOLANA_RPC") {
         state::redact_value(&rpc, "RPC");
     }
+    // Optional residential proxy for web fetch/search (datacenter IPs are walled
+    // off from much of the web). Same contract as SOLANA_RPC: usable by
+    // reference, never printable — the URL embeds the proxy credentials.
+    let http_proxy = match std::env::var("FETCH_PROXY") {
+        Ok(p) if !p.trim().is_empty() => {
+            state::redact_value(&p, "FETCH_PROXY");
+            match reqwest::Proxy::all(&p) {
+                Ok(proxy) => {
+                    println!("web fetch: residential proxy configured (FETCH_PROXY)");
+                    reqwest::Client::builder()
+                        .proxy(proxy)
+                        .timeout(std::time::Duration::from_secs(45))
+                        .build()
+                        .ok()
+                }
+                Err(e) => {
+                    eprintln!("[khan] FETCH_PROXY is set but invalid ({e}) — continuing without a proxy");
+                    None
+                }
+            }
+        }
+        _ => None,
+    };
     let llm = llm::Client::new();
     llm.discover_context_limits(&cfg).await;
     if let Some(l) = llm.discover_limits(&cfg).await {
@@ -167,6 +190,7 @@ async fn main() -> Result<()> {
                 .timeout(std::time::Duration::from_secs(30))
                 .build()
                 .unwrap_or_default(),
+            http_proxy,
         },
         llm,
         stop,
@@ -235,6 +259,24 @@ mod tests {
         assert!(h.contains("web_search"), "should flag the broken tool: {h}");
         assert!(h.contains("2 of 2"), "should report the failure ratio: {h}");
         assert!(!h.contains("shell"), "healthy tools must not add noise: {h}");
+    }
+
+    #[test]
+    fn manager_flag_survives_saves_and_counts_the_team() {
+        let store = crate::state::Store::open(":memory:").unwrap();
+        store.save_agent("pm-1", "project manager", "agent:pm-1", "m", "[]");
+        store.set_manager("pm-1", true);
+        store.save_agent("dev-1", "engineer", "agent:dev-1", "m", "[]");
+        assert!(store.is_manager("pm-1"));
+        assert!(!store.is_manager("dev-1"), "a plain hire is never a manager");
+        // A later save (every task end writes history back) must not demote them.
+        store.save_agent("pm-1", "project manager", "agent:pm-1", "m", "[{\"role\":\"user\"}]");
+        assert!(store.is_manager("pm-1"), "manager flag survives a history write-back");
+        // The hiring ceiling counts active employees, and firing frees a seat.
+        assert_eq!(store.count_active_agents(), 2);
+        store.fire_agent("dev-1");
+        assert_eq!(store.count_active_agents(), 1);
+        assert!(!store.is_manager("dev-1"));
     }
 
     #[test]
@@ -420,6 +462,7 @@ mod tests {
             store: std::sync::Arc::new(crate::state::Store::open(":memory:").unwrap()),
             workspace: ws.clone(),
             http: reqwest::Client::new(),
+            http_proxy: None,
         };
         // On Linux the ancestor probe alone let this through: `new` does not exist,
         // so exists() failed all the way back to the workspace and the check passed,

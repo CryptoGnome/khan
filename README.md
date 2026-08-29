@@ -76,6 +76,13 @@ viewer gives you a live window into what the company is doing from anywhere.
    - `OPENROUTER_API_KEY` and/or `BU0Y_API_KEY` (whatever your `khan.toml` providers need)
    - `KHAN_DIRECTIVE` — the base directive. This is where the big goal goes;
      multi-line/multi-paragraph values are fine in Railway's variable editor.
+   - `FETCH_PROXY` *(optional)* — a residential proxy URL
+     (`http://user:pass@gateway:port`) for web fetching. Datacenter IPs are
+     walled off from much of the web (search engines, CDNs, many sites);
+     with this set, `web_fetch`/`web_search` automatically retry blocked
+     requests through the proxy, and agents can opt into it for scraping.
+     The value is registered with the log redactor and never routes RPC or
+     model-API traffic.
 5. **Deploy.** The image's default command is `khan auto`: first boot starts
    the mission from `KHAN_DIRECTIVE`; every later deploy **resumes** it.
 6. **Enable public networking** on the service to get the live log viewer at

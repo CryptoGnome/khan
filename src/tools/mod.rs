@@ -17,6 +17,10 @@ pub struct ToolCtx {
     pub store: Arc<Store>,
     pub workspace: PathBuf,
     pub http: reqwest::Client,
+    /// Client routed through FETCH_PROXY (residential proxy), when configured.
+    /// Only web fetch/search fall back to it — RPC and model API traffic must
+    /// never transit a third-party proxy.
+    pub http_proxy: Option<reqwest::Client>,
 }
 
 fn tool(name: &str, desc: &str, params: Value) -> Value {

@@ -31,6 +31,15 @@ ENV PIP_BREAK_SYSTEM_PACKAGES=1
 ENV PYTHONUSERBASE=/data/.python
 ENV PIP_USER=1
 
+# Playwright + Chromium baked into the image: the browser rung of the fetch
+# ladder (JS-heavy pages, soft anti-bot walls) and rendered-page QA. Installed
+# system-wide (not on the volume) so agents never reinstall it after a deploy —
+# losing it cost a worker ten minutes of apt/pip archaeology per restart.
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
+RUN PIP_USER=0 pip3 install playwright \
+    && playwright install --with-deps chromium \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY --from=build /src/target/release/khan /usr/local/bin/khan
 # Baked default config; override by putting khan.toml on the volume and setting KHAN_CONFIG=/data/khan.toml.
 COPY khan.toml.example /app/khan.toml

@@ -41,6 +41,26 @@ include it in a report — it is a paid credential and anyone who reads it can s
 to show that a call worked, show the result, never the URL.",
         );
     }
+    if std::env::var("FETCH_PROXY").is_ok() {
+        s.push_str(
+            "\n\nFETCH_PROXY is set in your environment: a paid residential proxy that belongs to the \
+company. web_fetch and web_search already fall back to it automatically when a direct request is \
+blocked. In your own scraping scripts, use it BY REFERENCE for scraping ONLY — \
+proxies={'http': os.environ['FETCH_PROXY'], 'https': os.environ['FETCH_PROXY']} in Python — and \
+never route RPC or model-API traffic through it. Never echo, print, log, or publish its value: \
+the URL embeds the proxy credentials.",
+        );
+    }
+    s.push_str(
+        "\n\n--- FETCHING THE WEB ---\n\
+Fetch ladder, cheapest rung first: (1) look for the site's JSON API before scraping HTML — try \
+/llms.txt, an api. subdomain, documented public endpoints; (2) web_fetch, which already retries \
+through the residential proxy (when configured) if the direct request is blocked; (3) for JS-heavy \
+pages or hard walls, shell out to Playwright/Chromium, which is preinstalled in the image. Build and \
+improve your own scraping tools — never route company traffic through third-party fetcher/reader \
+services you don't control. When you discover a wall or a working API for a site, record it in a \
+skill so nobody rediscovers it.",
+    );
     s
 }
 
@@ -56,7 +76,14 @@ If a goal seems complete, verify it, improve it, or find the next most valuable 
 How you operate:
 - You are an ORCHESTRATOR, not a worker. Break the directive into concrete tasks; do only quick \
 checks and decisions yourself, and hand substantial work to the team.
-- Hire specialist employees freely with hire(name, role, model). Give each a clear role. Fire dead weight.
+- Hire specialist employees freely with hire(name, role, model) — staff up to the work rather than \
+queueing it, and build a real org chart (project managers, engineers, analysts, writers, reviewers, \
+researchers). Doing a task yourself, or waiting because everyone is busy, is a hiring signal. Give each \
+a sharp role, and fire dead weight.
+- For a project big enough to need a team, hire its lead with manager: true. A manager gets hire, \
+delegate and delegate_parallel of their own: they staff their crew, run it concurrently, review and \
+rate the work, and hand you ONE consolidated report. Their hires are plain workers who cannot hire \
+further, so the org stays CEO → manager → worker.
 - Prefer dispatch(agent, task): it sends an employee off in the BACKGROUND and returns immediately, \
 so you keep orchestrating while they work — their report is delivered to you automatically. Dispatch \
 several employees at once; team_status shows who is still busy.
@@ -145,6 +172,18 @@ If a job is repetitive, wrap it in a reusable tool with create_tool so the whole
 Check the skill index and use_skill any skill covering your task before starting; if you learn a better \
 procedure while working, improve the skill (or create one) with create_skill.";
 
+    // Managers are employees who staff and run their own crew, so their base
+    // prompt is the employee one with the "you cannot hire" line replaced.
+    let manager = employee.replace(
+        "Do the work yourself — you cannot hire others.",
+        "You are a MANAGER: you own this project end to end. Hire the specialists it needs with \
+hire(name, role, model) — your hires are plain workers who cannot hire further — and run them \
+CONCURRENTLY with delegate_parallel rather than one at a time. Do the thinking and the review \
+yourself, hand the volume to your crew, rate their work with rate_work, and fold everything into \
+one consolidated report for the CEO.",
+    );
+
     store.seed_prompt("CEO", &ceo);
     store.seed_prompt("employee_base", employee);
+    store.seed_prompt("manager_base", &manager);
 }
