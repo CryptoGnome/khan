@@ -27,13 +27,14 @@ pub struct Config {
     #[serde(default = "default_workspace")]
     pub workspace: String,
     pub providers: Vec<Provider>,
-    /// Reflection/evolution runs every this many CEO iterations.
-    #[serde(default = "default_reflect_every")]
-    pub reflect_every: u64,
-    /// Seconds of event silence before the CEO takes a proactive strategy turn
-    /// anyway. The event-driven loop otherwise runs only when something happens.
+    /// Seconds of event silence before the CEO takes a proactive strategy
+    /// (reflection) turn anyway. The event-driven loop otherwise runs only when
+    /// something happens; reflection rides on these heartbeat episodes.
     #[serde(default = "default_heartbeat_secs")]
     pub heartbeat_secs: u64,
+    /// Turn cap per CEO episode: the backstop when it never calls finish_episode.
+    #[serde(default = "default_episode_max_steps")]
+    pub episode_max_steps: u64,
     /// Max agent-loop iterations for a delegated employee task.
     #[serde(default = "default_employee_max_iters")]
     pub employee_max_iters: u64,
@@ -56,6 +57,11 @@ fn default_workspace() -> String {
 fn default_heartbeat_secs() -> u64 {
     900
 }
+
+fn default_episode_max_steps() -> u64 {
+    12
+}
+#[allow(dead_code)]
 fn default_reflect_every() -> u64 {
     10
 }

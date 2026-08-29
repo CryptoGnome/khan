@@ -65,6 +65,9 @@ fn ceo_schemas() -> Vec<Value> {
             json!(["topic", "content"])),
         tool("finish", "Record a milestone report for the founder. Work continues afterwards.", json!({
             "report": {"type": "string"}}), json!(["report"])),
+        tool("finish_episode", "Close this working episode. Your transcript is DISPOSABLE — only what you write here, on the board, and in memories survives to the next episode. The note is your handoff to your next self: what changed, what is in flight and with whom, and what the next episode must do or know. Call this when the events you woke for are handled and everything else is delegated or on the board.", json!({
+            "note": {"type": "string", "description": "What changed, what is in flight, what the next episode must know. Max ~1500 chars."}}),
+            json!(["note"])),
         tool("set_ceo_model", "Switch which model YOU (the CEO) run on, starting next iteration. Choose from the approved pool (call with model '?' to list it, with quality scores where known). Match the model to the stakes: your seat makes every hiring, treasury and strategy call, so a stronger model here pays for itself — but if your chosen model starts failing you are reverted to the reliable default automatically.", json!({
             "model": {"type": "string", "description": "provider/model from the approved pool, or '?' to list the pool"}}),
             json!(["model"])),
@@ -167,6 +170,7 @@ const CEO_TOOL_NAMES: &[&str] = &[
     "hire", "delegate", "delegate_parallel", "dispatch", "team_status", "rate_work", "fire", "list_team",
     "add_routine", "remove_routine", "list_routines",
     "update_prompt", "rollback_prompt", "save_playbook", "finish", "set_ceo_model", "objectives",
+    "finish_episode",
 ];
 
 /// Tools that read state without changing it. A CEO turn whose calls all come
@@ -431,10 +435,6 @@ Drop superseded detail, resolved dead ends, and chatter.",
         }
     }
 
-    fn persist_ceo(&self, history: &[Message]) {
-        let h = serde_json::to_string(history).unwrap_or_else(|_| "[]".into());
-        self.ctx.store.save_agent("CEO", "CEO", "CEO", &self.current_ceo_model(), &h);
-    }
 
     /// Run one employee's loop to completion on a task; returns their report.
     /// Takes an Arc so several employees can run concurrently (delegate_parallel)
@@ -890,6 +890,28 @@ Drop superseded detail, resolved dead ends, and chatter.",
             .unwrap_or_else(|| self.ctx.cfg.ceo_model.clone())
     }
 
+    /// True when the heartbeat interval has elapsed; stamps the clock when so.
+    fn heartbeat_due(&self) -> bool {
+        let now = chrono::Utc::now();
+        let last = self
+            .ctx
+            .store
+            .kv_get("last_heartbeat")
+            .and_then(|v| chrono::DateTime::parse_from_rfc3339(&v).ok())
+            .map(|t| t.with_timezone(&chrono::Utc));
+        match last {
+            Some(t) if (now - t).num_seconds() as u64 >= self.ctx.cfg.heartbeat_secs => {
+                self.ctx.store.kv_set("last_heartbeat", &now.to_rfc3339());
+                true
+            }
+            None => {
+                self.ctx.store.kv_set("last_heartbeat", &now.to_rfc3339());
+                false
+            }
+            _ => false,
+        }
+    }
+
     /// Block until there is something for the CEO to react to: a finished
     /// dispatch, a founder message, a routine alert — or the heartbeat deadline,
     /// which fires a proactive strategy turn even in total silence. Returns true
@@ -910,19 +932,7 @@ Drop superseded detail, resolved dead ends, and chatter.",
                     return false;
                 }
             }
-            let last_hb: chrono::DateTime<chrono::Utc> = self
-                .ctx
-                .store
-                .kv_get("last_heartbeat")
-                .and_then(|v| chrono::DateTime::parse_from_rfc3339(&v).ok())
-                .map(|t| t.with_timezone(&chrono::Utc))
-                .unwrap_or_else(|| {
-                    let now = chrono::Utc::now();
-                    self.ctx.store.kv_set("last_heartbeat", &now.to_rfc3339());
-                    now
-                });
-            if (chrono::Utc::now() - last_hb).num_seconds() as u64 >= self.ctx.cfg.heartbeat_secs {
-                self.ctx.store.kv_set("last_heartbeat", &chrono::Utc::now().to_rfc3339());
+            if self.heartbeat_due() {
                 return true;
             }
             if !announced {
@@ -961,55 +971,119 @@ Drop superseded detail, resolved dead ends, and chatter.",
     }
 
     /// The unbounded CEO loop. Runs until the stop flag is set (Ctrl+C).
-    pub async fn run_ceo(self: &Arc<Self>, directive: &str, fresh: bool) -> Result<()> {
-        // MANDATE rides alongside SECURITY: both come from code every turn, so
-        // neither a prompt rewrite nor a rollback can leave the CEO without them.
-        let sys = crate::prompts::ceo_system(
-            &self.ctx.store.get_prompt("CEO").unwrap_or_default(),
-        );
-        let mut history: Vec<Message> = if fresh {
-            vec![
-                Message::text("system", sys),
-                Message::text("user", format!("BASE DIRECTIVE from your founder:\n{directive}\n\nBegin. Work autonomously and continuously.")),
-            ]
-        } else {
-            let h = self.ctx.store.load_agent("CEO").map(|(_, _, _, h)| h).unwrap_or_else(|| "[]".into());
-            let mut hist: Vec<Message> = serde_json::from_str(&h).unwrap_or_default();
-            if hist.is_empty() {
-                hist.push(Message::text("system", sys));
-                hist.push(Message::text("user", format!("BASE DIRECTIVE from your founder:\n{directive}\n\nBegin.")));
-            } else {
-                hist[0] = Message::text("system", sys); // pick up evolved prompt
-                hist.push(Message::text("user", "You were restarted. Review where you left off (use recall / list_team / read the workspace) and continue."));
+    pub async fn run_ceo(self: &Arc<Self>, directive: &str, _fresh: bool) -> Result<()> {
+
+        // One-way migration off the legacy resident transcript: distill its tail
+        // into the first episode note, then never read it again.
+        if self.ctx.store.last_episode_note().is_none() {
+            if let Some((_, _, model, h)) = self.ctx.store.load_agent("CEO") {
+                let legacy: Vec<Message> = serde_json::from_str(&h).unwrap_or_default();
+                if !legacy.is_empty() {
+                    let tail: Vec<String> = legacy
+                        .iter()
+                        .rev()
+                        .filter(|m| m.role == "assistant")
+                        .filter_map(|m| m.content.clone())
+                        .take(3)
+                        .map(|c| c.chars().take(500).collect())
+                        .collect();
+                    self.ctx.store.add_episode(
+                        &chrono::Utc::now().to_rfc3339(),
+                        "migration",
+                        &format!(
+                            "Migrated from the legacy resident transcript. Its most recent statements, newest first:\n{}",
+                            tail.join("\n---\n")
+                        ),
+                        0,
+                    );
+                    self.ctx.store.save_agent("CEO", "CEO", "CEO", &model, "[]");
+                    self.log_line("CEO", "migrated", "legacy transcript distilled into the first episode note");
+                }
             }
-            hist
-        };
+        }
 
         let mut iter: u64 = self.ctx.store.kv_get("iteration").and_then(|v| v.parse().ok()).unwrap_or(0);
-        // Whether the previous turn changed anything. Starts true so the first
-        // turn after boot always runs (it has the restart context to act on).
-        let mut last_advanced = true;
+        let mut first_episode = true;
 
-        loop {
+        'episodes: loop {
             if self.stop.load(Ordering::Relaxed) {
                 break;
             }
-            // Event-driven idle: a turn that only observed advanced nothing, so
-            // the next model call would look at the same world and say the same
-            // thing. Block until the world changes — a report, a founder message,
-            // a routine alert — or the heartbeat says it is time for a proactive
-            // strategy turn regardless.
+            // Between episodes the loop is event-driven: block until a report,
+            // founder message or alert exists — or the heartbeat fires a
+            // proactive strategy episode. Returns immediately when there is
+            // already something to react to, or when nothing is dispatched at
+            // all (an idle company should be staffing, not sleeping).
             let mut heartbeat = false;
-            if !last_advanced {
+            if !first_episode {
                 heartbeat = self.wait_for_event().await;
                 if self.stop.load(Ordering::Relaxed) {
                     break;
                 }
             }
+            first_episode = false;
+            // A busy company never idles into wait_for_event, so the heartbeat
+            // must also be able to fire between back-to-back episodes.
+            heartbeat |= self.heartbeat_due();
+
+            // Compose this episode's context from durable state. The transcript
+            // that follows is disposable: everything worth keeping leaves through
+            // the board, memories, ratings — and the closing note.
+            let sys = crate::prompts::ceo_system(&self.ctx.store.get_prompt("CEO").unwrap_or_default());
+            let mut history: Vec<Message> = vec![Message::text("system", sys)];
+            let roster = self.ctx.store.team_roster_text();
+            let recent = self.ctx.store.recent_log(15);
+            history.push(Message::text(
+                "user",
+                format!(
+                    "[Company brief — composed fresh each episode; durable truth lives on the objective board, in memories and in skills]\n\
+BASE DIRECTIVE from your founder:\n{directive}\n\nTEAM:\n{roster}\n\nRECENT ACTIVITY (public log tail):\n{recent}"
+                ),
+            ));
+            if let Some(note) = self.ctx.store.last_episode_note() {
+                history.push(Message::text("user", format!("[Your previous episode's closing note]\n{note}")));
+            }
+            // Founder messages drained by an episode a restart then killed would
+            // otherwise vanish; the scratch replays them.
+            if let Some(scratch) = self.ctx.store.kv_get("episode_scratch").filter(|s| !s.is_empty()) {
+                history.push(Message::text(
+                    "user",
+                    format!("[Recovered founder input from an interrupted episode — still act on this]\n{scratch}"),
+                ));
+                self.ctx.store.kv_set("episode_scratch", "");
+            }
+            history.push(Message::text(
+                "user",
+                if heartbeat {
+                    "Heartbeat episode: review strategy and the board, then handle anything pending. \
+Close with finish_episode(note) when done."
+                } else {
+                    "Handle the events that arrive below. Delegate the work, decide what needs deciding, \
+keep the board honest, then close with finish_episode(note)."
+                },
+            ));
+
+            let episode_started = chrono::Utc::now().to_rfc3339();
+            let mut event_kind = if heartbeat { "heartbeat" } else { "event" }.to_string();
+            let mut steps: u64 = 0;
+            let mut episode_note: Option<String> = None;
+            let mut obs_streak: u32 = 0;
+            // Auto-close only arms after the episode has advanced something:
+            // reading before acting is investigation, reading after acting is
+            // the poll disease. The step cap still bounds pure investigation.
+            let mut did_advance = false;
+
+            'turns: loop {
+            if self.stop.load(Ordering::Relaxed) {
+                break 'turns;
+            }
+            steps += 1;
+            if steps > self.ctx.cfg.episode_max_steps {
+                break 'turns;
+            }
             iter += 1;
             self.ctx.store.kv_set("iteration", &iter.to_string());
             let ceo_model = self.current_ceo_model();
-            self.maybe_compact("CEO", &ceo_model, &mut history).await;
             // Rebuilt every iteration so newly created custom tools become callable at once.
             let mut schemas = tools::work_schemas();
             schemas.extend(tools::custom::management_schemas());
@@ -1027,31 +1101,40 @@ Drop superseded detail, resolved dead ends, and chatter.",
             });
 
             // Reports from finished background dispatches land first.
-            self.harvest_dispatches(&mut history).await;
+            {
+                let before = history.len();
+                self.harvest_dispatches(&mut history).await;
+                if history.len() > before && event_kind == "event" {
+                    event_kind = "report".into();
+                }
+            }
 
             // Routine alerts: a scheduled check failed or printed ALERT. The
             // runner already logged it publicly; here it enters the CEO's context.
             for (name, detail) in self.ctx.store.drain_routine_alerts() {
+                if event_kind == "event" {
+                    event_kind = "alert".into();
+                }
                 history.push(Message::text(
                     "user",
                     format!("[Routine alert — {name}] The scheduled check failed or printed ALERT:\n{detail}\nInvestigate and fix the underlying problem; the routine stays scheduled."),
                 ));
             }
 
-            // Founder messages sent via `khan tell` land as top-priority instructions.
+            // Founder messages sent via `khan tell` land as top-priority
+            // instructions. The transcript is disposable, so each is also banked
+            // in the scratch until the episode closes: a restart mid-episode
+            // replays them instead of eating them.
             for m in self.ctx.store.drain_messages() {
+                event_kind = "founder".into();
                 self.log_line("CEO", "founder-message", &m);
+                let scratch = self.ctx.store.kv_get("episode_scratch").unwrap_or_default();
+                self.ctx.store.kv_set("episode_scratch", &format!("{scratch}\n---\n{m}"));
                 history.push(Message::text("user", format!("[Message from your founder — act on this now]\n{m}")));
             }
-            // The drains above marked their rows delivered, but this history only
-            // reaches the DB at the end of the iteration — a restart in between
-            // (every deploy) would lose the drained messages with no trace. Save
-            // now, so delivered always means persisted.
-            self.persist_ceo(&history);
 
-            // Reflection cadence: every N busy iterations, and on every
-            // heartbeat — a quiet company still reviews its strategy.
-            if iter % self.ctx.cfg.reflect_every == 0 || heartbeat {
+            // The reflection payload opens every heartbeat episode.
+            if heartbeat && steps == 1 {
                 let log = self.ctx.store.recent_log(40);
                 let toks = format!(
                     "Cumulative token usage since last restart (all agents): {} in / {} out. \
@@ -1301,15 +1384,20 @@ objective:<id>. Keep the board honest: add new bets, declare blocked_by, mark do
                 }
                 history.push(Message::text(
                     "user",
-                    "Do not stop. Take the next concrete action with a tool call (or finish(report) if you hit a milestone).",
+                    "Do not stop. Take the next concrete action with a tool call (or finish_episode(note) if this episode's events are handled).",
                 ));
-                // The nudge deserves an immediate retry, not an event wait.
-                last_advanced = true;
             } else {
                 let mut advanced = false;
+                let mut closed = false;
                 for call in calls {
                     let a = args_of(&call);
                     let tname = call.function.name.clone();
+                    if tname == "finish_episode" {
+                        episode_note = Some(s(&a, "note").chars().take(1500).collect());
+                        history.push(Message::tool_result(&call.id, "episode closed"));
+                        closed = true;
+                        continue;
+                    }
                     if !OBSERVATION_TOOLS.contains(&tname.as_str()) {
                         advanced = true;
                     }
@@ -1321,10 +1409,27 @@ objective:<id>. Keep the board honest: add new bets, declare blocked_by, mark do
                     };
                     history.push(Message::tool_result(&call.id, out));
                 }
-                last_advanced = advanced;
+                if closed {
+                    break 'turns;
+                }
+                // After the episode has acted, two consecutive observation-only
+                // turns with nothing new pending is quiescence: the episode is
+                // over whether it says so or not.
+                if advanced {
+                    did_advance = true;
+                    obs_streak = 0;
+                } else {
+                    obs_streak += 1;
+                    let idle = {
+                        let p = self.pending.lock().await;
+                        !p.iter().any(|t| t.handle.is_finished())
+                    };
+                    if did_advance && obs_streak >= 2 && idle && !self.ctx.store.has_pending_input() {
+                        break 'turns;
+                    }
+                }
             }
 
-            self.persist_ceo(&history);
             if iter % 5 == 0 {
                 println!(
                     "\x1b[2m-- iter {iter} | tokens: {} in / {} out --\x1b[0m",
@@ -1332,35 +1437,62 @@ objective:<id>. Keep the board honest: add new bets, declare blocked_by, mark do
                     self.tokens.completion.load(Ordering::Relaxed)
                 );
             }
+            } // 'turns
+
+            // Close the episode: the note is the only part of this transcript
+            // that survives. Synthesized from the tail when the model never
+            // closed properly — partial truth beats silence, here too.
+            let note = episode_note.unwrap_or_else(|| {
+                let tail: Vec<String> = history
+                    .iter()
+                    .rev()
+                    .filter(|m| m.role == "assistant")
+                    .filter_map(|m| m.content.clone())
+                    .take(2)
+                    .map(|c| c.chars().take(600).collect())
+                    .collect();
+                format!(
+                    "[synthesized — episode ended without finish_episode]\nLast statements, newest first:\n{}",
+                    tail.join("\n---\n")
+                )
+            });
+            self.ctx.store.add_episode(&episode_started, &event_kind, &note, steps as i64);
+            self.ctx.store.kv_set("episode_scratch", "");
+            self.ctx.store.save_agent("CEO", "CEO", "CEO", &self.current_ceo_model(), "[]");
+            self.log_line("CEO", "episode-closed", &format!("[{event_kind}, {steps} step(s)] {}", glimpse(&note)));
+
+            if self.stop.load(Ordering::Relaxed) {
+                break 'episodes;
+            }
         }
         // Give in-flight background employees a moment to notice the stop flag and
-        // save their own state; bank any reports that make it back in time.
+        // save their own state; reports that make it back in time are banked as an
+        // episode note so the next boot's brief carries them.
         {
+            let mut banked: Vec<String> = Vec::new();
             let mut pending = self.pending.lock().await;
             for t in pending.drain(..) {
                 match tokio::time::timeout(std::time::Duration::from_secs(30), t.handle).await {
-                    Ok(Ok(report)) => history.push(Message::text(
-                        "user",
-                        format!("[Background report from {} — task: {}]\n{report}", t.agent, glimpse(&t.task)),
+                    Ok(Ok(report)) => banked.push(format!(
+                        "[{} — task: {}]\n{}",
+                        t.agent,
+                        glimpse(&t.task),
+                        report.chars().take(900).collect::<String>()
                     )),
                     _ => self.log_line("CEO", "shutdown", &format!("{} did not finish before shutdown; their saved state resumes next start", t.agent)),
                 }
             }
-        }
-        // Save the real history FIRST, so nothing is lost if the platform kills us
-        // during the summarization below.
-        self.persist_ceo(&history);
-        // Then shrink what the next boot has to load. A resume re-sends the whole
-        // history in one uncached call before it can act, which is the difference
-        // between coming back in seconds and coming back in minutes. Bounded, because
-        // a shutdown that overruns the platform's grace period gets SIGKILLed.
-        if Self::history_chars(&history) > Self::KEEP_RECENT {
-            let _ = tokio::time::timeout(
-                std::time::Duration::from_secs(60),
-                self.compact("CEO", &mut history),
-            )
-            .await;
-            self.persist_ceo(&history);
+            if !banked.is_empty() {
+                self.ctx.store.add_episode(
+                    &chrono::Utc::now().to_rfc3339(),
+                    "shutdown",
+                    &format!(
+                        "Shutdown banked these late reports — review them first next episode:\n{}",
+                        banked.join("\n---\n")
+                    ),
+                    0,
+                );
+            }
         }
         self.ctx.store.log("khan", "shutdown", "state saved — resumes on next start");
         println!("\nState saved. Resume with: khan resume");

@@ -264,6 +264,23 @@ mod tests {
     }
 
     #[test]
+    fn episode_notes_roundtrip_and_roster_renders() {
+        let store = crate::state::Store::open(":memory:").unwrap();
+        assert!(store.last_episode_note().is_none());
+        store.add_episode("2026-08-29T20:00:00Z", "founder", "did X; next: Y", 4);
+        store.add_episode("2026-08-29T20:10:00Z", "report", "rated Z 5/5; phone still pending", 2);
+        // The newest note is the one the next episode's brief carries.
+        assert_eq!(store.last_episode_note().unwrap(), "rated Z 5/5; phone still pending");
+        store.save_agent("worker-1", "role", "agent:worker-1", "bu0y/deepseekv4flash", "[]");
+        store.save_agent("mgr-1", "role", "agent:mgr-1", "bu0y/glm53flash", "[]");
+        store.set_manager("mgr-1", true);
+        let roster = store.team_roster_text();
+        assert!(roster.contains("worker-1 (bu0y/deepseekv4flash)"));
+        assert!(roster.contains("mgr-1 (bu0y/glm53flash, manager)"));
+        assert!(!roster.contains("CEO"));
+    }
+
+    #[test]
     fn observation_set_excludes_every_advancing_tool() {
         use crate::agent::OBSERVATION_TOOLS as OBS;
         // Advancing actions must never be classified as observation — that would

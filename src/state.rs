@@ -205,6 +205,10 @@ impl Store {
              CREATE TABLE IF NOT EXISTS routine_alerts (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL,
                 name TEXT NOT NULL, detail TEXT NOT NULL, delivered INTEGER NOT NULL DEFAULT 0);
+             CREATE TABLE IF NOT EXISTS episodes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, started_at TEXT NOT NULL,
+                ended_at TEXT NOT NULL, event_kind TEXT NOT NULL,
+                note TEXT NOT NULL, steps INTEGER NOT NULL);
              CREATE TABLE IF NOT EXISTS objectives (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL,
                 rank INTEGER NOT NULL DEFAULT 100, status TEXT NOT NULL DEFAULT 'active',
@@ -248,6 +252,41 @@ impl Store {
     pub fn kv_get(&self, k: &str) -> Option<String> {
         let c = self.conn.lock().unwrap();
         c.query_row("SELECT v FROM kv WHERE k=?1", params![k], |r| r.get(0)).ok()
+    }
+
+    // --- CEO episodes (the transcript is disposable; notes carry continuity) ---
+
+    pub fn add_episode(&self, started_at: &str, event_kind: &str, note: &str, steps: i64) {
+        let c = self.conn.lock().unwrap();
+        let _ = c.execute(
+            "INSERT INTO episodes(started_at, ended_at, event_kind, note, steps) VALUES(?1,?2,?3,?4,?5)",
+            params![started_at, chrono::Utc::now().to_rfc3339(), event_kind, note, steps],
+        );
+    }
+
+    pub fn last_episode_note(&self) -> Option<String> {
+        let c = self.conn.lock().unwrap();
+        c.query_row("SELECT note FROM episodes ORDER BY id DESC LIMIT 1", [], |r| r.get(0)).ok()
+    }
+
+    /// One line per active employee for the episode brief.
+    pub fn team_roster_text(&self) -> String {
+        let c = self.conn.lock().unwrap();
+        let Ok(mut stmt) = c.prepare(
+            "SELECT name, model, manager FROM agents WHERE active=1 AND name!='CEO' ORDER BY name",
+        ) else {
+            return String::new();
+        };
+        let rows: Vec<(String, String, i64)> = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .map(|it| it.filter_map(|x| x.ok()).collect())
+            .unwrap_or_default();
+        rows.iter()
+            .map(|(n, m, mgr)| {
+                format!("- {n} ({m}{})", if *mgr == 1 { ", manager" } else { "" })
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 
     // --- objective board (standing priority structure; immune to compaction) ---

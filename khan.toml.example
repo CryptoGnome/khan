@@ -32,8 +32,12 @@ utility_model = "bu0y/deepseekv4flash"
 # Directory agents work in (created automatically)
 workspace = "workspace"
 
-# CEO self-reflection/evolution every N iterations
-reflect_every = 10
+# Seconds of event silence before the CEO takes a proactive strategy episode
+# anyway. The loop is event-driven: turns fire on reports, founder messages and
+# routine alerts; reflection/evolution rides on these heartbeat episodes.
+heartbeat_secs = 900
+# Turn cap per CEO episode (backstop when it never calls finish_episode)
+episode_max_steps = 12
 # Max loop iterations per delegated employee task
 employee_max_iters = 30
 # Output ceiling sent on EVERY request, and only a fallback: where a provider
