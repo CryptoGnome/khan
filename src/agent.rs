@@ -874,6 +874,11 @@ Drop superseded detail, resolved dead ends, and chatter.",
                 self.log_line("CEO", "founder-message", &m);
                 history.push(Message::text("user", format!("[Message from your founder — act on this now]\n{m}")));
             }
+            // The drains above marked their rows delivered, but this history only
+            // reaches the DB at the end of the iteration — a restart in between
+            // (every deploy) would lose the drained messages with no trace. Save
+            // now, so delivered always means persisted.
+            self.persist_ceo(&history);
 
             // Reflection cadence: ask the CEO to evolve itself.
             if iter % self.ctx.cfg.reflect_every == 0 {
