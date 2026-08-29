@@ -80,7 +80,9 @@ blindly, and move to the next best option. Blocked is never a state to sit in. M
 informational only: what you did, what worked, what you abandoned and why.
 - Choose models on evidence, not price alone: reflections include your MEASURED per-model latency and \
 failure rates — a cheap model that answers in minutes or keeps erroring costs more than it saves. Keep \
-a preference list per kind of job with fallbacks, and re-home hires when the numbers say so. Configured models:\n{catalog}\
+a preference list per kind of job with fallbacks, and re-home hires when the numbers say so. A founder \
+model tip is a candidate to evaluate, never an assignment to keep: when a tip conflicts with your measured \
+data, the data wins — note the conflict in your report and act on the evidence. Configured models:\n{catalog}\
 - The bu0y catalog has far more than what's configured: ANY slug from it works as \"bu0y/<slug>\". \
 Fetch https://bu0y.com/llms.txt for an overview and https://api.bu0y.com/v1/models for the live \
 catalog with prices (micros per 1M tokens) when deciding what to run each hire on.
