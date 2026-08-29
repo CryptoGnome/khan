@@ -225,6 +225,10 @@ impl Store {
         // Migration: managers are employees who may staff and run their own crew.
         // Errors when the column already exists, which is the normal case.
         let _ = conn.execute("ALTER TABLE agents ADD COLUMN manager INTEGER NOT NULL DEFAULT 0", []);
+        // Migration: a rating belongs to the model that earned it. Without this the
+        // only measured signal per model is latency and failure rate, which favours
+        // cheap fast models by construction and can never justify a better one.
+        let _ = conn.execute("ALTER TABLE ratings ADD COLUMN model TEXT NOT NULL DEFAULT ''", []);
         Ok(Store { conn: Mutex::new(conn), log_tx: broadcast::channel(512).0 })
     }
 
@@ -381,6 +385,33 @@ impl Store {
         rows.join("\n")
     }
 
+    /// Average rated quality per model, with the sample size that earned it.
+    ///
+    /// The counterweight to model_stats_text. Latency and failure rate measure how
+    /// fast a model answers and whether it errors — never whether the answer was
+    /// any good — so on that evidence alone the cheapest flash model wins every
+    /// comparison and no stronger model can ever be justified. Ratings are the
+    /// CEO's own judgement rather than an objective score, so the sample count is
+    /// shown alongside: one 5/5 is an anecdote, not a reason to re-home a team.
+    pub fn model_quality_text(&self) -> String {
+        let c = self.conn.lock().unwrap();
+        let Ok(mut stmt) = c.prepare(
+            "SELECT model, COUNT(*) n, ROUND(AVG(score),2) avg
+             FROM ratings WHERE model != '' GROUP BY model ORDER BY avg DESC, n DESC",
+        ) else {
+            return String::new();
+        };
+        let rows: Vec<String> = stmt
+            .query_map([], |r| {
+                let (model, n, avg): (String, i64, f64) = (r.get(0)?, r.get(1)?, r.get(2)?);
+                let confidence = if n < 3 { " — too few to trust yet" } else { "" };
+                Ok(format!("- {model}: {avg}/5 over {n} rated task(s){confidence}"))
+            })
+            .map(|it| it.filter_map(|x| x.ok()).collect())
+            .unwrap_or_default();
+        rows.join("\n")
+    }
+
     // --- routines (scheduled checks the binary runs itself — zero model cost) ---
 
     pub fn upsert_routine(&self, name: &str, command: &str, interval_secs: i64, purpose: &str) {
@@ -497,9 +528,14 @@ impl Store {
             .query_row("SELECT MAX(version) FROM prompts WHERE name=?1", params![pname], |r| r.get(0))
             .ok()
             .flatten();
+        // Stamp the model the agent was running when the work was rated: re-homing
+        // changes it afterwards, and the score belongs to the model that earned it.
+        let model: String = c
+            .query_row("SELECT model FROM agents WHERE name=?1", params![agent], |r| r.get(0))
+            .unwrap_or_default();
         let _ = c.execute(
-            "INSERT INTO ratings(agent, score, note, prompt_version, created_at) VALUES(?1,?2,?3,?4,?5)",
-            params![agent, score, note, pv, chrono::Utc::now().to_rfc3339()],
+            "INSERT INTO ratings(agent, score, note, prompt_version, created_at, model) VALUES(?1,?2,?3,?4,?5,?6)",
+            params![agent, score, note, pv, chrono::Utc::now().to_rfc3339(), model],
         );
     }
 

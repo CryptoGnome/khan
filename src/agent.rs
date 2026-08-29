@@ -841,13 +841,23 @@ re-read this list before choosing models):\n{}",
                     self.ctx.cfg.model_catalog()
                 );
                 let model_stats = self.ctx.store.model_stats_text();
+                // Speed and failures alone can only ever argue for the cheapest
+                // model. Rated quality per model is what can argue the other way.
+                let q = self.ctx.store.model_quality_text();
+                let quality = if q.is_empty() {
+                    String::new()
+                } else {
+                    format!("\n\nRATED QUALITY BY MODEL (your own rate_work scores, attributed to the model that earned them):\n{q}")
+                };
                 let model_block = if model_stats.is_empty() {
                     String::new()
                 } else {
                     format!(
-                        "\n\nMEASURED MODEL PERFORMANCE (recent calls, all agents — your own data, not the vendor's claims):\n{model_stats}\n\
+                        "\n\nMEASURED MODEL PERFORMANCE (recent calls, all agents — your own data, not the vendor's claims):\n{model_stats}{quality}\n\
 Weigh this against live prices when hiring or rebalancing: a cheap model that averages 60s+ per call or keeps failing \
-is expensive in wall-clock and retries. Maintain your own model preferences per kind of job (planning, coding, bulk \
+is expensive in wall-clock and retries — and a cheap model that produces weak work is expensive in rework, so read \
+the two tables together. Speed and failure rate alone will always favour the cheapest model; the quality scores are \
+what can justify paying for a better one on the jobs that deserve it. Maintain your own model preferences per kind of job (planning, coding, bulk \
 scraping) with explicit fallbacks, record them with save_playbook, and move existing hires when the data says so."
                     )
                 };

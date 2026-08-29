@@ -81,6 +81,17 @@ and never reached an answer (finish_reason=length)",
 
 impl std::error::Error for Truncated {}
 
+/// True when a gateway 5xx carries an upstream read timeout rather than a
+/// transient fault.
+///
+/// The gateway surfaces these as a clean 502 whose body names the real upstream
+/// status, because it deliberately does not retry them itself: the origin accepted
+/// the request and kept generating, so the work is done and may be billed whether
+/// or not anyone reads it. Retrying doubles the bill for one answer.
+pub(crate) fn upstream_timeout(body: &str) -> bool {
+    body.contains("upstream status 524") || body.contains("upstream status 504")
+}
+
 /// The truncation behind an error, when that is what it was.
 pub fn truncation(e: &anyhow::Error) -> Option<Truncated> {
     e.downcast_ref::<Truncated>().copied()
@@ -296,13 +307,107 @@ impl Client {
         // max_tokens is always sent. Omitting it lets the gateway impose its own
         // small ceiling, and a reasoning model will burn the lot thinking and
         // return an empty answer.
+        // Streaming is not a UX choice here. A buffered response from a slow model
+        // sits silent long enough for the gateway edge to time out mid-generation
+        // while the origin is still working — that is what the 524s were, and the
+        // gateway will not retry them because the generation is billed either way.
+        // Streamed bytes keep the connection alive, so a slow model can finish.
         let mut body = serde_json::json!({
-            "model": model_id, "messages": messages, "max_tokens": max_tokens
+            "model": model_id, "messages": messages, "max_tokens": max_tokens,
+            "stream": true, "stream_options": {"include_usage": true}
         });
         if !tools.is_empty() {
             body["tools"] = Value::Array(tools.to_vec());
         }
         body
+    }
+
+    /// Accumulate one streamed completion into the same shape a buffered reply has.
+    ///
+    /// Returns the message, the usage the final chunk carried, the finish_reason,
+    /// and the reasoning-token count — the caller needs the last two together to
+    /// tell a real answer from a model that spent its whole budget thinking.
+    async fn read_stream(resp: reqwest::Response) -> Result<(Message, Usage, String, u64)> {
+        use futures::StreamExt;
+        let mut stream = resp.bytes_stream();
+        let (mut buf, mut content, mut reasoning, mut finish) =
+            (String::new(), String::new(), String::new(), String::new());
+        let mut usage = Usage::default();
+        let mut reasoning_tokens = 0u64;
+        // Tool calls arrive as deltas keyed by index: the id and name land once,
+        // then the arguments come a fragment at a time and must be concatenated in
+        // arrival order. Anything else produces truncated JSON arguments.
+        let mut calls: Vec<(String, String, String)> = Vec::new();
+        while let Some(chunk) = stream.next().await {
+            buf.push_str(&String::from_utf8_lossy(&chunk.context("stream broke mid-response")?));
+            // Only whole lines are safe to parse; a chunk can split one in half.
+            while let Some(pos) = buf.find('\n') {
+                let line: String = buf.drain(..=pos).collect();
+                let Some(data) = line.trim().strip_prefix("data:") else { continue };
+                let data = data.trim();
+                if data.is_empty() || data == "[DONE]" {
+                    continue;
+                }
+                let Ok(v) = serde_json::from_str::<Value>(data) else { continue };
+                if !v["usage"].is_null() {
+                    usage.prompt_tokens = v["usage"]["prompt_tokens"].as_u64().unwrap_or(usage.prompt_tokens);
+                    usage.completion_tokens =
+                        v["usage"]["completion_tokens"].as_u64().unwrap_or(usage.completion_tokens);
+                    reasoning_tokens = v["usage"]["completion_tokens_details"]["reasoning_tokens"]
+                        .as_u64()
+                        .unwrap_or(reasoning_tokens);
+                }
+                let ch = &v["choices"][0];
+                if let Some(f) = ch["finish_reason"].as_str().filter(|f| !f.is_empty()) {
+                    finish = f.to_string();
+                }
+                let d = &ch["delta"];
+                if let Some(c) = d["content"].as_str() {
+                    content.push_str(c);
+                }
+                for key in ["reasoning", "reasoning_content"] {
+                    if let Some(r) = d[key].as_str() {
+                        reasoning.push_str(r);
+                    }
+                }
+                for tc in d["tool_calls"].as_array().unwrap_or(&Vec::new()) {
+                    let idx = tc["index"].as_u64().unwrap_or(0) as usize;
+                    while calls.len() <= idx {
+                        calls.push((String::new(), String::new(), String::new()));
+                    }
+                    let slot = &mut calls[idx];
+                    if let Some(id) = tc["id"].as_str().filter(|s| !s.is_empty()) {
+                        slot.0 = id.to_string();
+                    }
+                    if let Some(n) = tc["function"]["name"].as_str().filter(|s| !s.is_empty()) {
+                        slot.1 = n.to_string();
+                    }
+                    if let Some(a) = tc["function"]["arguments"].as_str() {
+                        slot.2.push_str(a);
+                    }
+                }
+            }
+        }
+        let tool_calls: Vec<ToolCall> = calls
+            .into_iter()
+            .filter(|(_, name, _)| !name.is_empty())
+            .enumerate()
+            .map(|(i, (id, name, arguments))| ToolCall {
+                // Some gateways omit the id on the delta; the loop below needs a
+                // stable one to match the tool result back to its call.
+                id: if id.is_empty() { format!("call_{i}") } else { id },
+                kind: func_type(),
+                function: FunctionCall { name, arguments },
+            })
+            .collect();
+        let msg = Message {
+            role: "assistant".into(),
+            content: (!content.is_empty()).then_some(content),
+            tool_calls: (!tool_calls.is_empty()).then_some(tool_calls),
+            tool_call_id: None,
+            reasoning: (!reasoning.is_empty()).then_some(reasoning),
+        };
+        Ok((msg, usage, finish, reasoning_tokens))
     }
 
     /// Chat completion against any OpenAI-compatible endpoint. `model` is "provider/model".
@@ -354,52 +459,60 @@ impl Client {
             };
             let status = resp.status();
             let reset = retry_after(resp.headers());
-            let text = resp.text().await.unwrap_or_default();
-            if status.as_u16() == 429 {
-                // A rate limit does not clear in a few seconds of backoff, and each
-                // extra attempt counts against the very cap that was just hit. Park
-                // the model until the reset the server named, and stop retrying.
-                let d = reset.unwrap_or(Duration::from_secs(60));
-                self.set_cooldown(model, d);
-                bail!(
-                    "{model} rate limited (429), paused for {}s: {}",
-                    d.as_secs(),
-                    text.chars().take(200).collect::<String>()
-                );
-            }
-            if status.is_server_error() {
-                last_err = format!("{status}: {}", text.chars().take(300).collect::<String>());
-                continue;
-            }
+            // A failure is drained as text; a success stays a stream. Buffering the
+            // success here would reintroduce the very edge timeout streaming exists
+            // to avoid, so every error path is handled before the body is touched.
             if !status.is_success() {
+                let text = resp.text().await.unwrap_or_default();
+                if status.as_u16() == 429 {
+                    // A rate limit does not clear in a few seconds of backoff, and each
+                    // extra attempt counts against the very cap that was just hit. Park
+                    // the model until the reset the server named, and stop retrying.
+                    let d = reset.unwrap_or(Duration::from_secs(60));
+                    self.set_cooldown(model, d);
+                    bail!(
+                        "{model} rate limited (429), paused for {}s: {}",
+                        d.as_secs(),
+                        text.chars().take(200).collect::<String>()
+                    );
+                }
+                if status.is_server_error() {
+                    // An upstream 504/524 means the origin was still generating when
+                    // the edge gave up. The request was accepted and may be billed, so
+                    // a retry buys a second generation of an answer nobody will read —
+                    // and the gateway will not retry it either. Fail out so the caller
+                    // can try a DIFFERENT model, which at least produces one usable
+                    // answer for the money.
+                    if upstream_timeout(&text) {
+                        bail!(
+                            "{model} upstream timed out mid-generation — not retried, the request may already be billed: {}",
+                            text.chars().take(200).collect::<String>()
+                        );
+                    }
+                    last_err = format!("{status}: {}", text.chars().take(300).collect::<String>());
+                    continue;
+                }
                 bail!("{model} returned {status}: {}", text.chars().take(500).collect::<String>());
             }
-            let v: Value = serde_json::from_str(&text).context("invalid JSON from provider")?;
-            let msg_v = v["choices"][0]["message"].clone();
-            if msg_v.is_null() {
-                bail!("no message in response from {model}: {}", text.chars().take(500).collect::<String>());
-            }
-            let msg: Message = serde_json::from_value(msg_v).context("unexpected message shape")?;
-            let usage = Usage {
-                prompt_tokens: v["usage"]["prompt_tokens"].as_u64().unwrap_or(0),
-                completion_tokens: v["usage"]["completion_tokens"].as_u64().unwrap_or(0),
+            let (msg, usage, finish, reasoning_tokens) = match Self::read_stream(resp).await {
+                Ok(r) => r,
+                Err(e) => {
+                    // A broken connection is a transport fault, not the gateway
+                    // telling us the generation is already paid for, so this one is
+                    // worth another attempt.
+                    last_err = format!("stream: {e:#}");
+                    continue;
+                }
             };
             // A reasoning model can spend its whole output budget thinking and stop
             // before it answers: HTTP 200, empty content, finish_reason "length".
             // Providers say so plainly; not reading it is what made these look like
             // silent empty replies.
-            let finish = v["choices"][0]["finish_reason"].as_str().unwrap_or("");
             let nothing = msg.content.as_deref().is_none_or(|c| c.trim().is_empty())
                 && msg.tool_calls.as_ref().is_none_or(|t| t.is_empty());
             if nothing && finish == "length" {
-                let think = v["usage"]["completion_tokens_details"]["reasoning_tokens"]
-                    .as_u64()
-                    .unwrap_or(0);
-                return Err(anyhow::Error::new(Truncated {
-                    max_tokens: max_out,
-                    reasoning_tokens: think,
-                })
-                .context(model.to_string()));
+                return Err(anyhow::Error::new(Truncated { max_tokens: max_out, reasoning_tokens })
+                    .context(model.to_string()));
             }
             return Ok((msg, usage));
         }

@@ -214,6 +214,11 @@ mod tests {
         // and a reasoning model then spends the whole budget thinking and returns
         // an empty answer with finish_reason "length".
         assert_eq!(body["max_tokens"], 16_384);
+        // Streamed, because a buffered reply from a slow model sits silent long
+        // enough for the gateway edge to time out while the origin is still
+        // generating — and the usage chunk is the only place token counts arrive.
+        assert_eq!(body["stream"], true);
+        assert_eq!(body["stream_options"]["include_usage"], true);
         assert_eq!(body["messages"][1]["role"], "user");
         assert_eq!(body["messages"][1]["content"], "hi");
         // messages must not serialize null tool fields
