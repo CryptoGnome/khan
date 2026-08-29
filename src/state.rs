@@ -512,6 +512,15 @@ impl Store {
         );
     }
 
+    /// True when undelivered founder messages or routine alerts are queued —
+    /// a cheap peek for the idle wait, which must never mark anything delivered.
+    pub fn has_pending_input(&self) -> bool {
+        let c = self.conn.lock().unwrap();
+        let count = |sql: &str| c.query_row(sql, [], |r| r.get::<_, i64>(0)).unwrap_or(0);
+        count("SELECT COUNT(*) FROM messages WHERE delivered=0") > 0
+            || count("SELECT COUNT(*) FROM routine_alerts WHERE delivered=0") > 0
+    }
+
     /// Undelivered founder messages, oldest first; marks them delivered.
     pub fn drain_messages(&self) -> Vec<String> {
         let c = self.conn.lock().unwrap();

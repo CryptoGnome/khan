@@ -1068,9 +1068,13 @@ Save one-off lessons with save_playbook. Then continue the mission.\n\n{log}{sta
                     "Do not stop. Take the next concrete action with a tool call (or finish(report) if you hit a milestone).",
                 ));
             } else {
+                let mut only_status = true;
                 for call in calls {
                     let a = args_of(&call);
                     let tname = call.function.name.clone();
+                    if !matches!(tname.as_str(), "team_status" | "list_team") {
+                        only_status = false;
+                    }
                     self.log_line("CEO", &tname, &call.function.arguments);
                     let out = if CEO_TOOL_NAMES.contains(&tname.as_str()) {
                         tools::truncate(self.ceo_tool("CEO", &tname, &a).await)
@@ -1078,6 +1082,39 @@ Save one-off lessons with save_playbook. Then continue the mission.\n\n{log}{sta
                         tools::execute(&self.ctx, "CEO", &tname, &a).await
                     };
                     history.push(Message::tool_result(&call.id, out));
+                }
+                // A turn that only asked how the workers are doing, while work is
+                // still out, is a poll: nothing changes until a report lands, so
+                // the next model call repeats this one verbatim — at premium-seat
+                // prices, every few seconds. Reports, founder messages and routine
+                // alerts all arrive on their own; block on them for free instead
+                // of paying the model to keep asking.
+                if only_status {
+                    let t0 = std::time::Instant::now();
+                    let mut announced = false;
+                    loop {
+                        if self.stop.load(Ordering::Relaxed)
+                            || t0.elapsed() > std::time::Duration::from_secs(600)
+                            || self.ctx.store.has_pending_input()
+                        {
+                            break;
+                        }
+                        // Nothing dispatched, or a report is ready: iterate now.
+                        let p = self.pending.lock().await;
+                        if p.is_empty() || p.iter().any(|t| t.handle.is_finished()) {
+                            break;
+                        }
+                        drop(p);
+                        if !announced {
+                            announced = true;
+                            self.log_line(
+                                "CEO",
+                                "waiting",
+                                "all dispatched work is still running — holding for a report or message instead of polling",
+                            );
+                        }
+                        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                    }
                 }
             }
 
