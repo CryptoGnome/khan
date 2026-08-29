@@ -946,6 +946,21 @@ one low-stakes dispatch: hire onto one for a single ordinary task, then read the
                         untried.iter().map(|m| format!("- {m}")).collect::<Vec<_>>().join("\n")
                     )
                 };
+                // Credits are the company's fuel and the CEO seat is the one
+                // meter it never otherwise reads: its own loop runs constantly,
+                // so a premium self-assignment burns faster than any employee.
+                let burn_block = match tools::credits::usage_snapshot(&self.ctx).await {
+                    Some(snap) => format!(
+                        "\n\nCREDIT BURN — prepaid balance and recent usage (raw):\n{snap}\n\
+You are currently running on {ceo_model}. Credits are finite: project the runway at the current pace, \
+and treat a premium model on your own seat as a stretch, not a residence — your loop runs every few \
+seconds all day, and most iterations are routine orchestration that the default handles fine. Drop \
+back with set_ceo_model when the work in front of you is routine; step up when real decisions are on \
+the table. Switching is free and instant in both directions. If the runway is short, that is a \
+treasury decision: top up, or cut the burn."
+                    ),
+                    None => String::new(),
+                };
                 let health = self.ctx.store.tool_health_text();
                 let health_block = if health.is_empty() {
                     String::new()
@@ -962,7 +977,7 @@ If a prompt (yours or an employee's) is causing weak results, improve it with up
 or rollback_prompt if a recent change hurt. If a custom tool erred or is missing, improve or build it with \
 create_tool (rollback_tool reverts a bad version). If you or employees keep re-figuring-out the same procedure, \
 capture it as a skill with create_skill; improve skills that led agents astray (rollback_skill reverts). \
-Save one-off lessons with save_playbook. Then continue the mission.\n\n{log}{stats_block}{capacity_block}{health_block}{catalog}{model_block}{untried_block}\n\n{toks}"
+Save one-off lessons with save_playbook. Then continue the mission.\n\n{log}{stats_block}{capacity_block}{health_block}{catalog}{model_block}{untried_block}{burn_block}\n\n{toks}"
                 )));
             }
 

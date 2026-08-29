@@ -16,6 +16,21 @@ pub fn schemas(ctx: &ToolCtx) -> Vec<Value> {
         "parameters": {"type": "object", "properties": {}, "required": []}}})]
 }
 
+/// The balance/usage half of `run`, for contexts assembled by the binary itself
+/// (reflection). None when the provider is missing or the request fails — the
+/// caller shows nothing rather than an error the model cannot act on.
+pub async fn usage_snapshot(ctx: &ToolCtx) -> Option<String> {
+    let prov = ctx.cfg.providers.iter().find(|p| p.name == PROVIDER)?;
+    let key = ctx.cfg.key_for(PROVIDER)?.to_string();
+    let base = prov.base_url.trim_end_matches('/');
+    let resp = ctx.http.get(format!("{base}/account/usage")).bearer_auth(&key).send().await.ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let body = resp.text().await.ok()?;
+    Some(body.chars().take(1200).collect())
+}
+
 pub async fn run(ctx: &ToolCtx) -> Result<String> {
     let prov = ctx
         .cfg
