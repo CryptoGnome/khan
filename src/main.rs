@@ -468,10 +468,90 @@ mod tests {
         // so exists() failed all the way back to the workspace and the check passed,
         // then create_dir_all made `new` real and the write escaped.
         for bad in ["new/../../escaped.txt", "../escaped.txt", "a/b/../../../escaped.txt"] {
-            assert!(crate::tools::fs::write_file(&ctx, bad, "pwn").is_err(), "{bad} must be rejected");
+            assert!(crate::tools::fs::write_file(&ctx, bad, "pwn", false).is_err(), "{bad} must be rejected");
+            // Appending creates the file too, so it must be contained just as tightly.
+            assert!(crate::tools::fs::write_file(&ctx, bad, "pwn", true).is_err(), "{bad} must be rejected on append");
         }
         assert!(!root.join("escaped.txt").exists(), "nothing may be written outside the workspace");
-        assert!(crate::tools::fs::write_file(&ctx, "sub/ok.txt", "fine").is_ok());
+        assert!(crate::tools::fs::write_file(&ctx, "sub/ok.txt", "fine", false).is_ok());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A truncated answer must be recognisable as such, because the three callers
+    /// each treat it differently from an ordinary failure: no model fallback, no
+    /// dead employee, no silent CEO retry.
+    #[test]
+    fn truncation_is_distinguishable_from_an_ordinary_failure() {
+        use crate::llm::{truncation, Truncated};
+        let t = anyhow::Error::new(Truncated { max_tokens: 16_384, reasoning_tokens: 16_000 })
+            .context("openrouter/some-model");
+        let got = truncation(&t).expect("must survive being wrapped in context");
+        assert_eq!(got.max_tokens, 16_384);
+        assert_eq!(got.reasoning_tokens, 16_000);
+        // The message still has to read well in the log, model included.
+        let shown = format!("{t:#}");
+        assert!(shown.contains("openrouter/some-model"), "{shown}");
+        assert!(shown.contains("16384-token output budget"), "{shown}");
+        // Anything else must not be mistaken for it.
+        assert!(truncation(&anyhow::anyhow!("429 rate limited")).is_none());
+    }
+
+    /// The ceiling is per-model where the provider publishes one, and the same
+    /// number compaction reserves — the two must not drift apart.
+    #[test]
+    fn output_ceiling_follows_the_model_not_one_global_number() {
+        use crate::agent::compact_threshold;
+        let mut cfg: crate::config::Config = toml::from_str(
+            "ceo_model = \"p/m\"\n[[providers]]\nname = \"p\"\nbase_url = \"http://x\"\napi_key_env = \"X\"\npaid_models = [\"m\"]\n",
+        )
+        .unwrap();
+        cfg.max_tokens = 16_384;
+        let c = Client::new();
+        // Unknown model: the configured default, unchanged from before.
+        assert_eq!(c.output_limit("bu0y/whatever", &cfg), 16_384);
+        c.set_output_limit("openrouter/deepseek/deepseek-v3.2", 65_536);
+        c.set_output_limit("openrouter/minimax/minimax-m3", 512_000);
+        c.set_output_limit("openrouter/minimax/minimax-m2-her", 2_048);
+        // Published and modest: taken as-is, four times the old fixed ceiling.
+        assert_eq!(c.output_limit("openrouter/deepseek/deepseek-v3.2", &cfg), 65_536);
+        // Published and enormous: capped, or compaction would reserve the window.
+        assert_eq!(c.output_limit("openrouter/minimax/minimax-m3", &cfg), 65_536);
+        // Published and small: we stop over-asking, which the old global did.
+        assert_eq!(c.output_limit("openrouter/minimax/minimax-m2-her", &cfg), 2_048);
+        // A bigger reserve must never loosen compaction.
+        let ctx = Some(163_840);
+        assert!(compact_threshold(ctx, 65_536) <= compact_threshold(ctx, 16_384));
+    }
+
+    #[test]
+    fn append_builds_a_file_across_several_writes() {
+        use crate::tools::fs::write_file;
+        let cfg: crate::config::Config = toml::from_str(
+            "ceo_model = \"p/m\"\n[[providers]]\nname = \"p\"\nbase_url = \"http://x\"\napi_key_env = \"X\"\npaid_models = [\"m\"]\n",
+        )
+        .unwrap();
+        let root = std::env::temp_dir().join("khan-append-test");
+        let ws = root.join("ws");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&ws).unwrap();
+        let ctx = crate::tools::ToolCtx {
+            cfg,
+            store: std::sync::Arc::new(crate::state::Store::open(":memory:").unwrap()),
+            workspace: ws.clone(),
+            http: reqwest::Client::new(),
+            http_proxy: None,
+        };
+        // Appending to a file that does not exist yet must create it, so an agent
+        // can start a chunked write without a separate setup call.
+        write_file(&ctx, "page.html", "<html>", true).unwrap();
+        write_file(&ctx, "page.html", "body", true).unwrap();
+        let out = write_file(&ctx, "page.html", "</html>", true).unwrap();
+        assert_eq!(std::fs::read_to_string(ws.join("page.html")).unwrap(), "<html>body</html>");
+        // The running total is what tells the agent how far along it is.
+        assert!(out.contains("17 bytes total"), "{out}");
+        // Overwrite still truncates: append must be opt-in, never the default.
+        write_file(&ctx, "page.html", "fresh", false).unwrap();
+        assert_eq!(std::fs::read_to_string(ws.join("page.html")).unwrap(), "fresh");
         let _ = std::fs::remove_dir_all(&root);
     }
 

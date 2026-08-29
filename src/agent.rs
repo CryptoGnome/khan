@@ -1,4 +1,4 @@
-use crate::llm::{Client, Message, Usage};
+use crate::llm::{truncation, Client, Message, Usage};
 use crate::tools::{self, ToolCtx};
 use anyhow::Result;
 use serde_json::{json, Value};
@@ -122,6 +122,13 @@ pub(crate) fn split_point(history: &[Message], keep_recent: usize) -> usize {
     split
 }
 
+/// What to tell a model that spent its whole output budget before answering.
+///
+/// "Try again" would only reproduce the failure, so this names the cause and asks
+/// for a specific, smaller shape of turn — including the chunked-write recipe,
+/// since one oversized file is the usual way an agent gets here.
+const TRUNCATION_NUDGE: &str = "Your last response used up the entire output budget before you produced an answer, so nothing came back. Do not retry the same thing. Take ONE small step now instead of the whole task: think briefly, then make a single tool call. If you are writing a large file, build it in pieces — call write_file for the first chunk, then write_file with append=true for each chunk after it.";
+
 /// Compaction threshold in characters for a model whose context window is `ctx`
 /// tokens, or None when the provider does not publish one.
 ///
@@ -236,6 +243,13 @@ impl Orchestrator {
             Err(e) => {
                 self.ctx.store.record_model_call(model, started.elapsed().as_millis() as u64, false, &format!("{e:#}"));
                 self.log_line(agent, "llm-error", &format!("{model} failed: {e:#}"));
+                // Running out of output budget is the one failure another model
+                // cannot rescue: the request is unchanged, so every fallback spends
+                // its budget the same way. Walking the ladder here only burns
+                // minutes and free-tier requests before failing anyway.
+                if truncation(&e).is_some() {
+                    return Err(e);
+                }
                 for alt in self.ctx.cfg.free_model_ids() {
                     if alt == model {
                         continue;
@@ -297,8 +311,15 @@ impl Orchestrator {
     /// provider actually published a context window. An unknown model — which is
     /// every bu0y model, since their catalog is prices only — keeps the existing
     /// threshold exactly, so the default path is byte-for-byte what it was.
+    ///
+    /// The reserve is the ceiling actually sent for this model, not the configured
+    /// default, so the two stay in step: a model given a bigger output budget also
+    /// has that much more of its window spoken for.
     fn compact_at(&self, model: &str) -> usize {
-        compact_threshold(self.llm.context_limit(model), self.ctx.cfg.max_tokens)
+        compact_threshold(
+            self.llm.context_limit(model),
+            self.llm.output_limit(model, &self.ctx.cfg),
+        )
     }
 
     async fn maybe_compact(&self, name: &str, model: &str, history: &mut Vec<Message>) {
@@ -456,6 +477,23 @@ Drop superseded detail, resolved dead ends, and chatter.",
             let (msg, u) = match self.chat_fb(name, &model, &history, &schemas).await {
                 Ok(r) => r,
                 Err(e) => {
+                    // An overrun answer is a task-shaping problem, not a dead
+                    // employee. Killing the dispatch here threw away the whole task
+                    // over one oversized turn, and the CEO only found out by
+                    // noticing the silence. Ask for a smaller step instead; the
+                    // iteration cap still bounds this if it keeps overrunning.
+                    if let Some(t) = truncation(&e) {
+                        self.log_line(
+                            name,
+                            "truncated",
+                            &format!(
+                                "{model} hit its {}-token output ceiling before answering — asking for a smaller step",
+                                t.max_tokens
+                            ),
+                        );
+                        history.push(Message::text("user", TRUNCATION_NUDGE));
+                        continue;
+                    }
                     report = format!("ERROR: employee '{name}' model call failed: {e:#}");
                     break;
                 }
@@ -843,6 +881,21 @@ Save one-off lessons with save_playbook. Then continue the mission.\n\n{log}{sta
             let (msg, u) = match self.chat_fb("CEO", &self.ctx.cfg.ceo_model, &req, &schemas).await {
                 Ok(r) => r,
                 Err(e) => {
+                    // The CEO already retries forever, so an overrun would repeat
+                    // unchanged every iteration. The nudge goes into history so the
+                    // next request is actually different from the one that failed.
+                    if let Some(t) = truncation(&e) {
+                        self.log_line(
+                            "CEO",
+                            "truncated",
+                            &format!(
+                                "hit the {}-token output ceiling before answering — taking a smaller step",
+                                t.max_tokens
+                            ),
+                        );
+                        history.push(Message::text("user", TRUNCATION_NUDGE));
+                        continue;
+                    }
                     self.log_line("CEO", "llm-error", &format!("{e:#}"));
                     tokio::time::sleep(std::time::Duration::from_secs(15)).await;
                     continue;

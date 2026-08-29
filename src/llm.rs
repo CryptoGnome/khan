@@ -55,6 +55,37 @@ pub struct Usage {
     pub completion_tokens: u64,
 }
 
+/// The model spent its entire output budget before it produced anything: HTTP
+/// 200, empty content, `finish_reason` "length".
+///
+/// Carried as its own error type because the cure is specific. Retrying against
+/// another model cannot help — the request is identical, so the next model spends
+/// the same budget the same way — and failing the task outright throws away work
+/// over what is really a task-shaping problem. The caller asks for a smaller step.
+#[derive(Debug, Clone, Copy)]
+pub struct Truncated {
+    pub max_tokens: u32,
+    pub reasoning_tokens: u64,
+}
+
+impl std::fmt::Display for Truncated {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "used its entire {}-token output budget on reasoning ({} reasoning tokens) \
+and never reached an answer (finish_reason=length)",
+            self.max_tokens, self.reasoning_tokens
+        )
+    }
+}
+
+impl std::error::Error for Truncated {}
+
+/// The truncation behind an error, when that is what it was.
+pub fn truncation(e: &anyhow::Error) -> Option<Truncated> {
+    e.downcast_ref::<Truncated>().copied()
+}
+
 /// Request caps that apply to a provider's free model variants.
 #[derive(Debug, Clone, Copy)]
 pub struct Limits {
@@ -90,7 +121,19 @@ pub struct Client {
     /// Absent means unknown, which callers must treat as "no opinion" rather than
     /// as a small window.
     ctx_limits: Mutex<HashMap<String, u32>>,
+    /// "provider/model" -> most output tokens the provider will accept for one
+    /// answer. Published separately from the window and often far smaller than it:
+    /// a model with a 1M window can still cap a single answer at 16k.
+    out_limits: Mutex<HashMap<String, u32>>,
 }
+
+/// Never ask for more output than this, however much a model advertises.
+///
+/// This value is also what compaction reserves out of the context window (see
+/// `agent::compact_threshold`), so honouring a model that advertises 512k would
+/// squeeze the history down to nothing. 64k is far more than any single answer
+/// needs and still four times the old fixed ceiling.
+const MAX_OUTPUT: u32 = 65_536;
 
 impl Client {
     pub fn new() -> Client {
@@ -103,6 +146,7 @@ impl Client {
             free: Mutex::new(FreeUsage::default()),
             limits: Mutex::new(None),
             ctx_limits: Mutex::new(HashMap::new()),
+            out_limits: Mutex::new(HashMap::new()),
         }
     }
 
@@ -123,15 +167,42 @@ impl Client {
         let Ok(resp) = self.http.get(&url).send().await else { return };
         let Ok(v) = resp.json::<Value>().await else { return };
         let Some(list) = v["data"].as_array() else { return };
-        let mut map = self.ctx_limits.lock().unwrap();
+        let mut ctxs = self.ctx_limits.lock().unwrap();
+        let mut outs = self.out_limits.lock().unwrap();
         for m in list {
-            let (Some(id), Some(ctx)) = (m["id"].as_str(), m["context_length"].as_u64()) else {
-                continue;
-            };
-            if ctx > 0 {
-                map.insert(format!("{}/{id}", prov.name), ctx.min(u32::MAX as u64) as u32);
+            let Some(id) = m["id"].as_str() else { continue };
+            let key = format!("{}/{id}", prov.name);
+            if let Some(ctx) = m["context_length"].as_u64().filter(|c| *c > 0) {
+                ctxs.insert(key.clone(), ctx.min(u32::MAX as u64) as u32);
+            }
+            // Recorded independently of the window: the two are unrelated in
+            // practice, and a model missing one may still publish the other.
+            if let Some(out) = m["top_provider"]["max_completion_tokens"].as_u64().filter(|c| *c > 0)
+            {
+                outs.insert(key, out.min(u32::MAX as u64) as u32);
             }
         }
+    }
+
+    /// Test-only: seed a published ceiling without a network round-trip.
+    #[cfg(test)]
+    pub fn set_output_limit(&self, model: &str, limit: u32) {
+        self.out_limits.lock().unwrap().insert(model.to_string(), limit);
+    }
+
+    /// Output ceiling to send for a model: what the provider says it accepts,
+    /// bounded by `MAX_OUTPUT`.
+    ///
+    /// A provider that publishes nothing (bu0y lists prices only) keeps the
+    /// configured default, which is right for it — it clamps an oversized ceiling
+    /// rather than rejecting the request.
+    pub fn output_limit(&self, model: &str, cfg: &Config) -> u32 {
+        self.out_limits
+            .lock()
+            .unwrap()
+            .get(model)
+            .map(|&c| c.min(MAX_OUTPUT))
+            .unwrap_or(cfg.max_tokens)
     }
 
     /// Context window for a "provider/model", if the provider published one.
@@ -240,7 +311,8 @@ impl Client {
             bail!("{model} hit its free-tier request cap; paused for {}s", wait.as_secs());
         }
         let url = format!("{}/chat/completions", prov.base_url.trim_end_matches('/'));
-        let body = Self::build_request(&model_id, messages, tools, cfg.max_tokens);
+        let max_out = self.output_limit(model, cfg);
+        let body = Self::build_request(&model_id, messages, tools, max_out);
 
         let mut last_err = String::new();
         for attempt in 0..4u32 {
@@ -311,11 +383,11 @@ impl Client {
                 let think = v["usage"]["completion_tokens_details"]["reasoning_tokens"]
                     .as_u64()
                     .unwrap_or(0);
-                bail!(
-                    "{model} used its entire {}-token output budget on reasoning ({think} reasoning tokens) \
-and never reached an answer (finish_reason=length) — raise max_tokens in khan.toml",
-                    cfg.max_tokens
-                );
+                return Err(anyhow::Error::new(Truncated {
+                    max_tokens: max_out,
+                    reasoning_tokens: think,
+                })
+                .context(model.to_string()));
             }
             return Ok((msg, usage));
         }

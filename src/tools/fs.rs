@@ -39,13 +39,31 @@ pub fn read_file(ctx: &ToolCtx, path: &str) -> Result<String> {
     std::fs::read_to_string(&p).with_context(|| format!("cannot read {path}"))
 }
 
-pub fn write_file(ctx: &ToolCtx, path: &str, content: &str) -> Result<String> {
+/// Write a workspace file, overwriting it or appending to the end.
+///
+/// Appending exists because a single model response has a hard output ceiling: a
+/// large file cannot arrive as one tool argument, so it has to be built across
+/// several turns. Without this an agent's only route was a shell heredoc.
+pub fn write_file(ctx: &ToolCtx, path: &str, content: &str, append: bool) -> Result<String> {
     let p = resolve(ctx, path)?;
     if let Some(parent) = p.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    std::fs::write(&p, content).with_context(|| format!("cannot write {path}"))?;
-    Ok(format!("wrote {} bytes to {path}", content.len()))
+    if !append {
+        std::fs::write(&p, content).with_context(|| format!("cannot write {path}"))?;
+        return Ok(format!("wrote {} bytes to {path}", content.len()));
+    }
+    use std::io::Write;
+    let mut f = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&p)
+        .with_context(|| format!("cannot open {path} to append"))?;
+    f.write_all(content.as_bytes()).with_context(|| format!("cannot append to {path}"))?;
+    // Report the running total: the agent is building towards a size it has in
+    // mind and otherwise cannot tell how far along it is.
+    let total = std::fs::metadata(&p).map(|m| m.len()).unwrap_or_default();
+    Ok(format!("appended {} bytes to {path} ({total} bytes total)", content.len()))
 }
 
 pub fn list_files(ctx: &ToolCtx, path: &str) -> Result<String> {

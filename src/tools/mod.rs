@@ -35,8 +35,9 @@ pub fn work_schemas() -> Vec<Value> {
         tool("read_file", "Read a text file from the workspace.", json!({
             "properties": {"path": {"type": "string", "description": "Path relative to the workspace"}},
             "required": ["path"]})),
-        tool("write_file", "Write (create/overwrite) a text file in the workspace.", json!({
-            "properties": {"path": {"type": "string"}, "content": {"type": "string"}},
+        tool("write_file", "Write a text file in the workspace. Overwrites by default.", json!({
+            "properties": {"path": {"type": "string"}, "content": {"type": "string"},
+                           "append": {"type": "boolean", "description": "Add to the end of the file instead of overwriting it. This is how to build a file too large to fit in one response: write the first chunk, then append each following chunk."}},
             "required": ["path", "content"]})),
         tool("list_files", "List files under a workspace directory (recursive).", json!({
             "properties": {"path": {"type": "string", "description": "Relative dir, '' for workspace root"}},
@@ -88,7 +89,12 @@ pub fn truncate(mut s: String) -> String {
 pub async fn execute(ctx: &ToolCtx, agent: &str, name: &str, args: &Value) -> String {
     let out = match name {
         "read_file" => fs::read_file(ctx, s(args, "path")),
-        "write_file" => fs::write_file(ctx, s(args, "path"), s(args, "content")),
+        "write_file" => fs::write_file(
+            ctx,
+            s(args, "path"),
+            s(args, "content"),
+            args["append"].as_bool().unwrap_or(false),
+        ),
         "list_files" => fs::list_files(ctx, s(args, "path")),
         "shell" => shell::run(ctx, s(args, "command"), None).await,
         "web_fetch" => web::fetch(ctx, s(args, "url")).await,
