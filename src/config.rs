@@ -18,6 +18,10 @@ pub struct Provider {
 pub struct Config {
     /// Model the CEO runs on, as "provider/model".
     pub ceo_model: String,
+    /// Models the CEO may move ITSELF onto with set_ceo_model. `ceo_model` stays
+    /// the fail-safe floor: a chosen model that errors out reverts to it.
+    #[serde(default)]
+    pub ceo_models: Vec<String>,
     /// Model used for cheap internal work (history summarization). Defaults to ceo_model.
     pub utility_model: Option<String>,
     #[serde(default = "default_workspace")]
@@ -65,6 +69,9 @@ impl Config {
         }
         cfg.take_keys_from_env();
         cfg.resolve(&cfg.ceo_model)?; // validate early
+        for m in &cfg.ceo_models {
+            cfg.resolve(m).with_context(|| format!("ceo_models entry '{m}' does not resolve"))?;
+        }
         Ok(cfg)
     }
 

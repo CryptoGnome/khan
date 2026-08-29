@@ -55,6 +55,9 @@ fn ceo_schemas() -> Vec<Value> {
             json!(["topic", "content"])),
         tool("finish", "Record a milestone report for the founder. Work continues afterwards.", json!({
             "report": {"type": "string"}}), json!(["report"])),
+        tool("set_ceo_model", "Switch which model YOU (the CEO) run on, starting next iteration. Choose from the approved pool (call with model '?' to list it, with quality scores where known). Match the model to the stakes: your seat makes every hiring, treasury and strategy call, so a stronger model here pays for itself — but if your chosen model starts failing you are reverted to the reliable default automatically.", json!({
+            "model": {"type": "string", "description": "provider/model from the approved pool, or '?' to list the pool"}}),
+            json!(["model"])),
     ]
 }
 
@@ -153,7 +156,7 @@ pub(crate) fn compact_threshold(ctx: Option<u32>, max_tokens: u32) -> usize {
 const CEO_TOOL_NAMES: &[&str] = &[
     "hire", "delegate", "delegate_parallel", "dispatch", "team_status", "rate_work", "fire", "list_team",
     "add_routine", "remove_routine", "list_routines",
-    "update_prompt", "rollback_prompt", "save_playbook", "finish",
+    "update_prompt", "rollback_prompt", "save_playbook", "finish", "set_ceo_model",
 ];
 
 /// Tools a manager employee gets on top of the normal employee set: they staff
@@ -406,7 +409,7 @@ Drop superseded detail, resolved dead ends, and chatter.",
 
     fn persist_ceo(&self, history: &[Message]) {
         let h = serde_json::to_string(history).unwrap_or_else(|_| "[]".into());
-        self.ctx.store.save_agent("CEO", "CEO", "CEO", &self.ctx.cfg.ceo_model, &h);
+        self.ctx.store.save_agent("CEO", "CEO", "CEO", &self.current_ceo_model(), &h);
     }
 
     /// Run one employee's loop to completion on a task; returns their report.
@@ -737,8 +740,47 @@ Drop superseded detail, resolved dead ends, and chatter.",
                 self.ctx.store.remember("CEO", "milestone", report, "milestone");
                 "Milestone recorded. Continue: verify your work, improve it, or pursue the next most valuable goal.".into()
             }
+            "set_ceo_model" => {
+                if caller != "CEO" {
+                    return "ERROR: only the CEO can change the CEO's model".into();
+                }
+                let pool = self.ceo_pool();
+                let m = s(a, "model");
+                if pool.iter().any(|p| p == m) {
+                    self.ctx.store.kv_set("ceo_model", m);
+                    self.log_line("CEO", "model-change", &format!("CEO moving to {m}"));
+                    format!("done — you run on {m} from the next iteration. If it starts failing you revert to {} automatically.", self.ctx.cfg.ceo_model)
+                } else {
+                    format!(
+                        "approved pool (default first, it is the fail-safe floor):\n{}\ncurrently on: {}",
+                        pool.join("\n"),
+                        self.current_ceo_model()
+                    )
+                }
+            }
             _ => format!("unknown tool {name}"),
         }
+    }
+
+    /// Models the CEO may run itself on: the configured floor plus the vetted pool.
+    fn ceo_pool(&self) -> Vec<String> {
+        let mut pool = vec![self.ctx.cfg.ceo_model.clone()];
+        for m in &self.ctx.cfg.ceo_models {
+            if !pool.contains(m) {
+                pool.push(m.clone());
+            }
+        }
+        pool
+    }
+
+    /// The model the CEO runs on right now: its own persisted choice when that
+    /// is still in the approved pool, else the configured floor.
+    fn current_ceo_model(&self) -> String {
+        self.ctx
+            .store
+            .kv_get("ceo_model")
+            .filter(|m| self.ceo_pool().contains(m))
+            .unwrap_or_else(|| self.ctx.cfg.ceo_model.clone())
     }
 
     /// Deliver reports from finished background dispatches into the CEO's
@@ -797,7 +839,8 @@ Drop superseded detail, resolved dead ends, and chatter.",
             }
             iter += 1;
             self.ctx.store.kv_set("iteration", &iter.to_string());
-            self.maybe_compact("CEO", &self.ctx.cfg.ceo_model, &mut history).await;
+            let ceo_model = self.current_ceo_model();
+            self.maybe_compact("CEO", &ceo_model, &mut history).await;
             // Rebuilt every iteration so newly created custom tools become callable at once.
             let mut schemas = tools::work_schemas();
             schemas.extend(tools::custom::management_schemas());
@@ -939,9 +982,29 @@ Save one-off lessons with save_playbook. Then continue the mission.\n\n{log}{sta
                 req.push(Message::text("user", idx));
             }
 
-            let (msg, u) = match self.chat_fb("CEO", &self.ctx.cfg.ceo_model, &req, &schemas).await {
+            let (msg, u) = match self.chat_fb("CEO", &ceo_model, &req, &schemas).await {
                 Ok(r) => r,
                 Err(e) => {
+                    // A self-chosen model that cannot answer even through the
+                    // fallback ladder must not strand the company: revert to the
+                    // configured floor and say so, rather than looping on it.
+                    if ceo_model != self.ctx.cfg.ceo_model && truncation(&e).is_none() {
+                        self.ctx.store.kv_set("ceo_model", &self.ctx.cfg.ceo_model);
+                        self.log_line(
+                            "CEO",
+                            "model-revert",
+                            &format!("{ceo_model} failed ({e:#}); reverting the CEO to {}", self.ctx.cfg.ceo_model),
+                        );
+                        history.push(Message::text(
+                            "user",
+                            &format!(
+                                "[System] Your chosen model {ceo_model} failed and you are back on {}. \
+                                 Pick a different pool model with set_ceo_model, or stay here.",
+                                self.ctx.cfg.ceo_model
+                            ),
+                        ));
+                        continue;
+                    }
                     // The CEO already retries forever, so an overrun would repeat
                     // unchanged every iteration. The nudge goes into history so the
                     // next request is actually different from the one that failed.

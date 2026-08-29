@@ -9,6 +9,18 @@
 # between marketplaces when the model is priced on more than one. Worth 1.37x the
 # per-token cost: the pinned variant took the whole company offline.
 ceo_model = "bu0y/deepseekv4flash"
+# Models the CEO may move ITSELF onto with set_ceo_model. ceo_model above stays
+# the fail-safe floor: if a chosen model errors out, the CEO reverts to it
+# automatically. Probed 2026-08-29 with a scam-refusal + capacity + urgency
+# scenario: grok46 was the only model to fully handle all three (and its tools
+# flag is bu0y-verified, plus 93 real production calls); claudesonnet5 had the
+# sharpest reasoning at ~22x cost with a 1M context; claudeopus5 reasons best
+# of all but 33.5s/call makes it a when-the-stakes-warrant-it option.
+ceo_models = [
+  "bu0y/grok46",         # ~17x — best all-around probe result, verified tools
+  "bu0y/claudesonnet5",  # ~22x — sharpest judgment, 1M context
+  "bu0y/claudeopus5",    # ~54x — deepest reasoning, slow; for high-stakes stretches
+]
 # Cheap model for internal work like history summarization (defaults to ceo_model).
 # NOT the "free" auto-router: it fails on essentially every call and only works
 # because khan then falls back, which wastes a round trip each time. Name a
