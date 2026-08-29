@@ -385,6 +385,17 @@ impl Store {
         rows.join("\n")
     }
 
+    /// Every model with at least one recorded call.
+    pub fn models_seen(&self) -> Vec<String> {
+        let c = self.conn.lock().unwrap();
+        let Ok(mut stmt) = c.prepare("SELECT DISTINCT model FROM model_calls") else {
+            return Vec::new();
+        };
+        stmt.query_map([], |r| r.get::<_, String>(0))
+            .map(|it| it.filter_map(|x| x.ok()).collect())
+            .unwrap_or_default()
+    }
+
     /// Average rated quality per model, with the sample size that earned it.
     ///
     /// The counterweight to model_stats_text. Latency and failure rate measure how

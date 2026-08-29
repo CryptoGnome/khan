@@ -873,6 +873,22 @@ than the people you have, hire — seats are not the constraint, and a project n
 gets a manager with their own crew rather than a queue behind you.",
                     self.ctx.store.team_capacity_text(MAX_EMPLOYEES)
                 );
+                // Without this, every instrument we give the CEO argues for the
+                // incumbent: only models already in use accumulate latency and
+                // quality history, so a newly available model is indistinguishable
+                // from a bad one and never gets a first call.
+                let untried = self.ctx.cfg.untried_models(&self.ctx.store.models_seen());
+                let untried_block = if untried.is_empty() {
+                    String::new()
+                } else {
+                    format!(
+                        "\n\nNEVER TRIED — no recorded calls, which means unmeasured, not bad:\n{}\n\
+These cannot win a comparison against your current models however good they are, because they have \
+no history to compare with — that is a hole in your data, not a verdict on them. Closing it costs \
+one low-stakes dispatch: hire onto one for a single ordinary task, then read the numbers.",
+                        untried.iter().map(|m| format!("- {m}")).collect::<Vec<_>>().join("\n")
+                    )
+                };
                 let health = self.ctx.store.tool_health_text();
                 let health_block = if health.is_empty() {
                     String::new()
@@ -889,7 +905,7 @@ If a prompt (yours or an employee's) is causing weak results, improve it with up
 or rollback_prompt if a recent change hurt. If a custom tool erred or is missing, improve or build it with \
 create_tool (rollback_tool reverts a bad version). If you or employees keep re-figuring-out the same procedure, \
 capture it as a skill with create_skill; improve skills that led agents astray (rollback_skill reverts). \
-Save one-off lessons with save_playbook. Then continue the mission.\n\n{log}{stats_block}{capacity_block}{health_block}{catalog}{model_block}\n\n{toks}"
+Save one-off lessons with save_playbook. Then continue the mission.\n\n{log}{stats_block}{capacity_block}{health_block}{catalog}{model_block}{untried_block}\n\n{toks}"
                 )));
             }
 

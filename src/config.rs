@@ -165,6 +165,20 @@ impl Config {
         }
     }
 
+    /// Catalog models with no measured history yet.
+    ///
+    /// An evidence-driven policy cannot reach these on its own: a model with zero
+    /// calls loses every comparison to one with thousands of good ones, however
+    /// capable it is, and the gap never closes because nothing generates the first
+    /// data point. Naming them is what makes the choice available.
+    pub fn untried_models(&self, seen: &[String]) -> Vec<String> {
+        self.paid_model_ids()
+            .into_iter()
+            .chain(self.free_model_ids())
+            .filter(|m| !seen.iter().any(|s| s == m))
+            .collect()
+    }
+
     /// Human-readable model catalog for prompts.
     pub fn model_catalog(&self) -> String {
         let mut s = String::new();

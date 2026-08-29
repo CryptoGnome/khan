@@ -580,6 +580,10 @@ mod tests {
             "hire(manager: true)",
             "PROGRESS",
             "never park it for",
+            // Capability matching has to outlive prompt evolution too: the seeded
+            // "plan with power, execute cheap" line was compressed away long ago.
+            "Match the model to the stakes",
+            "untested, not bad",
         ] {
             assert!(sys.contains(must), "mandate lost {must}");
         }
@@ -668,6 +672,33 @@ mod tests {
         assert_eq!(free, vec!["or/cheap:free".to_string()]);
         // A model hired off-catalog (the CEO may name any slug) counts as paid.
         assert_eq!(cfg.fallback_ids_for("pay/unlisted"), cfg.paid_model_ids());
+    }
+
+    /// An evidence-only policy can never reach a new model: the incumbent has
+    /// thousands of good calls and the newcomer has none, so it loses every
+    /// comparison however capable it is. The gap has to be named to be closed.
+    #[test]
+    fn models_never_called_are_reported_as_unmeasured() {
+        let cfg: crate::config::Config = toml::from_str(
+            "ceo_model = \"pay/big\"\n\
+             [[providers]]\nname = \"pay\"\nbase_url = \"http://x\"\napi_key_env = \"X\"\n\
+             paid_models = [\"big\", \"fresh\"]\n\
+             [[providers]]\nname = \"or\"\nbase_url = \"http://y\"\napi_key_env = \"Y\"\n\
+             free_models = [\"cheap:free\"]\n",
+        )
+        .unwrap();
+        let store = crate::state::Store::open(":memory:").unwrap();
+        store.record_model_call("pay/big", 1200, true, "");
+        let seen = store.models_seen();
+        assert_eq!(seen, vec!["pay/big".to_string()]);
+        let untried = cfg.untried_models(&seen);
+        assert!(!untried.contains(&"pay/big".to_string()), "a measured model is not untried");
+        assert!(untried.contains(&"pay/fresh".to_string()), "{untried:?}");
+        // Free models count too — an untried free model is also unmeasured.
+        assert!(untried.contains(&"or/cheap:free".to_string()), "{untried:?}");
+        // A failed call is still a measurement: it produced data either way.
+        store.record_model_call("pay/fresh", 500, false, "boom");
+        assert!(!cfg.untried_models(&store.models_seen()).contains(&"pay/fresh".to_string()));
     }
 
     #[test]
