@@ -921,6 +921,30 @@ scraping) with explicit fallbacks, record them with save_playbook, and move exis
                 // Idle capacity is invisible in every other block: a company can
                 // sit at four people with thirty-six seats free and look healthy
                 // by every measure it already reports.
+                // The task texts, verbatim: the binary cannot judge how many
+                // independent bets these are, but the model can — and without
+                // seeing them side by side, a portfolio that has collapsed into
+                // one thesis behind one keystone looks like healthy parallelism.
+                let inflight: Vec<String> = self
+                    .pending
+                    .lock()
+                    .await
+                    .iter()
+                    .map(|t| format!("- {}: {}", t.agent, t.task.chars().take(200).collect::<String>()))
+                    .collect();
+                let portfolio_block = if inflight.is_empty() {
+                    String::new()
+                } else {
+                    format!(
+                        "\n\nWORK IN FLIGHT — every background task right now, verbatim:\n{}\n\
+Read these as a portfolio: how many INDEPENDENT bets are running, and what single dependency or \
+single premise do several of them share? Parallel hands on one thesis is one bet, not a portfolio — \
+one wrong fact or one blocked keystone zeroes the whole day. A bet big enough to matter runs as a \
+division: hire a manager for it and dispatch them in the background with the whole brief, then \
+allocate your attention BETWEEN bets instead of chairing one.",
+                        inflight.join("\n")
+                    )
+                };
                 let busy = self.pending.lock().await.len();
                 let capacity_block = format!(
                     "\n\nTEAM CAPACITY — {busy} background task(s) running right now.\n{}\n\
@@ -977,7 +1001,7 @@ If a prompt (yours or an employee's) is causing weak results, improve it with up
 or rollback_prompt if a recent change hurt. If a custom tool erred or is missing, improve or build it with \
 create_tool (rollback_tool reverts a bad version). If you or employees keep re-figuring-out the same procedure, \
 capture it as a skill with create_skill; improve skills that led agents astray (rollback_skill reverts). \
-Save one-off lessons with save_playbook. Then continue the mission.\n\n{log}{stats_block}{capacity_block}{health_block}{catalog}{model_block}{untried_block}{burn_block}\n\n{toks}"
+Save one-off lessons with save_playbook. Then continue the mission.\n\n{log}{stats_block}{capacity_block}{portfolio_block}{health_block}{catalog}{model_block}{untried_block}{burn_block}\n\n{toks}"
                 )));
             }
 

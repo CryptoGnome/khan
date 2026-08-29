@@ -31,7 +31,7 @@ fn to_text(body: &str) -> String {
     }
 }
 
-async fn get(client: &reqwest::Client, url: &str) -> Result<(reqwest::StatusCode, String)> {
+async fn get(client: &reqwest::Client, url: &str) -> Result<(reqwest::StatusCode, String, Option<String>)> {
     let resp = client
         .get(url)
         .header("User-Agent", UA)
@@ -41,8 +41,24 @@ async fn get(client: &reqwest::Client, url: &str) -> Result<(reqwest::StatusCode
         .await
         .with_context(|| format!("fetch failed: {url}"))?;
     let status = resp.status();
+    // Publication date lives in headers, not the body — a page that says
+    // "Monday, September 1" with no year reads as upcoming forever, and an
+    // agent that never sees when it was written will build plans on old news.
+    let modified = resp
+        .headers()
+        .get(reqwest::header::LAST_MODIFIED)
+        .and_then(|v| v.to_str().ok())
+        .map(String::from);
     let body = resp.text().await.unwrap_or_default();
-    Ok((status, body))
+    Ok((status, body, modified))
+}
+
+/// Provenance line prepended to fetched content.
+fn dated(modified: &Option<String>) -> String {
+    match modified {
+        Some(m) => format!(" | server Last-Modified: {m} — check any date in the content against this before treating it as upcoming"),
+        None => " | no Last-Modified header — the content's age is unknown; verify dates (e.g. a repo's commit history) before building on time-sensitive claims".into(),
+    }
 }
 
 /// Fetch with a fallback ladder: direct → FETCH_PROXY (if configured). The
@@ -51,16 +67,17 @@ async fn get(client: &reqwest::Client, url: &str) -> Result<(reqwest::StatusCode
 /// Beyond that, agents build their own workarounds (APIs, Playwright) rather
 /// than leaning on third-party reader services.
 pub async fn fetch(ctx: &ToolCtx, url: &str) -> Result<String> {
-    let (status, body) = get(&ctx.http, url).await?;
+    let (status, body, modified) = get(&ctx.http, url).await?;
     if !looks_blocked(status, &body) {
-        return Ok(untrusted(format!("[{status}]\n{}", to_text(&body))));
+        return Ok(untrusted(format!("[{status}{}]\n{}", dated(&modified), to_text(&body))));
     }
 
     if let Some(proxied) = &ctx.http_proxy {
-        if let Ok((p_status, p_body)) = get(proxied, url).await {
+        if let Ok((p_status, p_body, p_modified)) = get(proxied, url).await {
             if !looks_blocked(p_status, &p_body) {
                 return Ok(untrusted(format!(
-                    "[{p_status} — direct fetch was blocked ({status}); this came via the residential proxy]\n{}",
+                    "[{p_status} — direct fetch was blocked ({status}); this came via the residential proxy{}]\n{}",
+                    dated(&p_modified),
                     to_text(&p_body)
                 )));
             }
