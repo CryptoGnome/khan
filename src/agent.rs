@@ -514,7 +514,16 @@ Drop superseded detail, resolved dead ends, and chatter.",
         if let Some(idx) = tools::skills::index(&self.ctx) {
             history.push(Message::text("user", idx));
         }
-        history.push(Message::text("user", format!("New task from the CEO:\n{task}")));
+        // Workers have no clock beyond stray log timestamps, so a year-old
+        // "September 1" announcement reads as an upcoming event (the fee-change
+        // premise incident) — stamp now into every task.
+        history.push(Message::text(
+            "user",
+            format!(
+                "It is now {} UTC. Dates before this are the past, and a date without a year belongs to its document's publication date — never assume the current year.\n\nNew task from the CEO:\n{task}",
+                chrono::Utc::now().format("%Y-%m-%d %H:%M")
+            ),
+        ));
 
         let mut report = String::from("(employee stopped without a report)");
         let mut fired = false;
@@ -1489,7 +1498,9 @@ detail, and anything already acted on and closed.",
                 "user",
                 format!(
                     "[Company brief — composed fresh each episode; durable truth lives on the objective board, in memories and in skills]\n\
-BASE DIRECTIVE from your founder:\n{directive}\n\nTEAM:\n{roster}{policy}\n\nRECENT ACTIVITY (public log tail):\n{recent}"
+It is now {now} UTC. Anything dated before this already happened. A dated announcement is history, not a catalyst — and a date WITHOUT a year never resolves to the current calendar: it resolves to the document's own publication date (commit date, Last-Modified, weekday arithmetic). Check that before treating any date as upcoming.\n\n\
+BASE DIRECTIVE from your founder:\n{directive}\n\nTEAM:\n{roster}{policy}\n\nRECENT ACTIVITY (public log tail):\n{recent}",
+                    now = chrono::Utc::now().format("%Y-%m-%d %H:%M")
                 ),
             ));
             if let Some(note) = self.ctx.store.last_episode_note() {
