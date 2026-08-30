@@ -65,13 +65,14 @@ image_model = "openrouter/meta/muse-image"
 # episode so it survives restarts (a nudged version of this was forgotten
 # within the hour after the 2026-08-30 redeploy). Plain text, kept short.
 model_policy = """
-- Default seat for every hire (workers, planners, managers): bu0y/glm53flash.
-  It has FULL VISION (use it for page QA, art review, screenshots), 1M
-  context, and near-frontier agentic behavior at flash price. Caveat: token-
-  hungry (~2-3x frontier tokens per task) — verbosity is not stuckness.
-- bu0y/deepseekv4flash is for the SIMPLEST mechanical tasks only (polling,
-  formatting, bulk scraping). No vision, weak judgment; cheap is its only
-  virtue. Never seat it for judgment, QA of rendered pages, or long tasks.
+- EVERY hire (workers, planners, managers) is seated on bu0y/glm53flash or
+  better — no exceptions. It has FULL VISION (use it for page QA, art
+  review, screenshots), 1M context, and near-frontier agentic behavior at
+  flash price. Caveat: token-hungry (~2-3x frontier tokens per task) —
+  verbosity is not stuckness.
+- bu0y/deepseekv4flash is NOT a seat. It exists only as the automatic
+  fallback the binary fails through when a primary model errors. Never hire
+  onto it, and re-home any agent still sitting on it at its next dispatch.
 - Escalate hard novel problems and money-gating plans to glm5, then grok46.
 - Founder model tips are candidates: probe, record the verdict in the model
   playbook, and let measured ratings move seats — including off this default.
@@ -143,8 +144,9 @@ paid_models = [
                                 #   vision, 1M context, 0 failures in 200+ calls. Its
                                 #   launch-window price (18x) collapsed 2026-08-30;
                                 #   input now undercuts deepseekv4flash.
-  "deepseekv4flash",            # 1.37x — mechanical tasks. Priced on two marketplaces,
-                                #   so the router can fail over; the pinned -0731 cannot.
+  "deepseekv4flash",            # 1.37x — FALLBACK ONLY, never a seat (model_policy).
+                                #   Priced on two marketplaces, so the router can fail
+                                #   over; the pinned -0731 cannot.
   "deepseekv32",                # 1.5x / 1.1x  — stronger reasoning, 4.4s, 0 failures
   "minimaxm25",                 # 1.6x / 2.9x  — 3.6s
   "glm5",                       # 3.6x / 5.8x  — 4.8s
