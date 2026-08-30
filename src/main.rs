@@ -376,8 +376,17 @@ mod tests {
         let store = crate::state::Store::open(":memory:").unwrap();
         crate::tools::skills::seed(&store);
         let names: Vec<String> = store.list_skills().into_iter().map(|(n, _)| n).collect();
-        assert!(names.contains(&"palmyr_agent_infra".into()), "seeded: {names:?}");
-        assert!(names.contains(&"bridge_hygiene".into()));
+        for n in [
+            "palmyr_agent_infra",
+            "bridge_hygiene",
+            "skill_authoring",
+            "web_access_from_datacenter",
+            "evm_wallet_ops",
+            "key_compromise_response",
+            "security_audit",
+        ] {
+            assert!(names.contains(&n.to_string()), "missing seed '{n}' in {names:?}");
+        }
         // A company-evolved version is never clobbered by a reseed.
         store.save_skill("bridge_hygiene", "evolved", "the company's own v2", "test").unwrap();
         crate::tools::skills::seed(&store);
