@@ -419,6 +419,12 @@ mod tests {
             "jupiter_swap_v2",
             "routine_script_pattern",
             "safe_file_read_pattern",
+            "pumpfun_launch",
+            "pumpfun_creator_fees",
+            "pumpfun_swap",
+            "founder_payout",
+            "wallet_anti_dusting",
+            "image_generation",
         ] {
             assert!(names.contains(&n.to_string()), "missing seed '{n}' in {names:?}");
         }
