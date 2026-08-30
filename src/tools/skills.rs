@@ -29,7 +29,14 @@ pub fn schemas() -> Vec<Value> {
 /// since written itself is never overridden — agents evolve and roll back
 /// seeded skills exactly like their own.
 pub fn seed(store: &crate::state::Store) {
-    let dir = std::path::Path::new("skills");
+    // The container runs with WORKDIR /data (the volume) while the image
+    // bakes the seeds at /app/skills — the first deploy seeded nothing
+    // because only the relative path was tried. Local dev still hits ./skills.
+    let dir = ["skills", "/app/skills"]
+        .iter()
+        .map(std::path::Path::new)
+        .find(|p| p.is_dir());
+    let Some(dir) = dir else { return };
     let Ok(entries) = std::fs::read_dir(dir) else { return };
     for entry in entries.flatten() {
         let path = entry.path();
