@@ -43,6 +43,12 @@ utility_model = "bu0y/deepseekv4flash"
 # not a decision. The binary escalates back to the ladder seat the moment real
 # work drains in, so no weak model ever judges whether a strong one is needed.
 heartbeat_model = "bu0y/deepseekv4flash"
+# Image seat for the generate_image tool. OpenRouter only: the OpenRouter key
+# is for images and nothing else (chat stays on bu0y — its pipe strips image
+# payloads while billing the tokens, verified 2026-08-30). muse-image renders
+# for $0.01 flat; step up per-call to x-ai/grok-imagine-image-2.0 ($0.06,
+# photoreal) or qwen/qwen-image-3-pro ($0.075, detail) when a render matters.
+image_model = "openrouter/meta/muse-image"
 # Low-fuel floor in provider micro-dollars ($10). Below it the binary files an
 # hourly fuel-low alert so the CEO tops up before calls bounce with 402 — the
 # 2026-08-30 outage came from tracking billed spend instead of the tank, and the

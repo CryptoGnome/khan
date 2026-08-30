@@ -40,6 +40,10 @@ pub struct Config {
     /// mechanical — a queue check by the binary — so no weak model ever judges
     /// whether a strong one is needed. Unset = every episode uses the ladder.
     pub heartbeat_model: Option<String>,
+    /// Model for the generate_image tool, in provider/model form. OpenRouter
+    /// only — the OpenRouter key is spent on image generation and nothing else;
+    /// chat stays on bu0y. Unset = the tool's built-in cheap default.
+    pub image_model: Option<String>,
     /// Low-fuel floor in provider micro-dollars (bu0y GET /account
     /// availableMicros). Below it the binary files an hourly "fuel-low" routine
     /// alert so the CEO tops up before calls start bouncing with 402. 0 disables.
@@ -121,6 +125,9 @@ impl Config {
         }
         if let Some(m) = &cfg.heartbeat_model {
             cfg.resolve(m).with_context(|| format!("heartbeat_model '{m}' does not resolve"))?;
+        }
+        if let Some(m) = &cfg.image_model {
+            cfg.resolve(m).with_context(|| format!("image_model '{m}' does not resolve"))?;
         }
         Ok(cfg)
     }

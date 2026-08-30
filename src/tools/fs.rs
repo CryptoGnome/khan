@@ -44,6 +44,16 @@ fn resolve(ctx: &ToolCtx, rel: &str) -> Result<PathBuf> {
     Ok(joined)
 }
 
+/// Write raw bytes to a workspace file (image generation lands PNGs here).
+pub fn write_binary(ctx: &ToolCtx, path: &str, bytes: &[u8]) -> Result<String> {
+    let p = resolve(ctx, path)?;
+    if let Some(parent) = p.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(&p, bytes).with_context(|| format!("cannot write {path}"))?;
+    Ok(format!("wrote {} bytes to {path}", bytes.len()))
+}
+
 pub fn read_file(ctx: &ToolCtx, path: &str) -> Result<String> {
     let p = resolve(ctx, path)?;
     std::fs::read_to_string(&p).with_context(|| format!("cannot read {path}"))

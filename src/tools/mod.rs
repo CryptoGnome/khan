@@ -2,6 +2,7 @@ pub mod credits;
 pub mod custom;
 pub mod skills;
 pub(crate) mod fs;
+mod image;
 pub mod shell;
 mod sql;
 mod web;
@@ -56,6 +57,11 @@ pub fn work_schemas() -> Vec<Value> {
             "properties": {"query": {"type": "string"},
                            "purpose": {"type": "string", "description": "REQUIRED. One short plain-English sentence saying what this query is for, written for a non-technical person watching the public activity log — e.g. 'recording today's profit in the ledger'. Never restate the SQL; say the goal."}},
             "required": ["query", "purpose"]})),
+        tool("generate_image", "Generate a real image (coin art, site imagery, social graphics) and save it as a PNG in the workspace. Runs on OpenRouter image models — a few tenths of a cent per image at the default; NEVER hand-draw art with PIL when this tool exists. PROMPTING: write ONE flowing sentence, not a keyword pile, front-loading the subject — [subject with key details] → [style/medium] → [composition/shot] → [lighting/color]. Put any words that must appear IN the image in \"double quotes\". Phrase avoids as positives ('clean empty background', never 'no clutter' — negatives are ignored). Iterate by changing ONE thing, not re-rolling. Look at the saved file (or its byte size — under ~30KB usually means a failed/blank render) before shipping it anywhere.", json!({
+            "properties": {"prompt": {"type": "string", "description": "The full one-sentence image description."},
+                           "path": {"type": "string", "description": "Workspace-relative output path ending in .png"},
+                           "model": {"type": "string", "description": "Optional OpenRouter image model override for when the default's render disappoints: 'x-ai/grok-imagine-image-2.0' ($0.06, strong photoreal) or 'qwen/qwen-image-3-pro' ($0.075, high detail). Leave empty for the $0.01 default."}},
+            "required": ["prompt", "path"]})),
         tool("remember", "Store a memory (fact, decision, lesson) in long-term memory.", json!({
             "properties": {"key": {"type": "string", "description": "Short title"},
                            "content": {"type": "string"},
@@ -110,6 +116,7 @@ pub async fn execute(ctx: &ToolCtx, agent: &str, name: &str, args: &Value) -> St
         "web_fetch" => web::fetch(ctx, s(args, "url")).await,
         "web_search" => web::search(ctx, s(args, "query")).await,
         "sql" => sql::run(ctx, s(args, "query")),
+        "generate_image" => image::generate(ctx, s(args, "prompt"), s(args, "path"), s(args, "model")).await,
         "remember" => {
             ctx.store.remember(agent, s(args, "key"), s(args, "content"), s(args, "tags"));
             Ok("remembered".to_string())
