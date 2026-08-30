@@ -449,8 +449,14 @@ mod tests {
         assert!(!store.is_manager("dev-1"));
     }
 
+    /// Tests that set env vars and then run Config::load must not overlap:
+    /// load's key-scrub deletes every secret-shaped var in the PROCESS, so a
+    /// parallel test's variable can vanish between its set and its load.
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn example_config_is_the_shipped_config_and_must_load() {
+        let _env = ENV_LOCK.lock().unwrap();
         // The Dockerfile bakes khan.toml.example in as /app/khan.toml — a parse
         // or validation error here is a downed company, not a doc typo.
         std::env::set_var("BU0Y_API_KEY", "test-key");
@@ -621,6 +627,7 @@ mod tests {
 
     #[test]
     fn api_keys_leave_the_process_environment_at_load() {
+        let _env = ENV_LOCK.lock().unwrap();
         // Stripping child envs is not enough: a child can read its parent's copy
         // from /proc/<pid>/environ on Linux. The key must not be in the parent's
         // environment at all once config is loaded.
