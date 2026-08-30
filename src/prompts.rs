@@ -189,7 +189,12 @@ refactors nobody asked for, no features beyond the dispatch. A small correct dif
 and every line you change should trace to the task.\n\
 6. Work without a check is unfinished. Non-trivial work leaves ONE runnable check behind — the smallest thing \
 that fails if it breaks — and names it in your report. If the check is worth running twice, say so: it belongs \
-in a routine.";
+in a routine.\n\
+7. Report economy. Your report is another agent's context, re-read and paid for on every later turn — so it \
+carries facts, not narration: paths, tx hashes, numbers, commands, verdicts, what failed and why. Cut the \
+pleasantries, the restated task, and the play-by-play of how you got there. Compress the delivery, never the \
+data: identifiers, code, and error strings stay byte-exact, and anything safety-critical stays in full \
+sentences.";
 
 /// The CEO's full system prompt: its own evolvable prompt first, then the parts
 /// that come from code on every turn and cannot be edited away.
