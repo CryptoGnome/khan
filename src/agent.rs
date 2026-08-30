@@ -265,6 +265,9 @@ pub struct SeatState {
     /// (last fuel poll, last low-fuel alert) — the poll rides the same cadence
     /// as the price cache; the alert re-fires hourly while the tank stays low.
     fuel: std::sync::Mutex<(Option<std::time::Instant>, Option<std::time::Instant>)>,
+    /// Burn gauge: (available at last poll, when, EMA of burn in micro$/hour).
+    /// Sizes the top-up target — a refill should buy days, not hours.
+    gauge: std::sync::Mutex<Option<(u64, std::time::Instant, f64)>>,
     /// Set on a 402: the tank is empty and the ladder is a list of models that
     /// cannot answer. While broke, the seat is the cheap floor (smallest
     /// per-call reserve, so it survives a near-empty tank longest), and if even
@@ -1036,6 +1039,27 @@ detail, and anything already acted on and closed.",
         }
         let Ok(v) = resp.json::<serde_json::Value>().await else { return };
         let Some(available) = v["availableMicros"].as_u64() else { return };
+        // Update the burn gauge: EMA of the drop between polls, in micro$/hr.
+        // A rising balance (a top-up landed) updates the anchor without
+        // polluting the rate.
+        let burn_per_hour = {
+            let mut g = self.seat.gauge.lock().unwrap();
+            let now = std::time::Instant::now();
+            let ema = match *g {
+                Some((prev, t, ema)) if prev > available => {
+                    let hrs = (now - t).as_secs_f64() / 3600.0;
+                    if hrs > 0.0 {
+                        ema * 0.7 + ((prev - available) as f64 / hrs) * 0.3
+                    } else {
+                        ema
+                    }
+                }
+                Some((_, _, ema)) => ema,
+                None => 0.0,
+            };
+            *g = Some((available, now, ema));
+            ema
+        };
         let mut f = self.seat.fuel.lock().unwrap();
         f.0 = Some(std::time::Instant::now());
         if available >= threshold {
@@ -1051,15 +1075,28 @@ detail, and anything already acted on and closed.",
         f.1 = Some(std::time::Instant::now());
         drop(f);
         let (avail_usd, floor_usd) = (available as f64 / 1e6, threshold as f64 / 1e6);
+        // Target: the floor plus ~3 days of measured burn, never less than
+        // 2.5x the floor. Refilling to just-above-floor books another refill
+        // for tomorrow; a top-up should buy days, not hours.
+        let burn_day_usd = burn_per_hour * 24.0 / 1e6;
+        let target_usd = (floor_usd + burn_day_usd * 3.0).max(floor_usd * 2.5);
+        let send_usd = (target_usd - avail_usd).max(1.0).ceil();
+        let burn_note = if burn_day_usd > 0.01 {
+            format!("Measured burn is ~${burn_day_usd:.2}/day. ")
+        } else {
+            String::new()
+        };
         self.log_line("core", "fuel-low", &format!("provider balance ${avail_usd:.2} < ${floor_usd:.2} floor"));
         self.ctx.store.add_routine_alert(
             "fuel-low",
             &format!(
                 "FUEL LOW: ${avail_usd:.2} available on {} (floor ${floor_usd:.2}). Top up NOW, before \
                  calls start failing with 402 — your own seat dies first because it reserves the most \
-                 per call. Use the proven top-up path (swap treasury SOL to USDC, send to the provider, \
-                 verify the credit lands, book the entries). This alert repeats hourly until the balance \
-                 is back above the floor.",
+                 per call. {burn_note}Send ~${send_usd:.0} to reach ~${target_usd:.0} — a refill should \
+                 buy DAYS of runway, not hours; topping up to just above the floor books another refill \
+                 for tomorrow. Use the proven top-up path (swap treasury SOL to USDC, send to the \
+                 provider, verify the credit lands, book the entries). This alert repeats hourly until \
+                 the balance is back above the floor.",
                 provider.name
             ),
         );
@@ -1740,7 +1777,10 @@ Keep the board honest: add new bets, declare blocked_by, mark done what is done.
                                 "FUEL EMPTY: the provider is refusing calls with 402. You are on the \
                                  emergency seat (cheap floor, then free models). Drop everything and \
                                  run the proven top-up path NOW — swap treasury SOL to USDC, send it \
-                                 to the provider, verify the credit lands, book the entries.",
+                                 to the provider, verify the credit lands, book the entries. Send \
+                                 enough to buy DAYS of runway (at least 2.5x the low-fuel floor), not \
+                                 the minimum that clears the error — a bare-minimum refill is why you \
+                                 are reading this alert again.",
                             );
                         }
                         let next = self.emergency_seat(&ceo_model);
