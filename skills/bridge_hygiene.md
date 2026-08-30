@@ -74,6 +74,10 @@ Docs: https://privacycash.mintlify.app (machine-readable: /llms.txt,
    happen.
 
 ## Pitfalls
+- ChangeNOW is not a usable route: its v2 API returns 401 without a paid
+  API key, the keyless v1 endpoints are gone, and driving its website form
+  with a headless browser fails (learned the hard way — 20 probe versions,
+  no order ever created). Do not retry it; LI.FI needs no key.
 - ETH on Optimism is the GAS token there — the destination wallet needs
   enough of it to act; a wallet holding only bridged USDC on OP cannot even
   move. For Farcaster registration, bridge ETH itself.
