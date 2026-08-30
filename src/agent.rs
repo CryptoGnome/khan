@@ -1434,6 +1434,9 @@ keep the board honest, then close with finish_episode(note)."
             // the poll disease. The step cap still bounds pure investigation.
             let mut did_advance = false;
             let mut warned_idle_close = false;
+            // Anything draining into the episode (report, alert, founder
+            // message) flips this; a cheap heartbeat seat escalates on it.
+            let mut work_arrived = false;
             // The seat is pinned for the whole episode: a model never swaps
             // mid-thought. Context survives a swap regardless — it lives in the
             // transcript and the durable state, not in the model — but style
@@ -1510,14 +1513,18 @@ keep the board honest, then close with finish_episode(note)."
             {
                 let before = history.len();
                 self.harvest_dispatches(&mut history).await;
-                if history.len() > before && event_kind == "event" {
-                    event_kind = "report".into();
+                if history.len() > before {
+                    work_arrived = true;
+                    if event_kind == "event" {
+                        event_kind = "report".into();
+                    }
                 }
             }
 
             // Routine alerts: a scheduled check failed or printed ALERT. The
             // runner already logged it publicly; here it enters the CEO's context.
             for (name, detail) in self.ctx.store.drain_routine_alerts() {
+                work_arrived = true;
                 if event_kind == "event" {
                     event_kind = "alert".into();
                 }
@@ -1533,6 +1540,7 @@ keep the board honest, then close with finish_episode(note)."
             // replays them instead of eating them.
             let mut tg_context_injected = false;
             for m in self.ctx.store.drain_messages() {
+                work_arrived = true;
                 event_kind = "founder".into();
                 // A Telegram message arrives with the conversation so far: the
                 // long-term brief (compacted down to what stayed necessary)
@@ -1571,9 +1579,11 @@ keep the board honest, then close with finish_episode(note)."
             // A quiet heartbeat stops being quiet the moment real work drains
             // in: escalate to the ladder seat. The transcript carries over, so
             // the strong model inherits everything the cheap one saw.
-            if event_kind != "heartbeat"
-                && self.ctx.cfg.heartbeat_model.as_deref() == Some(ceo_model.as_str())
-            {
+            // The trigger is the drains themselves, not the episode label:
+            // an alert draining into a heartbeat keeps the "heartbeat" kind,
+            // and the first fuel-low alert got handled by the cheap seat
+            // exactly that way.
+            if work_arrived && self.ctx.cfg.heartbeat_model.as_deref() == Some(ceo_model.as_str()) {
                 ceo_model = self.pick_ceo_model().await;
             }
 
