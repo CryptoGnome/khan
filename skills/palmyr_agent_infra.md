@@ -1,4 +1,4 @@
-Buys real-world infrastructure the company cannot get by signup — phone numbers, SMS verification, email inboxes, X/Twitter accounts, TikTok, domains, VPS, prepaid Visa cards — from palmyr.ai, paid per-action in USDC with no human, no card, no API key. Load when a task is blocked on a phone number or SMS code, needs a social account (X, TikTok), a domain, a server, or a card number, or when any signup rejects VoIP numbers.
+Buys real-world infrastructure the company cannot get by signup — phone numbers, SMS verification, email inboxes, domains, VPS, prepaid Visa cards — from palmyr.ai, paid per-action in USDC with no human, no card, no API key. NOT social accounts (banned — see Pitfalls). Load when a task is blocked on a phone number or SMS code, needs a domain, a server, or a card number, or when any signup rejects VoIP numbers.
 
 # palmyr.ai — buy infrastructure with USDC, no human in the loop
 
@@ -10,9 +10,10 @@ settled tx hash comes back in the response. Discovery commands (`search`,
 ## When to use
 - A signup demands SMS verification and rejects VoIP (Bluesky and X both do —
   this is the tested answer to that wall).
-- The company needs an X/Twitter or TikTok account, a domain, an email inbox,
-  a VPS, or a prepaid Visa card, and no human is available to buy one.
+- The company needs a domain, an email inbox, a VPS, or a prepaid Visa card,
+  and no human is available to buy one.
 - Do NOT use for anything a free API or an existing company account covers.
+- Do NOT use for social accounts of any platform — see the ban in Pitfalls.
 
 ## Quick reference
 ```
@@ -28,7 +29,6 @@ PALMYR_JSON=1 palmyr phone messages ...   # $0.02, read the verification SMS
 Published prices (2026-08, verify with `palmyr pricing` before spending):
 phone number $3.00, read SMS $0.02, send SMS $0.05, email inbox $2.00,
 domain buy $20, VPS deploy $6.00, prepaid Visa = amount + 3% (min $0.50).
-X-account and TikTok pricing: run `palmyr pricing`.
 
 ## Procedure
 1. Fetch the full contract first: https://palmyr.ai/skill.md is Palmyr's own
@@ -53,9 +53,13 @@ X-account and TikTok pricing: run `palmyr pricing`.
 ## Pitfalls
 - Prices in this file go stale; `palmyr pricing` is free and authoritative —
   check it before any spend over $1.
-- A bought X/TikTok account arrives with history: rotate every credential it
-  came with before treating it as company-owned, and warm it up (profile,
-  a few normal posts) before promotional use.
+- PURCHASED SOCIAL ACCOUNTS ARE BANNED (X, TikTok, any platform, any vendor).
+  Incident: a bought aged X account's original seller can still hold the
+  recovery email/phone, and access depends on vendor credentials and a pinned
+  proxy the company does not control — it can be reclaimed or locked at any
+  moment, making every dollar spent on it unrecoverable. Self-signup with own
+  email, own password, own 2FA, and a self-describing handle — or no account
+  at all.
 - Phone numbers are per-country; some services blacklist entire ranges —
   if a verification fails, `release` the number ($0.01) and buy a different
   country rather than retrying the same one.

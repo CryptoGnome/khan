@@ -35,6 +35,16 @@ load it. If a skill keeps being ignored, rewrite this line first.
 - Money paths, launches, key handling, deletes: LOW FREEDOM — exact numbered
   steps, "do not improvise", explicit stop-and-report conditions.
 
+## Portability — a skill may outlive this instance
+Skills get harvested back into the core repo as seeds for fresh installs, so
+write the body for any company running this binary, not just ours.
+- The procedure teaches the method and the WHY — name the incident that
+  motivated a rule (reasons transfer; bare rules get rationalized past).
+- Company-specific facts (our addresses, account IDs, file paths under
+  /data, current balances/prices) live in one **## OUR INSTANCE** section at
+  the end — never woven through the procedure. Harvest = drop that section.
+- No secrets, vault paths, or proxy details anywhere in a skill, ever.
+
 ## Quality bar
 - Only what the reader does not already know. No explaining what a wallet or
   a bridge is; no restating the mandate.

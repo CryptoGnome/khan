@@ -6,7 +6,7 @@ use serde_json::{json, Value};
 pub fn schemas() -> Vec<Value> {
     vec![
         json!({"type": "function", "function": {"name": "create_skill",
-            "description": "Create a NEW skill, or improve an existing one (same name = new version, old versions kept). A skill is a reusable how-to document (markdown) for a procedure the company does often — steps, gotchas, checklists, examples. Every agent sees the skill index and loads a skill with use_skill when relevant.",
+            "description": "Create a NEW skill, or improve an existing one (same name = new version, old versions kept). A skill is a reusable how-to document (markdown) for a procedure the company does often — steps, gotchas, checklists, examples. Every agent sees the skill index and loads a skill with use_skill when relevant. Write skills PORTABLE: the body teaches the method and the why (name the incident that motivated a rule — reasons transfer, bare rules don't); company-specific facts (addresses, IDs, file paths, current balances) go in one clearly-marked '## OUR INSTANCE' section at the end, never woven through the procedure. No secrets or vault paths anywhere — a skill may be shared beyond this company.",
             "parameters": {"type": "object", "properties": {
                 "name": {"type": "string", "description": "snake_case skill name"},
                 "description": {"type": "string", "description": "One line: when an agent should load this skill"},

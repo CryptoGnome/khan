@@ -237,6 +237,9 @@ token count is printed. **There is no spend cap — watch it.**
   directory (one `.md` per skill, first line the description): seeds land at
   boot, a changed seed file ships as a new version while the skill is still
   seed-origin, and a skill the company has since evolved is never overridden.
+  Skills are written portable (method and why in the body, instance facts in
+  one marked section, no secrets) so a live company's best skills can be
+  harvested back into `skills/` as better seeds for fresh installs.
 - **Tool health** — every tool call's outcome is recorded. Failures show up
   immediately in the activity log (red), and repeated failures are aggregated
   into the reflection step as "N of M recent calls FAILED — last error: …", so

@@ -414,6 +414,11 @@ mod tests {
             "security_audit",
             "anti_slop_frontend",
             "pons_launchpad",
+            "farcaster_ops",
+            "farcaster_voice_policy",
+            "jupiter_swap_v2",
+            "routine_script_pattern",
+            "safe_file_read_pattern",
         ] {
             assert!(names.contains(&n.to_string()), "missing seed '{n}' in {names:?}");
         }
