@@ -1456,11 +1456,60 @@ explore (buys knowledge).\n{}\n",
             Ok(s) => s,
             Err(_) => return vec![],
         };
-        stmt.query_map(params![fts, limit], |r| {
-            let (k, v): (String, String) = (r.get(0)?, r.get(1)?);
-            Ok(format!("[{k}] {v}"))
-        })
-        .map(|it| it.filter_map(|x| x.ok()).collect())
-        .unwrap_or_default()
+        let mut hits: Vec<String> = stmt
+            .query_map(params![fts, limit], |r| {
+                let (k, v): (String, String) = (r.get(0)?, r.get(1)?);
+                Ok(format!("[{k}] {v}"))
+            })
+            .map(|it| it.filter_map(|x| x.ok()).collect())
+            .unwrap_or_default();
+        // Skill bodies are institutional knowledge too — a fact buried in a
+        // skill an agent never loads is invisible to recall, which is how a
+        // scout re-derived a fee-change premise its own copy skill had already
+        // debunked (and the CEO rated it 5/5 with the debunk a table away).
+        // Scan the latest version of every skill for the same terms and append
+        // the matching lines, so the contradiction rides into context wherever
+        // the claim goes. ~50 small docs: a full scan is cheaper than keeping
+        // an FTS mirror consistent across versions and retires.
+        let lterms: Vec<String> = terms.iter().map(|t| t.trim_matches('"').to_lowercase()).collect();
+        if let Ok(mut sk) = c.prepare(
+            "SELECT name, content FROM skill_defs s1
+             WHERE version=(SELECT max(version) FROM skill_defs s2 WHERE s2.name=s1.name)",
+        ) {
+            let mut scored: Vec<(usize, String)> = sk
+                .query_map([], |r| {
+                    let (name, content): (String, String) = (r.get(0)?, r.get(1)?);
+                    Ok((name, content))
+                })
+                .map(|it| it.filter_map(|x| x.ok()).collect::<Vec<_>>())
+                .unwrap_or_default()
+                .into_iter()
+                .filter_map(|(name, content)| {
+                    let lc = content.to_lowercase();
+                    let found = lterms.iter().filter(|t| lc.contains(t.as_str())).count();
+                    // One shared term across 50 docs is noise; demand overlap.
+                    if found < 2 {
+                        return None;
+                    }
+                    let lines: Vec<&str> = content
+                        .lines()
+                        .filter(|l| {
+                            let ll = l.to_lowercase();
+                            lterms.iter().filter(|t| ll.contains(t.as_str())).count() >= 2
+                        })
+                        .take(3)
+                        .collect();
+                    if lines.is_empty() {
+                        return None;
+                    }
+                    let mut excerpt = lines.join(" / ");
+                    excerpt.truncate(400);
+                    Some((found, format!("[skill {name} — load it for the full picture] {excerpt}")))
+                })
+                .collect();
+            scored.sort_by(|a, b| b.0.cmp(&a.0));
+            hits.extend(scored.into_iter().take(3).map(|(_, s)| s));
+        }
+        hits
     }
 }

@@ -217,6 +217,8 @@ token count is printed. **There is no spend cap — watch it.**
   OpenRouter image models, ~$0.01 each, the key never enters an agent shell),
   and `remember`/`recall` memory.
 - **Memory** — SQLite FTS5. Relevant memories are auto-injected into context;
+  recall also scans skill bodies and surfaces matching excerpts, so a fact
+  recorded in a skill contradicts a false claim wherever that claim travels;
   long histories are compacted into summaries by a cheap model.
 - **Custom tools** — any agent can call `create_tool` to turn a Python or
   PowerShell script into a real, schema-described tool that every agent can

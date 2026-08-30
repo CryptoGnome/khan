@@ -451,6 +451,37 @@ mod tests {
     }
 
     #[test]
+    fn recall_surfaces_contradicting_skill_lines() {
+        // The fee-premise incident: a debunk written into a skill body was
+        // invisible to recall, so a scout re-derived the false premise and the
+        // reviewing CEO never saw the contradiction. Recall must now search
+        // skill content too.
+        let store = crate::state::Store::open(":memory:").unwrap();
+        store
+            .save_skill(
+                "growth_copy",
+                "copy rules",
+                "## Fee-reality facts\n- the creator-fee structure has been LIVE since 2025. \
+                 There is NO upcoming fee change tied to a date. That premise is false.\n\
+                 - unrelated line about tone",
+                "test",
+            )
+            .unwrap();
+        let hits = store.recall("scout found an upcoming creator-fee change premise", 5);
+        let skill_hit = hits.iter().find(|h| h.starts_with("[skill growth_copy"));
+        let hit = skill_hit.expect("recall must surface the skill excerpt");
+        assert!(hit.contains("NO upcoming fee change"), "excerpt must carry the debunk line: {hit}");
+        assert!(!hit.contains("unrelated line"), "only term-matching lines ride along");
+        // A skill sharing just one common word stays out of recall (noise floor).
+        store.save_skill("payouts", "payout rules", "the founder premise here is dust tests", "test").unwrap();
+        let hits = store.recall("weekly premise review", 5);
+        assert!(
+            !hits.iter().any(|h| h.starts_with("[skill payouts")),
+            "single-term overlap must not surface a skill: {hits:?}"
+        );
+    }
+
+    #[test]
     fn telegram_chat_tail_old_and_delete_slice_correctly() {
         let store = crate::state::Store::open(":memory:").unwrap();
         for i in 1..=10 {
