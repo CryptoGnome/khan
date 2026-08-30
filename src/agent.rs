@@ -265,6 +265,13 @@ pub struct SeatState {
     /// (last fuel poll, last low-fuel alert) — the poll rides the same cadence
     /// as the price cache; the alert re-fires hourly while the tank stays low.
     fuel: std::sync::Mutex<(Option<std::time::Instant>, Option<std::time::Instant>)>,
+    /// Set on a 402: the tank is empty and the ladder is a list of models that
+    /// cannot answer. While broke, the seat is the cheap floor (smallest
+    /// per-call reserve, so it survives a near-empty tank longest), and if even
+    /// the floor 402s the seat falls to the first free model — the company
+    /// limps but never stops, and can still run its own top-up. Cleared by the
+    /// balance poll once the tank is back above the low-fuel floor.
+    broke: std::sync::atomic::AtomicBool,
 }
 
 impl Orchestrator {
@@ -982,6 +989,9 @@ Drop superseded detail, resolved dead ends, and chatter.",
         f.0 = Some(std::time::Instant::now());
         if available >= threshold {
             f.1 = None;
+            if self.seat.broke.swap(false, Ordering::Relaxed) {
+                self.log_line("core", "fuel-ok", "tank refilled — emergency seat over, back on the ladder");
+            }
             return;
         }
         if f.1.is_some_and(|t| t.elapsed() < std::time::Duration::from_secs(3600)) {
@@ -1008,7 +1018,27 @@ Drop superseded detail, resolved dead ends, and chatter.",
     /// ceo_models list that is not benched and whose current average price
     /// fits the ceilings; the configured floor when nothing qualifies. A model
     /// missing from the catalog passes on quality order alone.
+    /// The seat while the tank is empty: the cheap floor, or — when the floor
+    /// itself just 402'd — the first free model. Never returns the model that
+    /// failed unless there is nothing else.
+    fn emergency_seat(&self, failed: &str) -> String {
+        let floor = self.ctx.cfg.ceo_model.clone();
+        if failed != floor {
+            return floor;
+        }
+        self.ctx.cfg.free_model_ids().into_iter().next().unwrap_or(floor)
+    }
+
     async fn pick_ceo_model(&self) -> String {
+        if self.seat.broke.load(Ordering::Relaxed) {
+            let m = self.ctx.cfg.ceo_model.clone();
+            let mut cur = self.seat.current.lock().unwrap();
+            if *cur != m {
+                self.log_line("CEO", "seat", &format!("CEO seat: {m} (fuel emergency — tank empty)"));
+                *cur = m.clone();
+            }
+            return m;
+        }
         self.refresh_seat_prices().await;
         let prices = self.seat.prices.lock().unwrap().0.clone();
         let now = std::time::Instant::now();
@@ -1623,6 +1653,35 @@ Keep the board honest: add new bets, declare blocked_by, mark done what is done.
             let (msg, u) = match self.chat_fb("CEO", &ceo_model, &req, &schemas).await {
                 Ok(r) => r,
                 Err(e) => {
+                    // 402 means the TANK is empty, not the model: sliding down
+                    // the ladder retries ever-cheaper models against the same
+                    // empty balance (the 08-30 outage burned 70 minutes doing
+                    // exactly that). Go broke instead: cheap floor first, free
+                    // model if even the floor bounces, and an immediate alert
+                    // so the next answered turn runs the top-up.
+                    if format!("{e:#}").contains("402") {
+                        if !self.seat.broke.swap(true, Ordering::Relaxed) {
+                            self.ctx.store.add_routine_alert(
+                                "fuel-empty",
+                                "FUEL EMPTY: the provider is refusing calls with 402. You are on the \
+                                 emergency seat (cheap floor, then free models). Drop everything and \
+                                 run the proven top-up path NOW — swap treasury SOL to USDC, send it \
+                                 to the provider, verify the credit lands, book the entries.",
+                            );
+                        }
+                        let next = self.emergency_seat(&ceo_model);
+                        self.log_line(
+                            "CEO",
+                            "fuel-emergency",
+                            &format!("{ceo_model} bounced with 402 (empty tank) — emergency seat {next}"),
+                        );
+                        *self.seat.current.lock().unwrap() = next.clone();
+                        ceo_model = next;
+                        // Both rungs bouncing = everything is down; pace the
+                        // retry loop instead of spinning through 402s.
+                        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                        continue;
+                    }
                     // A ladder model that cannot answer even through the
                     // fallback ladder must not strand the company: bench it and
                     // let the next pick slide down a rung.

@@ -173,7 +173,9 @@ token count is printed. **There is no spend cap — watch it.**
   heartbeats (nothing queued) run on a cheap `heartbeat_model`, escalating
   the moment real work drains in. The binary also polls the provider's
   balance and alerts the CEO below a floor, so fuel is bought before calls
-  start bouncing.
+  start bouncing. If they bounce anyway (402), the seat goes into fuel
+  emergency: the cheap floor model first, a free model if even that bounces —
+  the company limps but never stalls, and runs its own top-up to recover.
 - **Employees** — hired freely by the CEO, each with a role prompt and its own
   model (the CEO is told which models are free vs paid). `delegate` runs one
   employee to completion; `delegate_parallel` runs several concurrently and
