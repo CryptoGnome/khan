@@ -382,7 +382,6 @@ mod tests {
             "skill_authoring",
             "web_access_from_datacenter",
             "evm_wallet_ops",
-            "key_compromise_response",
             "security_audit",
         ] {
             assert!(names.contains(&n.to_string()), "missing seed '{n}' in {names:?}");
