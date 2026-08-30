@@ -38,7 +38,8 @@ fn ceo_schemas() -> Vec<Value> {
             "plan": {"type": "string", "description": "The current plan: premise check, milestones, staffing. Written by a planning dispatch on a reasoning model, stored here."},
             "note": {"type": "string", "description": "One-line status note shown on the board"},
             "blocked_by": {"type": "string", "description": "Comma-separated objective ids this waits on (e.g. '3' or '2,3'); empty string clears. Work that needs an account or artifact another objective produces is BLOCKED, not hard."},
-            "owner": {"type": "string", "description": "Manager who OWNS this objective; empty string clears. Workers' reports on an owned objective route to the owner, who reviews, rates and drives follow-up work — you get their summary and escalations only. Give every big objective an owner so your attention stays on allocation."}}),
+            "owner": {"type": "string", "description": "Manager who OWNS this objective; empty string clears. Workers' reports on an owned objective route to the owner, who reviews, rates and drives follow-up work — you get their summary and escalations only. Give every big objective an owner so your attention stays on allocation."},
+            "kind": {"type": "string", "enum": ["profit", "growth", "infra", "explore"], "description": "Portfolio category — every objective needs one, and the weekly portfolio review judges each by its own yardstick. profit: exists to earn (launches, fees, trading) — judged revenue vs cost. growth: buys audience (social presence, listings, content) — judged cost per attention and trend, NEVER on revenue. infra: keeps the company running (automation, bookkeeping, site plumbing) — judged reliability and cost trend. explore: buys knowledge (premise checks, probes) — judged learning per capped dollar."}}),
             json!(["action"])),
         tool("team_status", "List background tasks started with dispatch: who is still working and on what.", json!({}), json!([])),
         tool("add_routine", "Schedule a shell command the binary runs itself, forever, at zero model cost. Silent when it passes; if it exits nonzero, times out, or prints ALERT, the output lands in your inbox as a routine alert. Any check you have performed the same way roughly three times belongs here — verification scripts, health checks, reconciliation. Same name = replace.", json!({
@@ -905,6 +906,11 @@ Drop superseded detail, resolved dead ends, and chatter.",
                                 return e;
                             }
                         }
+                        if let Some(k) = a["kind"].as_str() {
+                            if !self.ctx.store.set_objective_kind(id, k) {
+                                return format!("ERROR: kind must be profit, growth, infra or explore (got '{k}')");
+                            }
+                        }
                         format!("objective #{id} added at rank {rank}. Tag dispatches with objective:{id} so the board tracks its progress; if it needs more than one dispatch, get a plan onto it first.")
                     }
                     "update" => {
@@ -925,6 +931,12 @@ Drop superseded detail, resolved dead ends, and chatter.",
                                 Ok(changed) => ok |= changed,
                                 Err(e) => return e,
                             }
+                        }
+                        if let Some(k) = a["kind"].as_str() {
+                            if !["profit", "growth", "infra", "explore"].contains(&k) {
+                                return format!("ERROR: kind must be profit, growth, infra or explore (got '{k}')");
+                            }
+                            ok |= self.ctx.store.set_objective_kind(id, k);
                         }
                         if ok { format!("objective #{id} updated") } else { format!("ERROR: no objective #{id} (or nothing to change)") }
                     }
@@ -1788,6 +1800,39 @@ treasury decision: top up, or cut the burn."
                     ),
                     None => String::new(),
                 };
+                // Once a week the reflection widens into a portfolio review:
+                // each category of objective judged by its own yardstick, so a
+                // growth lane is never killed for earning nothing and "it's
+                // marketing" never excuses unlimited spend. Weekly because the
+                // per-bet kill-checks already run daily; this is the step-back.
+                let review_due = self
+                    .ctx
+                    .store
+                    .kv_get("portfolio_review_at")
+                    .and_then(|t| chrono::DateTime::parse_from_rfc3339(&t).ok())
+                    .map(|t| (chrono::Utc::now() - t.with_timezone(&chrono::Utc)).num_days() >= 7)
+                    .unwrap_or(true);
+                let portfolio_review = if review_due {
+                    let since = self
+                        .ctx
+                        .store
+                        .kv_get("portfolio_review_at")
+                        .unwrap_or_else(|| (chrono::Utc::now() - chrono::Duration::days(7)).to_rfc3339());
+                    let body = self.ctx.store.portfolio_review_text(&since);
+                    if body.is_empty() {
+                        String::new()
+                    } else {
+                        self.ctx.store.kv_set("portfolio_review_at", &chrono::Utc::now().to_rfc3339());
+                        format!(
+                            "\n\nWEEKLY PORTFOLIO REVIEW — step back from the lanes and judge the allocation itself. \
+For profit lanes, pull the actual numbers from the books (revenue booked vs spend) before judging — attention share \
+below is measured, revenue is yours to join. Record a one-line verdict per lane in its board note, and act on the \
+verdicts: kill measured losers, scale measured winners, re-cap growth envelopes, and reclassify anything mislabeled.\n{body}"
+                        )
+                    }
+                } else {
+                    String::new()
+                };
                 let health = self.ctx.store.tool_health_text();
                 let health_block = if health.is_empty() {
                     String::new()
@@ -1804,7 +1849,7 @@ If a prompt (yours or an employee's) is causing weak results, improve it with up
 or rollback_prompt if a recent change hurt. If a custom tool erred or is missing, improve or build it with \
 create_tool (rollback_tool reverts a bad version). If you or employees keep re-figuring-out the same procedure, \
 capture it as a skill with create_skill; improve skills that led agents astray (rollback_skill reverts). \
-Save one-off lessons with save_playbook. Then continue the mission.\n\n{log}{stats_block}{skill_block}{capacity_block}{portfolio_block}{health_block}{catalog}{model_block}{untried_block}{burn_block}\n\n{toks}"
+Save one-off lessons with save_playbook. Then continue the mission.\n\n{log}{stats_block}{skill_block}{capacity_block}{portfolio_block}{portfolio_review}{health_block}{catalog}{model_block}{untried_block}{burn_block}\n\n{toks}"
                 )));
             }
 

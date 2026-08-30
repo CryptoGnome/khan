@@ -169,7 +169,14 @@ token count is printed. **There is no spend cap — watch it.**
 - **Objectives board** — a ranked board with owners, plans, blockers, and
   status. Worker reports route to the manager who owns the objective; a plan
   untouched for a day while work advanced gets flagged, and a pivot closes its
-  objective for a fresh one instead of mutating the old plan in place.
+  objective for a fresh one instead of mutating the old plan in place. Every
+  objective carries a portfolio category (profit / growth / infra / explore),
+  and once a week the reflection widens into a portfolio review: each category
+  judged by its own yardstick (profit in dollars vs cost, growth in cost per
+  attention, infra in reliability, exploration in learning per capped dollar),
+  with each lane's measured share of the company's recent attention — so a
+  social presence is never killed for earning nothing, and "it's marketing"
+  never excuses unlimited spend.
 - **CEO seat ladder** — the binary, never the model, picks the CEO's seat:
   the first model in a quality-ordered list that isn't benched by a recent
   failure and whose live marketplace price fits configured ceilings. Quiet

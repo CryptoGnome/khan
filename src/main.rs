@@ -310,6 +310,35 @@ mod tests {
     }
 
     #[test]
+    fn portfolio_review_groups_by_kind_and_attributes_attention() {
+        let store = crate::state::Store::open(":memory:").unwrap();
+        let launches = store.add_objective("trend launches", 1);
+        let social = store.add_objective("farcaster voice", 2);
+        let mystery = store.add_objective("unlabeled bet", 3);
+        assert!(store.set_objective_kind(launches, "profit"));
+        assert!(store.set_objective_kind(social, "growth"));
+        assert!(!store.set_objective_kind(mystery, "marketing"), "unknown kinds must be rejected");
+        // Attention: a dispatch tags the agent to an objective; the agent's
+        // thinking turns after it are attributed there.
+        store.log("CEO", "dispatch", &format!("{{\"agent\":\"launch-mgr\",\"objective\":{launches},\"task\":\"scan\"}}"));
+        for _ in 0..3 {
+            store.log("launch-mgr", "thinking", "weighing the odds (bu0y/glm53flash)");
+        }
+        store.log("free-agent", "thinking", "unattributed turn");
+        let review = store.portfolio_review_text("2000-01-01T00:00:00Z");
+        assert!(review.contains("PROFIT LANES"), "profit group missing: {review}");
+        assert!(review.contains("GROWTH / AUDIENCE"));
+        // 3 of 4 thinking turns belong to the launches lane.
+        assert!(review.contains("trend launches — ~75% of the company's attention"), "attribution wrong: {review}");
+        assert!(review.contains("farcaster voice — ~0% of the company's attention"));
+        // The unclassified lane is called out and told how to classify.
+        assert!(review.contains("UNCLASSIFIED") && review.contains("unlabeled bet"));
+        // A done objective leaves the review.
+        assert!(store.update_objective(mystery, None, None, None, None, Some("done")));
+        assert!(!store.portfolio_review_text("2000-01-01T00:00:00Z").contains("unlabeled bet"));
+    }
+
+    #[test]
     fn objective_board_ranks_counts_and_flags_missing_plans() {
         let store = crate::state::Store::open(":memory:").unwrap();
         let email = store.add_objective("company email + phone", 1);

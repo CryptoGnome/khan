@@ -261,6 +261,12 @@ impl Store {
         // Migration: objectives can have an owning manager; their workers'
         // reports route to the owner instead of the CEO.
         let _ = conn.execute("ALTER TABLE objectives ADD COLUMN owner TEXT NOT NULL DEFAULT ''", []);
+        // Migration: objectives carry a category so the weekly portfolio review
+        // can judge each lane by the right yardstick — before this, every lane
+        // was implicitly measured like a profit center, which either kills the
+        // social presence for earning nothing or lets "it's marketing" excuse
+        // unlimited spend.
+        let _ = conn.execute("ALTER TABLE objectives ADD COLUMN kind TEXT NOT NULL DEFAULT ''", []);
         Ok(Store { conn: Mutex::new(conn), log_tx: broadcast::channel(512).0 })
     }
 
@@ -361,6 +367,20 @@ impl Store {
     pub fn backdate_plan(&self, id: i64, plan_updated_at: &str) {
         let c = self.conn.lock().unwrap();
         let _ = c.execute("UPDATE objectives SET plan_updated_at=?2 WHERE id=?1", params![id, plan_updated_at]);
+    }
+
+    /// Set an objective's portfolio category. Only the four known kinds are
+    /// accepted — a free-text category would silently fall out of the weekly
+    /// review's grouping.
+    pub fn set_objective_kind(&self, id: i64, kind: &str) -> bool {
+        if !["profit", "growth", "infra", "explore"].contains(&kind) {
+            return false;
+        }
+        let now = chrono::Utc::now().to_rfc3339();
+        let c = self.conn.lock().unwrap();
+        c.execute("UPDATE objectives SET kind=?2, updated_at=?3 WHERE id=?1", params![id, kind, now])
+            .unwrap_or(0)
+            > 0
     }
 
     /// Assign (or clear, with "") the manager who owns an objective. Workers'
@@ -524,6 +544,103 @@ impl Store {
             }
             out.push_str("BLOCKED — do not staff these; finish the blocker instead:\n");
             out.push_str(&blocked.join("\n"));
+        }
+        out
+    }
+
+    /// The weekly portfolio review body: active objectives grouped by category,
+    /// each group judged by its own yardstick, with each lane's share of the
+    /// company's recent attention. Attention is approximated from the run log:
+    /// dispatches tag agents to objectives ("objective":N in the dispatch
+    /// detail), and every thinking event an agent logged after that is
+    /// attributed to their most recently dispatched objective. Coarse — an
+    /// agent juggling two lanes books everything to the newer one — but it is
+    /// measured from real activity, and the alternative (no attribution) let a
+    /// lane consume half the company invisibly.
+    pub fn portfolio_review_text(&self, since_ts: &str) -> String {
+        let c = self.conn.lock().unwrap();
+        let Ok(mut stmt) = c.prepare(
+            "SELECT id, title, kind, owner, note FROM objectives WHERE status='active' ORDER BY rank, id",
+        ) else {
+            return String::new();
+        };
+        let objs: Vec<(i64, String, String, String, String)> = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))
+            .map(|it| it.filter_map(|x| x.ok()).collect())
+            .unwrap_or_default();
+        drop(stmt);
+        if objs.is_empty() {
+            return String::new();
+        }
+        // agent -> objective of their latest dispatch in the window (rows come
+        // oldest-first, so later assignments overwrite earlier ones).
+        let mut assigned: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+        if let Ok(mut stmt) = c.prepare(
+            "SELECT detail FROM run_log WHERE ts > ?1 AND event='dispatch' ORDER BY id",
+        ) {
+            let details: Vec<String> = stmt
+                .query_map(params![since_ts], |r| r.get(0))
+                .map(|it| it.filter_map(|x| x.ok()).collect())
+                .unwrap_or_default();
+            for d in details {
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&d) {
+                    if let (Some(agent), Some(oid)) = (v["agent"].as_str(), v["objective"].as_i64()) {
+                        assigned.insert(agent.to_string(), oid);
+                    }
+                }
+            }
+        }
+        let mut turns_by_obj: std::collections::HashMap<i64, i64> = std::collections::HashMap::new();
+        let mut total_turns: i64 = 0;
+        if let Ok(mut stmt) = c.prepare(
+            "SELECT agent, COUNT(*) FROM run_log WHERE ts > ?1 AND event='thinking' GROUP BY agent",
+        ) {
+            let counts: Vec<(String, i64)> = stmt
+                .query_map(params![since_ts], |r| Ok((r.get(0)?, r.get(1)?)))
+                .map(|it| it.filter_map(|x| x.ok()).collect())
+                .unwrap_or_default();
+            for (agent, n) in counts {
+                total_turns += n;
+                if let Some(oid) = assigned.get(&agent) {
+                    *turns_by_obj.entry(*oid).or_default() += n;
+                }
+            }
+        }
+        let line = |(id, title, _k, owner, note): &(i64, String, String, String, String)| {
+            let share = if total_turns > 0 {
+                100 * turns_by_obj.get(id).copied().unwrap_or(0) / total_turns
+            } else {
+                0
+            };
+            let mut l = format!("- #{id} {title} — ~{share}% of the company's attention this period");
+            if !owner.is_empty() {
+                l.push_str(&format!(", owned by {owner}"));
+            }
+            if !note.is_empty() {
+                l.push_str(&format!(" — {}", note.chars().take(100).collect::<String>()));
+            }
+            l
+        };
+        let mut out = String::new();
+        for (kind, header) in [
+            ("profit", "PROFIT LANES — the only lanes judged in dollars. For EACH: pull revenue booked vs fuel + attention spent from the books, name it a measured winner or loser, and kill or scale accordingly."),
+            ("growth", "GROWTH / AUDIENCE — never judged on revenue. Judge cost per unit of attention and its TREND (followers, engagement, visits, donations). Kill only if audience is flat while spend continues; cap each lane's spend envelope."),
+            ("infra", "INFRASTRUCTURE / OPS — a cost center you want. Judge reliability (alerts, failures) and cost trend. The question is never kill — it is: is this getting cheaper and quieter?"),
+            ("explore", "EXPLORATION — judged on learning per dollar. A capped spend that produced a decisive, documented verdict is a WIN even when the verdict was no. Kill any exploration that is neither spending its cap nor producing verdicts."),
+        ] {
+            let lanes: Vec<String> = objs.iter().filter(|o| o.2 == kind).map(line).collect();
+            if !lanes.is_empty() {
+                out.push_str(&format!("\n{header}\n{}\n", lanes.join("\n")));
+            }
+        }
+        let unclassified: Vec<String> = objs.iter().filter(|o| !["profit", "growth", "infra", "explore"].contains(&o.2.as_str())).map(line).collect();
+        if !unclassified.is_empty() {
+            out.push_str(&format!(
+                "\nUNCLASSIFIED — these lanes are invisible to the portfolio until categorized. Set each with \
+objectives(update, id, kind): profit (earns money), growth (buys audience), infra (keeps the company running), \
+explore (buys knowledge).\n{}\n",
+                unclassified.join("\n")
+            ));
         }
         out
     }
