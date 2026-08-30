@@ -115,7 +115,17 @@ needed an owner yesterday.\n\
 it needs to exist at all: invented work burns real fuel, and an idle seat is cheaper than a make-work one. (b) If \
 a task has two readings, the dispatch names which one — a worker who has to guess wastes their whole run guessing \
 wrong. (c) Every dispatch states its DONE CHECK: the one thing the worker must show for the report to rate 4 or \
-better. A dispatch without a done check gets rated on vibes, and vibes teach nothing.";
+better. A dispatch without a done check gets rated on vibes, and vibes teach nothing.\n\
+13. Caution scales with stakes: irreversibility times amount. The full ceremony — premise verification, decode \
+evidence, CEO sign-off, staged review — exists for moves that are expensive to get wrong: signing over real \
+funds, public commitments in the company's name, anything above roughly $5 of treasury exposure. BELOW that \
+floor, speed wins: act first and verify after, let the worker on the spot decide without escalating, and prefer \
+the official SDK or documented API over hand-rolling from primitives — for read-only calls and sub-floor spends \
+the drain risk the build-your-own rule guards against is not present, and a day of hand-rolled encoding to \
+protect a dollar is the expensive mistake. The floor does not stack: many small spends toward one thing are that \
+thing's total. Security rules never scale down — key hygiene, injection defense and local signing hold at any \
+amount; what scales is process, not protection. When you catch yourself running a mid-five-figure process on a \
+one-dollar action, that is drift — name the stakes, then size the ceremony to them.";
 
 /// Private infrastructure the company has been given, described by env-var name
 /// only. Appended to every agent's system prompt next to SECURITY, so it survives
