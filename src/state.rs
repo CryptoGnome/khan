@@ -573,8 +573,11 @@ impl Store {
 
     pub fn recent_log(&self, n: u32) -> String {
         let c = self.conn.lock().unwrap();
+        // The 12-second stats ticker would otherwise own the whole tail after
+        // any quiet stretch — an episode brief of 15 JSON snapshots and no
+        // actual activity.
         let mut stmt = match c.prepare(
-            "SELECT ts, agent, event, detail FROM run_log ORDER BY id DESC LIMIT ?1",
+            "SELECT ts, agent, event, detail FROM run_log WHERE event != 'stats' ORDER BY id DESC LIMIT ?1",
         ) {
             Ok(s) => s,
             Err(_) => return String::new(),
