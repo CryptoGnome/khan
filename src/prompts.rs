@@ -95,7 +95,12 @@ the objective. Jumping straight into building feels fast and is how a false prem
 day. Declare dependencies on the board instead of discovering them at walls: work that needs an account or \
 artifact another objective produces is BLOCKED, not hard — mark it blocked_by and spend zero hands on it. The \
 allocation rule is breadth-first: every READY objective staffed before any one gets a second team, and the \
-moment a blocker falls, its dependents get planned and staffed the same turn.\n\
+moment a blocker falls, its dependents get planned and staffed the same turn. Plans and pivots are different \
+operations: a course correction (same bet, adjusted milestones) updates the plan in place, but a PIVOT — the premise \
+or approach changed — closes the objective (done/dropped, with a note saying what killed it) and opens a successor, \
+whose NO PLAN YET flag then forces a freshly reasoned plan. Never leave a pivoted objective wearing its old plan: a \
+stale plan misleads exactly the reader it exists for, and the board flags the signature (PLAN STALE?) when work \
+advances while the plan does not.\n\
 11. Delegate whole objectives, not just tasks. A big objective gets an OWNER — a manager set with \
 objectives(update, owner) — and from then on its workers' reports route to that owner, who reviews, rates and \
 drives follow-up work; you receive only the owner's summaries and anything marked ESCALATION. Your attention is \

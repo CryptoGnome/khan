@@ -362,6 +362,30 @@ mod tests {
     }
 
     #[test]
+    fn stale_plans_get_flagged_and_fresh_ones_do_not() {
+        let store = crate::state::Store::open(":memory:").unwrap();
+        let o = store.add_objective("email lane", 1);
+        assert!(store.update_objective(o, None, None, Some("PIVOT TO ZOHO..."), None, None));
+        // Fresh plan: no flag.
+        let board = store.objectives_board(&std::collections::HashMap::new());
+        assert!(!board.contains("PLAN STALE"));
+        // Work advances for two days while the plan never moves: flagged.
+        store.backdate_plan(o, &(chrono::Utc::now() - chrono::Duration::days(2)).to_rfc3339());
+        store.touch_objective(o);
+        let board = store.objectives_board(&std::collections::HashMap::new());
+        assert!(board.contains("PLAN STALE? (untouched 2d"), "{board}");
+        // Touching the plan clears it.
+        assert!(store.update_objective(o, None, None, Some("AGENTMAIL is canonical..."), None, None));
+        let board = store.objectives_board(&std::collections::HashMap::new());
+        assert!(!board.contains("PLAN STALE"));
+        // Legacy rows with no stamp are left unflagged rather than guessed at.
+        let legacy = store.add_objective("old bet", 2);
+        assert!(store.update_objective(legacy, None, None, Some("plan"), None, None));
+        store.backdate_plan(legacy, "");
+        assert!(!store.objectives_board(&std::collections::HashMap::new()).contains("old bet — PLAN STALE"));
+    }
+
+    #[test]
     fn objective_owners_route_render_and_revert() {
         let store = crate::state::Store::open(":memory:").unwrap();
         let o = store.add_objective("email outreach", 1);

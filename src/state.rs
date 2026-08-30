@@ -248,6 +248,10 @@ impl Store {
         // Migration: objectives can declare what blocks them; blockedness is
         // derived at render time so it can never go stale.
         let _ = conn.execute("ALTER TABLE objectives ADD COLUMN blocked_by TEXT NOT NULL DEFAULT ''", []);
+        // Migration: plans carry their own freshness stamp, so the board can
+        // flag a plan that stopped moving while the objective kept advancing —
+        // the signature of a pivot that edited notes but not the plan.
+        let _ = conn.execute("ALTER TABLE objectives ADD COLUMN plan_updated_at TEXT NOT NULL DEFAULT ''", []);
         // Migration: objectives can have an owning manager; their workers'
         // reports route to the owner instead of the CEO.
         let _ = conn.execute("ALTER TABLE objectives ADD COLUMN owner TEXT NOT NULL DEFAULT ''", []);
@@ -330,7 +334,12 @@ impl Store {
             changed += c.execute("UPDATE objectives SET rank=?2, updated_at=?3 WHERE id=?1", params![id, v, now]).unwrap_or(0);
         }
         if let Some(v) = plan {
-            changed += c.execute("UPDATE objectives SET plan=?2, updated_at=?3 WHERE id=?1", params![id, v, now]).unwrap_or(0);
+            changed += c
+                .execute(
+                    "UPDATE objectives SET plan=?2, updated_at=?3, plan_updated_at=?3 WHERE id=?1",
+                    params![id, v, now],
+                )
+                .unwrap_or(0);
         }
         if let Some(v) = note {
             changed += c.execute("UPDATE objectives SET note=?2, updated_at=?3 WHERE id=?1", params![id, v, now]).unwrap_or(0);
@@ -339,6 +348,13 @@ impl Store {
             changed += c.execute("UPDATE objectives SET status=?2, updated_at=?3 WHERE id=?1", params![id, v, now]).unwrap_or(0);
         }
         changed > 0
+    }
+
+    /// Test-only: backdate a plan's freshness stamp to exercise staleness.
+    #[cfg(test)]
+    pub fn backdate_plan(&self, id: i64, plan_updated_at: &str) {
+        let c = self.conn.lock().unwrap();
+        let _ = c.execute("UPDATE objectives SET plan_updated_at=?2 WHERE id=?1", params![id, plan_updated_at]);
     }
 
     /// Assign (or clear, with "") the manager who owns an objective. Workers'
@@ -428,14 +444,14 @@ impl Store {
     pub fn objectives_board(&self, inflight: &std::collections::HashMap<i64, usize>) -> String {
         let c = self.conn.lock().unwrap();
         let Ok(mut stmt) = c.prepare(
-            "SELECT id, title, rank, plan, note, blocked_by, updated_at, owner FROM objectives
+            "SELECT id, title, rank, plan, note, blocked_by, updated_at, owner, COALESCE(plan_updated_at,'') FROM objectives
              WHERE status='active' ORDER BY rank, id",
         ) else {
             return String::new();
         };
-        let rows: Vec<(i64, String, i64, String, String, String, String, String)> = stmt
+        let rows: Vec<(i64, String, i64, String, String, String, String, String, String)> = stmt
             .query_map([], |r| {
-                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?))
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?, r.get(8)?))
             })
             .map(|it| it.filter_map(|x| x.ok()).collect())
             .unwrap_or_default();
@@ -445,7 +461,7 @@ impl Store {
             rows.iter().map(|r| (r.0, r.1.as_str())).collect();
         let now = chrono::Utc::now();
         let (mut ready, mut blocked) = (Vec::new(), Vec::new());
-        for (id, title, rank, plan, note, blocked_by, updated, owner) in &rows {
+        for (id, title, rank, plan, note, blocked_by, updated, owner, plan_updated) in &rows {
             let waiting = Self::unresolved(blocked_by, &active);
             if waiting.is_empty() {
                 // Warnings live only here: a blocked objective is exempt from
@@ -465,6 +481,18 @@ impl Store {
                 }
                 if plan.is_empty() {
                     line.push_str(" — NO PLAN YET");
+                } else if let (Ok(p), Ok(u)) = (
+                    chrono::DateTime::parse_from_rfc3339(plan_updated),
+                    chrono::DateTime::parse_from_rfc3339(updated),
+                ) {
+                    // The pivot signature: work kept advancing for a day+ after
+                    // the plan last moved. Either the plan is still right
+                    // (touch it) or the bet pivoted (close it, open a
+                    // successor, plan that fresh).
+                    let lag = (u - p).num_hours();
+                    if lag >= 24 {
+                        line.push_str(&format!(" — PLAN STALE? (untouched {}d while work advanced)", lag / 24));
+                    }
                 }
                 if !note.is_empty() {
                     line.push_str(&format!(" — note: {}", note.chars().take(120).collect::<String>()));
