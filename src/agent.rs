@@ -1109,7 +1109,10 @@ detail, and anything already acted on and closed.",
                  buy DAYS of runway, not hours; topping up to just above the floor books another refill \
                  for tomorrow. The balance NEVER refills itself: it is not 'filling', nothing accrues, \
                  and every hour it only moves DOWN until you send USDC — do not defer this on a belief \
-                 that fuel is on its way. Use the proven top-up path (swap treasury SOL to USDC, send to the \
+                 that fuel is on its way. While the balance sits below the floor the kernel BENCHES you to \
+                 the cheap floor seat — the strong model does not come back until the tank is refilled \
+                 above the floor, so the top-up is the fastest route back to full capability. Use the \
+                 proven top-up path (swap treasury SOL to USDC, send to the \
                  provider, verify the credit lands, book the entries). This alert repeats hourly until \
                  the balance is back above the floor.",
                 provider.name
@@ -1138,6 +1141,30 @@ detail, and anything already acted on and closed.",
             let mut cur = self.seat.current.lock().unwrap();
             if *cur != m {
                 self.log_line("CEO", "seat", &format!("CEO seat: {m} (fuel emergency — tank empty)"));
+                *cur = m.clone();
+            }
+            return m;
+        }
+        // Below the floor the strong seat is mechanically gone, not advised
+        // against: the CEO kept rating the fuel alert as deferrable while the
+        // tank drained toward 402. Benching to the floor model slashes burn on
+        // its own and makes the top-up the only way the good seat comes back.
+        let low = self.ctx.cfg.fuel_low_micros > 0
+            && self
+                .seat
+                .gauge
+                .lock()
+                .unwrap()
+                .is_some_and(|(avail, _, _)| avail < self.ctx.cfg.fuel_low_micros);
+        if low {
+            let m = self.ctx.cfg.ceo_model.clone();
+            let mut cur = self.seat.current.lock().unwrap();
+            if *cur != m {
+                self.log_line(
+                    "CEO",
+                    "seat",
+                    &format!("CEO seat: {m} (fuel below floor — benched to the cheap seat until refueled)"),
+                );
                 *cur = m.clone();
             }
             return m;

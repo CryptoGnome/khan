@@ -56,9 +56,10 @@ image_model = "openrouter/meta/muse-image"
 # from that chat land exactly like `khan tell`; the CEO answers with the
 # message_founder tool. Unset = the line simply doesn't exist.
 # Low-fuel floor in provider micro-dollars ($10). Below it the binary files an
-# hourly fuel-low alert so the CEO tops up before calls bounce with 402 — the
-# 2026-08-30 outage came from tracking billed spend instead of the tank, and the
-# top seat died first because it reserves the most per call. 0 disables.
+# hourly fuel-low alert AND benches the CEO to the floor model until refueled —
+# the alert alone got rationalized as deferrable while the tank drained, and the
+# 2026-08-30 outage came from tracking billed spend instead of the tank, with the
+# top seat dying first because it reserves the most per call. 0 disables.
 fuel_low_micros = 10000000
 
 # Directory agents work in (created automatically)
