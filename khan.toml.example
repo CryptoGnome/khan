@@ -20,11 +20,13 @@ ceo_model = "bu0y/deepseekv4flash"
 # sonnet5 sharpest judgment, gemini37flash near-frontier at ~40% of their
 # price, glm53flash production-proven (200+ calls, 0 failures) and near-free.
 ceo_models = [
-  "bu0y/grok46",         # first choice: best all-around probe result, production-proven
-  "bu0y/claudeopus5",    # picked only when grok is benched AND its band fits the ceilings
+  "bu0y/glm53flash",     # first choice: ~14x cheaper than grok, worker-proven (200+ calls,
+                         # 0 failures) — a trial in the big seat; grok is the fallback rung,
+                         # so benching this reverts the seat without a deploy
+  "bu0y/grok46",         # best all-around probe result, production-proven
+  "bu0y/claudeopus5",    # picked only when the rungs above are benched AND its band fits
   "bu0y/claudesonnet5",
   "bu0y/gemini37flash",
-  "bu0y/glm53flash",
 ]
 # Ceilings in the catalog's per-1M price units (input.average / output.average).
 # Ladder entries above either ceiling are skipped that cycle and picked up
