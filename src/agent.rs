@@ -1415,7 +1415,13 @@ keep the board honest, then close with finish_episode(note)."
             // replays them instead of eating them.
             for m in self.ctx.store.drain_messages() {
                 event_kind = "founder".into();
-                self.log_line("CEO", "founder-message", &m);
+                // Telegram is a private line: the public log records that the
+                // founder wrote, never what. khan tell stays public as before.
+                if m.starts_with("[via Telegram]") {
+                    self.log_line("CEO", "founder-message", "(private — received via Telegram)");
+                } else {
+                    self.log_line("CEO", "founder-message", &m);
+                }
                 let scratch = self.ctx.store.kv_get("episode_scratch").unwrap_or_default();
                 self.ctx.store.kv_set("episode_scratch", &format!("{scratch}\n---\n{m}"));
                 history.push(Message::text("user", format!("[Message from your founder — act on this now]\n{m}")));
@@ -1694,7 +1700,13 @@ Keep the board honest: add new bets, declare blocked_by, mark done what is done.
                     if !OBSERVATION_TOOLS.contains(&tname.as_str()) {
                         advanced = true;
                     }
-                    self.log_line("CEO", &tname, &call.function.arguments);
+                    // The reply text on the founder's private line stays out of
+                    // the public log; every other call logs its raw arguments.
+                    if tname == "message_founder" {
+                        self.log_line("CEO", &tname, "(private — sent to the founder's Telegram)");
+                    } else {
+                        self.log_line("CEO", &tname, &call.function.arguments);
+                    }
                     let out = if CEO_TOOL_NAMES.contains(&tname.as_str()) {
                         tools::truncate(self.ceo_tool("CEO", &tname, &a).await)
                     } else {
