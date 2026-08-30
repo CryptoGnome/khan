@@ -54,6 +54,21 @@ heartbeat_model = "bu0y/deepseekv4flash"
 # for $0.01 flat; step up per-call to x-ai/grok-imagine-image-2.0 ($0.06,
 # photoreal) or qwen/qwen-image-3-pro ($0.075, detail) when a render matters.
 image_model = "openrouter/meta/muse-image"
+# Founder's standing model policy, injected into the CEO's brief every
+# episode so it survives restarts (a nudged version of this was forgotten
+# within the hour after the 2026-08-30 redeploy). Plain text, kept short.
+model_policy = """
+- Default seat for every hire (workers, planners, managers): bu0y/glm53flash.
+  It has FULL VISION (use it for page QA, art review, screenshots), 1M
+  context, and near-frontier agentic behavior at flash price. Caveat: token-
+  hungry (~2-3x frontier tokens per task) — verbosity is not stuckness.
+- bu0y/deepseekv4flash is for the SIMPLEST mechanical tasks only (polling,
+  formatting, bulk scraping). No vision, weak judgment; cheap is its only
+  virtue. Never seat it for judgment, QA of rendered pages, or long tasks.
+- Escalate hard novel problems and money-gating plans to glm5, then grok46.
+- Founder model tips are candidates: probe, record the verdict in the model
+  playbook, and let measured ratings move seats — including off this default.
+"""
 # Founder direct line (Telegram): set TELEGRAM_BOT_TOKEN (from @BotFather) and
 # TELEGRAM_CHAT_ID (the founder's chat id) in the environment. Inbound messages
 # from that chat land exactly like `khan tell`; the CEO answers with the

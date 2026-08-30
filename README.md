@@ -182,7 +182,9 @@ token count is printed. **There is no spend cap — watch it.**
   emergency: the cheap floor model first, a free model if even that bounces —
   the company limps but never stalls, and runs its own top-up to recover.
 - **Employees** — hired freely by the CEO, each with a role prompt and its own
-  model (the CEO is told which models are free vs paid). `delegate` runs one
+  model (the CEO is told which models are free vs paid; an optional
+  `model_policy` in khan.toml injects the founder's standing seat policy into
+  every episode's brief, so it survives restarts instead of living in nudges). `delegate` runs one
   employee to completion; `delegate_parallel` runs several concurrently and
   returns all their reports. An employee that hits its iteration cap gets one
   final turn to file its report (finish is the only tool offered) before the

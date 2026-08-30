@@ -1464,11 +1464,20 @@ detail, and anything already acted on and closed.",
             let mut history: Vec<Message> = vec![Message::text("system", sys)];
             let roster = self.ctx.store.team_roster_text();
             let recent = self.ctx.store.recent_log(15);
+            // Standing policy rides the config, not the CEO's memory: a restart
+            // forgot the nudged hiring policy within the hour.
+            let policy = self
+                .ctx
+                .cfg
+                .model_policy
+                .as_deref()
+                .map(|p| format!("\n\nMODEL POLICY from your founder (standing — applies to every seat and hire):\n{p}"))
+                .unwrap_or_default();
             history.push(Message::text(
                 "user",
                 format!(
                     "[Company brief — composed fresh each episode; durable truth lives on the objective board, in memories and in skills]\n\
-BASE DIRECTIVE from your founder:\n{directive}\n\nTEAM:\n{roster}\n\nRECENT ACTIVITY (public log tail):\n{recent}"
+BASE DIRECTIVE from your founder:\n{directive}\n\nTEAM:\n{roster}{policy}\n\nRECENT ACTIVITY (public log tail):\n{recent}"
                 ),
             ));
             if let Some(note) = self.ctx.store.last_episode_note() {

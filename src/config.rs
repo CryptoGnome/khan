@@ -44,6 +44,11 @@ pub struct Config {
     /// only — the OpenRouter key is spent on image generation and nothing else;
     /// chat stays on bu0y. Unset = the tool's built-in cheap default.
     pub image_model: Option<String>,
+    /// Founder's standing model policy, injected verbatim into the CEO's
+    /// system prompt every episode. Before this it lived only in nudges and
+    /// the CEO's playbook — a restart forgot it within the hour (2026-08-30:
+    /// fresh boot, new hires drifted straight back to deepseekv4flash).
+    pub model_policy: Option<String>,
     /// Low-fuel floor in provider micro-dollars (bu0y GET /account
     /// availableMicros). Below it the binary files an hourly "fuel-low" routine
     /// alert so the CEO tops up before calls start bouncing with 402. 0 disables.
