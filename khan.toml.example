@@ -45,9 +45,10 @@ ceo_max_output_price = 12000000
 # Never a free model here: compaction is what keeps every other call cheap, and
 # free-tier 429s were blocking it at exactly the moment histories were longest —
 # uncompacted history then multiplies the cost of every premium-seat call it
-# feeds into. deepseekv4flash costs ~$0.002/call, fills from two marketplaces,
-# and has a 1M context, which suits summarizing a long history in one pass.
-utility_model = "bu0y/deepseekv4flash"
+# feeds into. glm53flash over deepseek (founder rule 2026-08-30): a summary is
+# what survives of an agent's history, and a dumb summarizer quietly poisons
+# every episode built on it. Same 1M context, still pennies per pass.
+utility_model = "bu0y/glm53flash"
 # Seat for quiet-board heartbeats: fires only when a heartbeat opens with
 # nothing queued (no reports, no alerts, no founder messages). The binary
 # escalates back to the ladder seat the moment real work drains in. Founder
