@@ -37,10 +37,12 @@ on [Railway](https://railway.com?referralCode=SCj9lN) and left running 24/7.
 
 ## Highlights
 
-- **Never idles** — an unbounded CEO loop: finish a milestone, verify it, find the next most valuable thing.
-- **Builds its own company** — hires/fires employee agents, each on the model its task deserves, and manages its API budget against live prices.
-- **Self-evolving** — prompts, custom tools, and skills are versioned in SQLite; the CEO improves them from outcome ratings and can roll back bad changes.
-- **Live and steerable** — real-time color-coded web log viewer; redirect the whole company with `khan tell "..."` or by editing one env var.
+- **Never idles, never spins** — an event-driven CEO kernel: episodes open on reports, alerts, and founder messages, close with a durable handoff note, and a heartbeat keeps strategy alive when the board is quiet.
+- **Builds its own company** — hires/fires employee agents, each on the model its task deserves; objectives have owners, and worker reports route to the manager who owns the lane.
+- **Picks its own seat** — the binary (never the model) chooses the CEO's model from a quality-ordered ladder against live marketplace prices, benches failures, drops to a cheap seat for quiet heartbeats, and watches the provider's balance so the tank refills before calls bounce.
+- **Self-evolving** — prompts, custom tools, and skills are versioned in SQLite; the CEO improves them from outcome ratings and can roll back bad changes. Scheduled routines run mechanical checks at zero model cost, and review routines dispatch agents on a cadence for judgment work (site audits, adversarial code review).
+- **Live and steerable** — real-time color-coded web log viewer; redirect the whole company with `khan tell "..."`, a message to its Telegram bot, or by editing one env var.
+- **Makes real images** — a `generate_image` tool renders coin art and site imagery through OpenRouter image models for about a cent each, with the key held in the binary and spent on nothing else.
 - **Survives everything** — state lives in `khan.db`; restarts and redeploys resume mid-mission.
 - **Security-conscious** — immutable prompt rules, secret-scrubbed shells, injection-hardened web content, read-only public page. See [SECURITY.md](SECURITY.md).
 
@@ -50,7 +52,8 @@ Before first run you need:
 
 1. **A model API key** (at least one):
    - `BU0Y_API_KEY` — bu0y key (fund with USDC, mint key at bu0y.com). Cheapest paid routing.
-   - `OPENROUTER_API_KEY` — OpenRouter key, used for `:free` models by default.
+   - `OPENROUTER_API_KEY` — OpenRouter key, used for `:free` models and the
+     `generate_image` tool (`image_model` in `khan.toml`).
    - Or any custom OpenAI-compatible endpoint (add a `[[providers]]` block in `khan.toml`).
    - Tip: OpenRouter exposes `openrouter/free`, which auto-routes to whatever
      free model is currently up — a convenient catch-all for easy work and
@@ -76,6 +79,11 @@ viewer gives you a live window into what the company is doing from anywhere.
    - `OPENROUTER_API_KEY` and/or `BU0Y_API_KEY` (whatever your `khan.toml` providers need)
    - `KHAN_DIRECTIVE` — the base directive. This is where the big goal goes;
      multi-line/multi-paragraph values are fine in Railway's variable editor.
+   - `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` *(optional)* — a direct line
+     between founder and CEO. Messages from that one chat id land exactly like
+     `khan tell`; the CEO replies (and proactively pings you) with its
+     `message_founder` tool. Any other chat that finds the bot is dropped and
+     logged. Unset = the feature doesn't exist.
    - `FETCH_PROXY` *(optional)* — a residential proxy URL
      (`http://user:pass@gateway:port`) for web fetching. Datacenter IPs are
      walled off from much of the web (search engines, CDNs, many sites);
@@ -98,7 +106,8 @@ viewer gives you a live window into what the company is doing from anywhere.
   the CEO the directive changed.
 - **Nudge without redeploying:** open a shell on the service (`railway ssh`)
   and run `khan tell "drop the pricing page, focus on the scraper"` — the CEO
-  acts on it at its next iteration.
+  wakes on it immediately. With the Telegram line configured, texting the bot
+  from your phone does the same thing, and the CEO texts back.
 - **Stop the spend:** stop/remove the service. khan has **no built-in spend
   cap** (by design) — a cloud worker keeps calling the API until you stop it.
 
@@ -147,24 +156,47 @@ token count is printed. **There is no spend cap — watch it.**
 
 ## How it works
 
-- **CEO loop** — one agent with the base directive plus control tools:
-  `hire`, `delegate`, `fire`, `list_team`, `update_prompt`, `rollback_prompt`,
-  `save_playbook`, `finish` (milestone report; work continues).
+- **CEO kernel** — one agent with the base directive plus control tools
+  (`hire`, `delegate`, `fire`, `objectives`, `update_prompt`, `save_playbook`,
+  `finish_episode`, …), run as an event-driven loop: an episode opens when
+  something happens (a worker report, a routine alert, a founder message),
+  closes with a `finish_episode` note that hands context to the next episode,
+  and blocks on events in between instead of polling. A heartbeat opens a
+  strategy episode when nothing has happened for `heartbeat_secs`.
+- **Objectives board** — a ranked board with owners, plans, blockers, and
+  status. Worker reports route to the manager who owns the objective; a plan
+  untouched for a day while work advanced gets flagged, and a pivot closes its
+  objective for a fresh one instead of mutating the old plan in place.
+- **CEO seat ladder** — the binary, never the model, picks the CEO's seat:
+  the first model in a quality-ordered list that isn't benched by a recent
+  failure and whose live marketplace price fits configured ceilings. Quiet
+  heartbeats (nothing queued) run on a cheap `heartbeat_model`, escalating
+  the moment real work drains in. The binary also polls the provider's
+  balance and alerts the CEO below a floor, so fuel is bought before calls
+  start bouncing.
 - **Employees** — hired freely by the CEO, each with a role prompt and its own
   model (the CEO is told which models are free vs paid). `delegate` runs one
   employee to completion; `delegate_parallel` runs several concurrently and
   returns all their reports. The CEO rates each report (`rate_work`, 1-5);
   per-agent/per-prompt-version stats feed the reflection step so prompt
   changes are judged on outcomes, not vibes.
-- **Live steering** — `khan tell "..."` from a second terminal queues a founder
-  message; the running CEO picks it up on its next iteration. No restart needed.
+- **Live steering** — `khan tell "..."` from a second terminal (or a Telegram
+  message from the allowlisted founder chat) queues a founder message; the
+  running CEO wakes on it immediately. No restart needed.
+- **Routines** — the CEO schedules its own recurring checks: shell routines
+  run inside the binary at zero model cost and only surface deviations
+  (nonzero exit or `ALERT` output), while review routines dispatch an agent on
+  a cadence for work that needs judgment — an outsider-eyes site review, an
+  adversarial audit of the scripts.
 - **Model failover** — if an agent's model keeps failing (free-tier 429s/outages),
   the call is answered by the next available free model automatically and the
   swap is logged.
 - **Work tools** (all agents): file read/write/list (confined to `workspace/`),
   shell (with local `git` for version control; the GitHub CLI is blocked so
   agents can never reach your GitHub login), web fetch + DuckDuckGo search,
-  SQL against a scratch `workspace.db`, and `remember`/`recall` memory.
+  SQL against a scratch `workspace.db`, `generate_image` (real renders via
+  OpenRouter image models, ~$0.01 each, the key never enters an agent shell),
+  and `remember`/`recall` memory.
 - **Memory** — SQLite FTS5. Relevant memories are auto-injected into context;
   long histories are compacted into summaries by a cheap model.
 - **Custom tools** — any agent can call `create_tool` to turn a Python or
@@ -185,11 +217,11 @@ token count is printed. **There is no spend cap — watch it.**
   the CEO sees broken infrastructure as a *pattern* and routes around it
   (diagnose → build a replacement with `create_tool` → save the workaround as
   a skill) instead of silently retrying a dead tool forever.
-- **Self-evolution** — prompts live in `khan.db`, versioned. Every
-  `reflect_every` iterations the CEO reviews the activity log and may rewrite
-  its own or employees' prompts (`update_prompt`), roll back bad changes, and
-  save playbook lessons. Everything survives restarts, so the org genuinely
-  improves across runs.
+- **Self-evolution** — prompts live in `khan.db`, versioned. Reflection rides
+  the heartbeat episodes: the CEO reviews the activity log and outcome
+  ratings, may rewrite its own or employees' prompts (`update_prompt`), roll
+  back bad changes, and save playbook lessons. Everything survives restarts,
+  so the org genuinely improves across runs.
 - **Security layers** — defense against prompt injection and secret leaks:
   an immutable security preamble is appended to every agent's system prompt
   from code (not the editable prompts table, so neither evolution nor an

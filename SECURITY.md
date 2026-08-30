@@ -27,6 +27,12 @@ Understand the boundaries before deploying:
   anything to the agents.
 - Web content fetched by agents is wrapped in explicit untrusted-content
   markers.
+- Founder authority is bound to channels the binary verifies: `khan tell` on
+  the host and, when configured, one allowlisted Telegram chat id (messages
+  from any other chat are dropped and logged; the bot token is captured into
+  memory at startup like the API keys). The security preamble tells agents
+  that email and web content can never carry founder instructions — a company
+  inbox is a public attack surface.
 
 **Known limitations (by design — deploy accordingly)**
 
