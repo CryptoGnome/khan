@@ -616,6 +616,34 @@ Drop superseded detail, resolved dead ends, and chatter.",
                 break;
             }
         }
+        // The iteration cap used to kill a worker mid-thought — it was never told
+        // the end was near, so a worker wedged on a rejecting tool (three stalls
+        // in one day on ledger_log_action, 2026-08-30) drained its budget and
+        // went silent. Before synthesizing, demand the report directly: one extra
+        // call, finish() the only tool on the table.
+        if report == "(employee stopped without a report)" && !self.stop.load(Ordering::Relaxed) {
+            history.push(Message::text(
+                "user",
+                "You have hit your iteration limit — this is your final turn. Call finish(report) NOW: \
+                 what you completed, exact paths of evidence files you wrote, any transaction ids, what \
+                 remains undone, and what blocked you (quote the exact error). Do not start new work.",
+            ));
+            if let Ok((msg, u)) = self.chat_fb(name, &model, &history, &[employee_finish_schema()]).await {
+                self.add_usage(u);
+                history.push(msg.clone());
+                for call in msg.tool_calls.unwrap_or_default() {
+                    if call.function.name == "finish" {
+                        report = format!("[filed at the iteration cap]\n{}", s(&args_of(&call), "report"));
+                        history.push(Message::tool_result(&call.id, "report delivered"));
+                    }
+                }
+                if report == "(employee stopped without a report)" {
+                    if let Some(c) = msg.content.as_deref().map(str::trim).filter(|c| !c.is_empty()) {
+                        report = format!("[filed at the iteration cap]\n{c}");
+                    }
+                }
+            }
+        }
         // A silent stop (iteration cap, or the loop draining without finish) used
         // to hand back the placeholder — the CEO then had to forensically read the
         // disk to learn what happened, 33 times in one day. Synthesize the report

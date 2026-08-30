@@ -184,7 +184,10 @@ token count is printed. **There is no spend cap — watch it.**
 - **Employees** — hired freely by the CEO, each with a role prompt and its own
   model (the CEO is told which models are free vs paid). `delegate` runs one
   employee to completion; `delegate_parallel` runs several concurrently and
-  returns all their reports. The CEO rates each report (`rate_work`, 1-5);
+  returns all their reports. An employee that hits its iteration cap gets one
+  final turn to file its report (finish is the only tool offered) before the
+  kernel falls back to synthesizing one from the transcript tail. The CEO
+  rates each report (`rate_work`, 1-5);
   per-agent/per-prompt-version stats feed the reflection step so prompt
   changes are judged on outcomes, not vibes.
 - **Live steering** — `khan tell "..."` from a second terminal (or a Telegram
