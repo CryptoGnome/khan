@@ -262,6 +262,9 @@ pub struct SeatState {
     cooldown: std::sync::Mutex<std::collections::HashMap<String, std::time::Instant>>,
     /// The seat chosen for the episode in flight (for close-time bookkeeping).
     current: std::sync::Mutex<String>,
+    /// (last fuel poll, last low-fuel alert) — the poll rides the same cadence
+    /// as the price cache; the alert re-fires hourly while the tank stays low.
+    fuel: std::sync::Mutex<(Option<std::time::Instant>, Option<std::time::Instant>)>,
 }
 
 impl Orchestrator {
@@ -932,6 +935,59 @@ Drop superseded detail, resolved dead ends, and chatter.",
         }
     }
 
+    /// Check the provider's remaining balance and alert the CEO before calls
+    /// start bouncing. The 2026-08-30 outage proved the failure mode: the CEO
+    /// tracked cumulative billed spend, never the tank, and discovered empty
+    /// via 70 minutes of 402s — with the most expensive seat (its own) dying
+    /// first because large per-call reserves trip the balance check soonest.
+    /// Polls GET /account on the first provider (bu0y shape: availableMicros,
+    /// micro-dollars); providers without that endpoint are silently skipped.
+    async fn check_fuel(&self) {
+        let threshold = self.ctx.cfg.fuel_low_micros;
+        if threshold == 0 {
+            return;
+        }
+        {
+            let f = self.seat.fuel.lock().unwrap();
+            if f.0.is_some_and(|t| t.elapsed() < std::time::Duration::from_secs(300)) {
+                return;
+            }
+        }
+        let Some(provider) = self.ctx.cfg.providers.first() else { return };
+        let Some(key) = self.ctx.cfg.key_for(&provider.name) else { return };
+        let url = format!("{}/account", provider.base_url.trim_end_matches('/'));
+        let Ok(resp) = self.ctx.http.get(&url).bearer_auth(key).send().await else { return };
+        if !resp.status().is_success() {
+            return;
+        }
+        let Ok(v) = resp.json::<serde_json::Value>().await else { return };
+        let Some(available) = v["availableMicros"].as_u64() else { return };
+        let mut f = self.seat.fuel.lock().unwrap();
+        f.0 = Some(std::time::Instant::now());
+        if available >= threshold {
+            f.1 = None;
+            return;
+        }
+        if f.1.is_some_and(|t| t.elapsed() < std::time::Duration::from_secs(3600)) {
+            return;
+        }
+        f.1 = Some(std::time::Instant::now());
+        drop(f);
+        let (avail_usd, floor_usd) = (available as f64 / 1e6, threshold as f64 / 1e6);
+        self.log_line("core", "fuel-low", &format!("provider balance ${avail_usd:.2} < ${floor_usd:.2} floor"));
+        self.ctx.store.add_routine_alert(
+            "fuel-low",
+            &format!(
+                "FUEL LOW: ${avail_usd:.2} available on {} (floor ${floor_usd:.2}). Top up NOW, before \
+                 calls start failing with 402 — your own seat dies first because it reserves the most \
+                 per call. Use the proven top-up path (swap treasury SOL to USDC, send to the provider, \
+                 verify the credit lands, book the entries). This alert repeats hourly until the balance \
+                 is back above the floor.",
+                provider.name
+            ),
+        );
+    }
+
     /// Pick the CEO's seat for this turn: first model in the quality-ordered
     /// ceo_models list that is not benched and whose current average price
     /// fits the ceilings; the configured floor when nothing qualifies. A model
@@ -1250,7 +1306,28 @@ keep the board honest, then close with finish_episode(note)."
             // and judgment should stay consistent within one episode. Only a
             // failed call re-picks, and the replacement inherits the full
             // transcript.
-            let mut ceo_model = self.pick_ceo_model().await;
+            //
+            // Quiet-board heartbeats are the exception: nothing queued means the
+            // episode is a status sweep, and burning the top seat on "freeze
+            // matches, sitting" every 5 minutes is pure waste. The check is
+            // mechanical (queues, not judgment); the moment anything lands —
+            // report, alert, founder message — the loop below escalates back to
+            // the ladder seat.
+            let quiet_heartbeat = heartbeat
+                && !self.ctx.store.has_pending_input()
+                && !self.pending.lock().await.iter().any(|t| t.handle.is_finished());
+            let mut ceo_model = match (&self.ctx.cfg.heartbeat_model, quiet_heartbeat) {
+                (Some(m), true) => {
+                    let mut cur = self.seat.current.lock().unwrap();
+                    if *cur != *m {
+                        self.log_line("CEO", "seat", &format!("CEO seat: {m} (quiet heartbeat)"));
+                        *cur = m.clone();
+                    }
+                    m.clone()
+                }
+                _ => self.pick_ceo_model().await,
+            };
+            self.check_fuel().await;
 
             'turns: loop {
             if self.stop.load(Ordering::Relaxed) {
@@ -1309,6 +1386,15 @@ keep the board honest, then close with finish_episode(note)."
                 let scratch = self.ctx.store.kv_get("episode_scratch").unwrap_or_default();
                 self.ctx.store.kv_set("episode_scratch", &format!("{scratch}\n---\n{m}"));
                 history.push(Message::text("user", format!("[Message from your founder — act on this now]\n{m}")));
+            }
+
+            // A quiet heartbeat stops being quiet the moment real work drains
+            // in: escalate to the ladder seat. The transcript carries over, so
+            // the strong model inherits everything the cheap one saw.
+            if event_kind != "heartbeat"
+                && self.ctx.cfg.heartbeat_model.as_deref() == Some(ceo_model.as_str())
+            {
+                ceo_model = self.pick_ceo_model().await;
             }
 
             // The reflection payload opens every heartbeat episode.

@@ -34,6 +34,17 @@ pub struct Config {
     pub ceo_max_output_price: u64,
     /// Model used for cheap internal work (history summarization). Defaults to ceo_model.
     pub utility_model: Option<String>,
+    /// Seat for quiet-board heartbeats: when a heartbeat fires with NOTHING
+    /// queued (no reports, no alerts, no founder messages), the episode runs on
+    /// this cheaper model instead of the ladder pick. The escalation trigger is
+    /// mechanical — a queue check by the binary — so no weak model ever judges
+    /// whether a strong one is needed. Unset = every episode uses the ladder.
+    pub heartbeat_model: Option<String>,
+    /// Low-fuel floor in provider micro-dollars (bu0y GET /account
+    /// availableMicros). Below it the binary files an hourly "fuel-low" routine
+    /// alert so the CEO tops up before calls start bouncing with 402. 0 disables.
+    #[serde(default = "default_fuel_low_micros")]
+    pub fuel_low_micros: u64,
     #[serde(default = "default_workspace")]
     pub workspace: String,
     pub providers: Vec<Provider>,
@@ -72,6 +83,10 @@ fn default_ceo_max_output_price() -> u64 {
     12_000_000
 }
 
+fn default_fuel_low_micros() -> u64 {
+    10_000_000 // $10 — a few hours of top-seat burn
+}
+
 fn default_heartbeat_secs() -> u64 {
     300
 }
@@ -103,6 +118,9 @@ impl Config {
         cfg.resolve(&cfg.ceo_model)?; // validate early
         for m in &cfg.ceo_models {
             cfg.resolve(m).with_context(|| format!("ceo_models entry '{m}' does not resolve"))?;
+        }
+        if let Some(m) = &cfg.heartbeat_model {
+            cfg.resolve(m).with_context(|| format!("heartbeat_model '{m}' does not resolve"))?;
         }
         Ok(cfg)
     }

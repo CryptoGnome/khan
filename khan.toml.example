@@ -38,6 +38,16 @@ ceo_max_output_price = 12000000
 # feeds into. deepseekv4flash costs ~$0.002/call, fills from two marketplaces,
 # and has a 1M context, which suits summarizing a long history in one pass.
 utility_model = "bu0y/deepseekv4flash"
+# Seat for quiet-board heartbeats: fires only when a heartbeat opens with
+# nothing queued (no reports, no alerts, no founder messages) — a status sweep,
+# not a decision. The binary escalates back to the ladder seat the moment real
+# work drains in, so no weak model ever judges whether a strong one is needed.
+heartbeat_model = "bu0y/deepseekv4flash"
+# Low-fuel floor in provider micro-dollars ($10). Below it the binary files an
+# hourly fuel-low alert so the CEO tops up before calls bounce with 402 — the
+# 2026-08-30 outage came from tracking billed spend instead of the tank, and the
+# top seat died first because it reserves the most per call. 0 disables.
+fuel_low_micros = 10000000
 
 # Directory agents work in (created automatically)
 workspace = "workspace"
