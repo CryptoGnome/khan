@@ -1094,7 +1094,9 @@ detail, and anything already acted on and closed.",
                  calls start failing with 402 — your own seat dies first because it reserves the most \
                  per call. {burn_note}Send ~${send_usd:.0} to reach ~${target_usd:.0} — a refill should \
                  buy DAYS of runway, not hours; topping up to just above the floor books another refill \
-                 for tomorrow. Use the proven top-up path (swap treasury SOL to USDC, send to the \
+                 for tomorrow. The balance NEVER refills itself: it is not 'filling', nothing accrues, \
+                 and every hour it only moves DOWN until you send USDC — do not defer this on a belief \
+                 that fuel is on its way. Use the proven top-up path (swap treasury SOL to USDC, send to the \
                  provider, verify the credit lands, book the entries). This alert repeats hourly until \
                  the balance is back above the floor.",
                 provider.name
