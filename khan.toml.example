@@ -8,7 +8,12 @@
 # unpinned slug scored 8/8 in the same minute. The router can only fail over
 # between marketplaces when the model is priced on more than one. Worth 1.37x the
 # per-token cost: the pinned variant took the whole company offline.
-ceo_model = "bu0y/deepseekv4flash"
+#
+# This is also the FLOOR seat: what the CEO runs on during a fuel emergency,
+# a 402, or while benched below the fuel floor — exactly the moments it must
+# execute a top-up competently. glm53flash over deepseek: same price class,
+# real judgment, and it can see.
+ceo_model = "bu0y/glm53flash"
 # The CEO's seat LADDER, quality-ordered. The binary — never the model — picks
 # the first entry that is not benched by a recent failure and whose LIVE
 # marketplace price fits the ceilings below; ceo_model above is the
