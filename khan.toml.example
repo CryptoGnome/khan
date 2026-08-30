@@ -49,10 +49,11 @@ ceo_max_output_price = 12000000
 # and has a 1M context, which suits summarizing a long history in one pass.
 utility_model = "bu0y/deepseekv4flash"
 # Seat for quiet-board heartbeats: fires only when a heartbeat opens with
-# nothing queued (no reports, no alerts, no founder messages) — a status sweep,
-# not a decision. The binary escalates back to the ladder seat the moment real
-# work drains in, so no weak model ever judges whether a strong one is needed.
-heartbeat_model = "bu0y/deepseekv4flash"
+# nothing queued (no reports, no alerts, no founder messages). The binary
+# escalates back to the ladder seat the moment real work drains in. Founder
+# rule 2026-08-30: the CEO never sits on deepseekv4flash — even a quiet sweep
+# is judgment ("is anything wrong here"), and glm53flash costs pennies more.
+heartbeat_model = "bu0y/glm53flash"
 # Image seat for the generate_image tool. OpenRouter only: the OpenRouter key
 # is for images and nothing else (chat stays on bu0y — its pipe strips image
 # payloads while billing the tokens, verified 2026-08-30). muse-image renders
