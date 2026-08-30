@@ -383,6 +383,7 @@ mod tests {
             "web_access_from_datacenter",
             "evm_wallet_ops",
             "security_audit",
+            "anti_slop_frontend",
         ] {
             assert!(names.contains(&n.to_string()), "missing seed '{n}' in {names:?}");
         }
