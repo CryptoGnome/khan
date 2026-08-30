@@ -137,15 +137,18 @@ api_key_env = "BU0Y_API_KEY"
 # the bill here (roughly 40x more input than output tokens), so the input figure
 # is the one to weigh.
 paid_models = [
-  "deepseekv4flash",            # 1.37x — default. Priced on two marketplaces, so the
-                                #   router can fail over; the pinned -0731 cannot.
+  "glm53flash",                 # 1.3x / 4.6x — the default seat (see model_policy):
+                                #   vision, 1M context, 0 failures in 200+ calls. Its
+                                #   launch-window price (18x) collapsed 2026-08-30;
+                                #   input now undercuts deepseekv4flash.
+  "deepseekv4flash",            # 1.37x — mechanical tasks. Priced on two marketplaces,
+                                #   so the router can fail over; the pinned -0731 cannot.
   "deepseekv32",                # 1.5x / 1.1x  — stronger reasoning, 4.4s, 0 failures
   "minimaxm25",                 # 1.6x / 2.9x  — 3.6s
   "glm5",                       # 3.6x / 5.8x  — 4.8s
   "kimik2thinking",             # 3.6x / 7.6x  — reasoning model for hard calls, 5.2s
   "deepseekv4flash0731",        # 1.0x — cheapest, but single-marketplace: it is the
                                 #   one that stalled the company, so it sits late.
-  "glm53flash",                 # 18.1x / 30.2x — 0 failures in 203 calls, but pricey
 ]
 # Removed after measurement, not on principle:
 #   qwen3235ba22b2507 answered a toy prompt in 3.4s and looked like the bargain of
