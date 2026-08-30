@@ -24,6 +24,12 @@ pub struct ToolCtx {
     pub http_proxy: Option<reqwest::Client>,
 }
 
+/// Public schema builder for callers outside this module (agent.rs adds
+/// conditional CEO tools like message_founder).
+pub fn tool_schema(name: &str, desc: &str, params: Value) -> Value {
+    tool(name, desc, params)
+}
+
 fn tool(name: &str, desc: &str, params: Value) -> Value {
     json!({"type": "function", "function": {"name": name, "description": desc,
         "parameters": {"type": "object", "properties": params["properties"],

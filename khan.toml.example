@@ -49,6 +49,10 @@ heartbeat_model = "bu0y/deepseekv4flash"
 # for $0.01 flat; step up per-call to x-ai/grok-imagine-image-2.0 ($0.06,
 # photoreal) or qwen/qwen-image-3-pro ($0.075, detail) when a render matters.
 image_model = "openrouter/meta/muse-image"
+# Founder direct line (Telegram): set TELEGRAM_BOT_TOKEN (from @BotFather) and
+# TELEGRAM_CHAT_ID (the founder's chat id) in the environment. Inbound messages
+# from that chat land exactly like `khan tell`; the CEO answers with the
+# message_founder tool. Unset = the line simply doesn't exist.
 # Low-fuel floor in provider micro-dollars ($10). Below it the binary files an
 # hourly fuel-low alert so the CEO tops up before calls bounce with 402 — the
 # 2026-08-30 outage came from tracking billed spend instead of the tank, and the

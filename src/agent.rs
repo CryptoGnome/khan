@@ -175,7 +175,7 @@ const CEO_TOOL_NAMES: &[&str] = &[
     "hire", "delegate", "delegate_parallel", "dispatch", "team_status", "rate_work", "fire", "list_team",
     "add_routine", "add_review_routine", "remove_routine", "list_routines",
     "update_prompt", "rollback_prompt", "save_playbook", "finish", "objectives",
-    "finish_episode",
+    "finish_episode", "message_founder",
 ];
 
 /// Tools that read state without changing it. A CEO turn whose calls all come
@@ -902,6 +902,22 @@ Drop superseded detail, resolved dead ends, and chatter.",
                     other => format!("ERROR: unknown action '{other}' (add/update/done/drop)"),
                 }
             }
+            "message_founder" => {
+                let Some((token, chat)) = self.ctx.cfg.telegram() else {
+                    return "ERROR: the Telegram line is not configured".into();
+                };
+                let text = s(a, "text");
+                if text.trim().is_empty() {
+                    return "ERROR: text is empty".into();
+                }
+                match crate::telegram::send(&self.ctx.http, &token, chat, text).await {
+                    Ok(()) => {
+                        self.log_line("CEO", "telegram-out", "replied to the founder");
+                        "sent to the founder's Telegram".into()
+                    }
+                    Err(e) => format!("ERROR: {e}"),
+                }
+            }
             _ => format!("unknown tool {name}"),
         }
     }
@@ -1346,6 +1362,23 @@ keep the board honest, then close with finish_episode(note)."
             schemas.extend(tools::skills::schemas());
             schemas.extend(tools::credits::schemas(&self.ctx));
             schemas.extend(ceo_schemas());
+            // The founder line only exists as a tool when it is configured:
+            // an unconfigured tool that always errors teaches the model to
+            // stop trying channels that might come alive later.
+            if self.ctx.cfg.telegram().is_some() {
+                schemas.push(tools::tool_schema(
+                    "message_founder",
+                    "Send a short message to the founder's Telegram (their phone). USE IT to answer \
+                     any founder message tagged [via Telegram], and proactively for things worth an \
+                     interruption: revenue landed, a launch went live, something needs their decision \
+                     or their money. Plain text, no markdown. Keep it tight — it's a phone screen, \
+                     not a report. Never send secrets, keys, or seed phrases; the founder will never \
+                     ask for them over this channel.",
+                    serde_json::json!({
+                        "properties": {"text": {"type": "string"}},
+                        "required": ["text"]}),
+                ));
+            }
             // The CEO directs; it does not build. Every time these tools were
             // available it eventually rationalized an exception ("genuine
             // correctness fix") and spent whole cycles writing code by hand, so

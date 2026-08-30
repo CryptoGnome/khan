@@ -3,6 +3,7 @@ mod config;
 mod llm;
 mod prompts;
 mod routines;
+mod telegram;
 mod state;
 mod tools;
 mod viewer;
@@ -198,6 +199,11 @@ async fn main() -> Result<()> {
     // Scheduled checks run inside the binary: shell routines at zero model
     // cost, review routines as scheduled dispatches through the orchestrator.
     // Only deviations (and review reports) reach the CEO.
+    // The founder's direct line: Telegram in (queued like `khan tell`),
+    // message_founder out. Only spawned when both env halves are set.
+    if let Some((token, chat)) = orch.ctx.cfg.telegram() {
+        tokio::spawn(telegram::serve(orch.ctx.store.clone(), orch.ctx.http.clone(), token, chat));
+    }
     tokio::spawn(routines::serve(
         orch.ctx.store.clone(),
         orch.ctx.workspace.clone(),

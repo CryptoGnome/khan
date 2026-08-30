@@ -148,6 +148,14 @@ impl Config {
                 self.keys.insert(p.api_key_env.clone(), v);
             }
         }
+        // The Telegram founder line: the token matches the sensitive pattern and
+        // would be scrubbed below, so capture it (and the chat id, for symmetry)
+        // into memory first.
+        for k in ["TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"] {
+            if let Ok(v) = std::env::var(k) {
+                self.keys.insert(k.into(), v);
+            }
+        }
         // Drop the provider keys plus anything else secret-shaped: khan needs none
         // of them from the environment again, and what isn't there cannot leak.
         let doomed: Vec<String> = std::env::vars()
@@ -157,6 +165,14 @@ impl Config {
         for k in doomed {
             std::env::remove_var(k);
         }
+    }
+
+    /// The founder's Telegram line, when both halves are configured:
+    /// (bot token, allowlisted founder chat id).
+    pub fn telegram(&self) -> Option<(String, i64)> {
+        let token = self.keys.get("TELEGRAM_BOT_TOKEN")?.clone();
+        let chat = self.keys.get("TELEGRAM_CHAT_ID")?.parse().ok()?;
+        Some((token, chat))
     }
 
     /// The API key for a provider, or None if it was never set.
