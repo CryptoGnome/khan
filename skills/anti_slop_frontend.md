@@ -42,12 +42,18 @@ verify pass/fail without taste debates.
 3. Real images over fake ones: use the generate_image tool for hero and
    section art (it costs $0.01). No div-built fake screenshots, no
    hand-rolled decorative SVGs as the default.
+3b. NO BAKED DATA. Any number or list that can change (treasury, board,
+   claims, prices, team) renders from a live source — the stats/ledger SSE
+   pipe or a file a routine regenerates — never hand-copied into markup. A
+   transparency site showing stale data is lying with extra steps; the baked
+   board tab and the baked USD panel were both this bug.
 4. Ship the full states: loading (skeleton, not spinner), empty, error,
    hover/active feedback, and WCAG AA contrast on text and buttons.
 5. Pre-flight count before reporting done — each of these is yes/no:
    Design Read stated · banned fonts/palettes absent · hero within 4 text
    elements · eyebrow and zigzag counts pass · one accent + one radius +
    one theme · zero visible em-dashes · CTAs deduplicated · real images ·
+   zero baked changeable data (every live figure traced to its source) ·
    states + contrast shipped · copy free of the banned words.
 
 ## Pitfalls
