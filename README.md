@@ -215,7 +215,11 @@ token count is printed. **There is no spend cap — watch it.**
   themselves with `create_skill` (markdown: steps, gotchas, checklists). Every
   agent sees a compact skill index each turn and loads a skill's full
   instructions with `use_skill` before doing work it covers. Versioned like
-  tools: same name = new version, `rollback_skill` reverts.
+  tools: same name = new version, `rollback_skill` reverts. Curated skills can
+  also be seeded from the repo's `skills/` directory (one `.md` per skill,
+  first line the description): at boot, any seed not already in the database
+  lands as version 1 — a skill the company has since evolved is never
+  overridden.
 - **Tool health** — every tool call's outcome is recorded. Failures show up
   immediately in the activity log (red), and repeated failures are aggregated
   into the reflection step as "N of M recent calls FAILED — last error: …", so

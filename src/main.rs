@@ -73,6 +73,7 @@ async fn main() -> Result<()> {
     std::fs::create_dir_all(&workspace)?;
     let store = Arc::new(state::Store::open("khan.db")?);
     prompts::seed(&store, &cfg);
+    tools::skills::seed(&store);
 
     let (directive, fresh) = match &cli.cmd {
         Cmd::Run { directive } => {
@@ -365,6 +366,23 @@ mod tests {
         let freed = store.newly_ready(email);
         assert_eq!(freed.len(), 1);
         assert_eq!(freed[0].0, press);
+    }
+
+    #[test]
+    fn repo_skills_seed_once_and_never_override() {
+        // cargo test runs from the repo root, so seed() reads the real skills/
+        // directory — which also guards the shipped files' format (first line
+        // description, non-empty body).
+        let store = crate::state::Store::open(":memory:").unwrap();
+        crate::tools::skills::seed(&store);
+        let names: Vec<String> = store.list_skills().into_iter().map(|(n, _)| n).collect();
+        assert!(names.contains(&"palmyr_agent_infra".into()), "seeded: {names:?}");
+        assert!(names.contains(&"bridge_hygiene".into()));
+        // A company-evolved version is never clobbered by a reseed.
+        store.save_skill("bridge_hygiene", "evolved", "the company's own v2", "test").unwrap();
+        crate::tools::skills::seed(&store);
+        let (desc, _) = store.get_skill("bridge_hygiene").unwrap();
+        assert_eq!(desc, "evolved");
     }
 
     #[test]

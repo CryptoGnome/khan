@@ -22,6 +22,37 @@ pub fn schemas() -> Vec<Value> {
     ]
 }
 
+/// Seed curated skills from the repo's skills/ directory (baked into the
+/// image). Each file is <name>.md: first line the one-line description, the
+/// rest the content. A skill whose name already exists in the database is
+/// NEVER touched — the file is a seed for a fresh company, not an override of
+/// what the company has since learned; agents evolve and roll back seeded
+/// skills exactly like their own.
+pub fn seed(store: &crate::state::Store) {
+    let dir = std::path::Path::new("skills");
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("md") {
+            continue;
+        }
+        let Some(name) = path.file_stem().and_then(|s| s.to_str()) else { continue };
+        if !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') || store.get_skill(name).is_some()
+        {
+            continue;
+        }
+        let Ok(text) = std::fs::read_to_string(&path) else { continue };
+        let mut lines = text.splitn(2, '\n');
+        let (desc, content) = (lines.next().unwrap_or("").trim(), lines.next().unwrap_or("").trim());
+        if desc.is_empty() || content.is_empty() {
+            continue;
+        }
+        if store.save_skill(name, desc, content, "seeded from the repo's skills/ directory").is_ok() {
+            store.log("core", "skill-seeded", &format!("{name}: {desc}"));
+        }
+    }
+}
+
 pub fn create(ctx: &ToolCtx, args: &Value) -> Result<String> {
     let name = args["name"].as_str().unwrap_or("").trim().to_string();
     if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {

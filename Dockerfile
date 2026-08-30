@@ -43,6 +43,7 @@ RUN PIP_USER=0 pip3 install playwright \
 COPY --from=build /src/target/release/khan /usr/local/bin/khan
 # Baked default config; override by putting khan.toml on the volume and setting KHAN_CONFIG=/data/khan.toml.
 COPY khan.toml.example /app/khan.toml
+COPY skills /app/skills
 ENV KHAN_CONFIG=/app/khan.toml
 
 # /data is a Railway volume: khan.db and workspace/ live here so they persist across redeploys.
