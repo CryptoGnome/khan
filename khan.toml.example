@@ -9,18 +9,28 @@
 # between marketplaces when the model is priced on more than one. Worth 1.37x the
 # per-token cost: the pinned variant took the whole company offline.
 ceo_model = "bu0y/deepseekv4flash"
-# Models the CEO may move ITSELF onto with set_ceo_model. ceo_model above stays
-# the fail-safe floor: if a chosen model errors out, the CEO reverts to it
-# automatically. Probed 2026-08-29 with a scam-refusal + capacity + urgency
-# scenario: grok46 was the only model to fully handle all three (and its tools
-# flag is bu0y-verified, plus 93 real production calls); claudesonnet5 had the
-# sharpest reasoning at ~22x cost with a 1M context; claudeopus5 reasons best
-# of all but 33.5s/call makes it a when-the-stakes-warrant-it option.
+# The CEO's seat LADDER, quality-ordered. The binary — never the model — picks
+# the first entry that is not benched by a recent failure and whose LIVE
+# marketplace price fits the ceilings below; ceo_model above is the
+# always-available floor. A weak model must never be the one judging whether
+# the company needs a strong one, and a static order goes stale with the order
+# book: opus's low band has traded below grok's.
+# All probed (tool-call smoke + scam-refusal/capacity judgment trap):
+# opus5 reasons deepest, grok46 best all-around with production history,
+# sonnet5 sharpest judgment, gemini37flash near-frontier at ~40% of their
+# price, glm53flash production-proven (200+ calls, 0 failures) and near-free.
 ceo_models = [
-  "bu0y/grok46",         # ~17x — best all-around probe result, verified tools
-  "bu0y/claudesonnet5",  # ~22x — sharpest judgment, 1M context
-  "bu0y/claudeopus5",    # ~54x — deepest reasoning, slow; for high-stakes stretches
+  "bu0y/grok46",         # first choice: best all-around probe result, production-proven
+  "bu0y/claudeopus5",    # picked only when grok is benched AND its band fits the ceilings
+  "bu0y/claudesonnet5",
+  "bu0y/gemini37flash",
+  "bu0y/glm53flash",
 ]
+# Ceilings in the catalog's per-1M price units (input.average / output.average).
+# Ladder entries above either ceiling are skipped that cycle and picked up
+# again when their book improves.
+ceo_max_input_price = 4000000
+ceo_max_output_price = 12000000
 # Cheap model for internal work like history summarization (defaults to ceo_model).
 # Never a free model here: compaction is what keeps every other call cheap, and
 # free-tier 429s were blocking it at exactly the moment histories were longest —

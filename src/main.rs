@@ -193,6 +193,7 @@ async fn main() -> Result<()> {
         stop,
         tokens: Default::default(),
         pending: Default::default(),
+        seat: Default::default(),
     });
     // Scheduled checks run inside the binary: shell routines at zero model
     // cost, review routines as scheduled dispatches through the orchestrator.
@@ -292,7 +293,7 @@ mod tests {
         // make the loop sleep right after real work.
         for t in ["dispatch", "delegate", "delegate_parallel", "hire", "fire", "rate_work",
                   "objectives", "update_prompt", "save_playbook", "remember", "create_skill",
-                  "set_ceo_model", "finish", "add_routine", "remove_routine", "write_file", "create_tool"] {
+                  "finish", "add_routine", "remove_routine", "write_file", "create_tool"] {
             assert!(!OBS.contains(&t), "{t} must count as advancing");
         }
         // The observed poll vectors must be in the set or the wait never engages.
@@ -416,6 +417,17 @@ mod tests {
         store.fire_agent("dev-1");
         assert_eq!(store.count_active_agents(), 1);
         assert!(!store.is_manager("dev-1"));
+    }
+
+    #[test]
+    fn example_config_is_the_shipped_config_and_must_load() {
+        // The Dockerfile bakes khan.toml.example in as /app/khan.toml — a parse
+        // or validation error here is a downed company, not a doc typo.
+        std::env::set_var("BU0Y_API_KEY", "test-key");
+        std::env::set_var("OPENROUTER_API_KEY", "test-key");
+        let cfg = crate::config::Config::load("khan.toml.example").expect("khan.toml.example must load");
+        assert!(!cfg.ceo_models.is_empty(), "seat ladder configured");
+        assert!(cfg.ceo_max_input_price > 0 && cfg.ceo_max_output_price > 0);
     }
 
     #[test]

@@ -18,10 +18,20 @@ pub struct Provider {
 pub struct Config {
     /// Model the CEO runs on, as "provider/model".
     pub ceo_model: String,
-    /// Models the CEO may move ITSELF onto with set_ceo_model. `ceo_model` stays
-    /// the fail-safe floor: a chosen model that errors out reverts to it.
+    /// Quality-ordered seat ladder for the CEO. The binary — never the model —
+    /// picks the first entry that is not benched by a recent failure and whose
+    /// live marketplace price fits the ceilings below. `ceo_model` stays the
+    /// always-available floor.
     #[serde(default)]
     pub ceo_models: Vec<String>,
+    /// Price ceilings for the seat ladder, in the provider catalog's per-1M
+    /// units (the `input.average` / `output.average` fields). A ladder model
+    /// currently priced above either ceiling is skipped this cycle — and picked
+    /// up again the moment its book improves (opus has traded below grok).
+    #[serde(default = "default_ceo_max_input_price")]
+    pub ceo_max_input_price: u64,
+    #[serde(default = "default_ceo_max_output_price")]
+    pub ceo_max_output_price: u64,
     /// Model used for cheap internal work (history summarization). Defaults to ceo_model.
     pub utility_model: Option<String>,
     #[serde(default = "default_workspace")]
@@ -52,6 +62,14 @@ pub struct Config {
 
 fn default_workspace() -> String {
     "workspace".into()
+}
+
+fn default_ceo_max_input_price() -> u64 {
+    4_000_000
+}
+
+fn default_ceo_max_output_price() -> u64 {
+    12_000_000
 }
 
 fn default_heartbeat_secs() -> u64 {

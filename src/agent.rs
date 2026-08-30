@@ -76,9 +76,6 @@ fn ceo_schemas() -> Vec<Value> {
         tool("finish_episode", "Close this working episode. Your transcript is DISPOSABLE — only what you write here, on the board, and in memories survives to the next episode. The note is your handoff to your next self: what changed, what is in flight and with whom, and what the next episode must do or know. Call this when the events you woke for are handled and everything else is delegated or on the board.", json!({
             "note": {"type": "string", "description": "What changed, what is in flight, what the next episode must know. Max ~1500 chars."}}),
             json!(["note"])),
-        tool("set_ceo_model", "Switch which model YOU (the CEO) run on, starting next iteration. Choose from the approved pool (call with model '?' to list it, with quality scores where known). Match the model to the stakes: your seat makes every hiring, treasury and strategy call, so a stronger model here pays for itself — but if your chosen model starts failing you are reverted to the reliable default automatically.", json!({
-            "model": {"type": "string", "description": "provider/model from the approved pool, or '?' to list the pool"}}),
-            json!(["model"])),
     ]
 }
 
@@ -177,7 +174,7 @@ pub(crate) fn compact_threshold(ctx: Option<u32>, max_tokens: u32) -> usize {
 const CEO_TOOL_NAMES: &[&str] = &[
     "hire", "delegate", "delegate_parallel", "dispatch", "team_status", "rate_work", "fire", "list_team",
     "add_routine", "add_review_routine", "remove_routine", "list_routines",
-    "update_prompt", "rollback_prompt", "save_playbook", "finish", "set_ceo_model", "objectives",
+    "update_prompt", "rollback_prompt", "save_playbook", "finish", "objectives",
     "finish_episode",
 ];
 
@@ -249,6 +246,22 @@ pub struct Orchestrator {
     pub stop: Arc<AtomicBool>,
     pub tokens: Tokens,
     pub pending: tokio::sync::Mutex<Vec<BackgroundTask>>,
+    pub seat: SeatState,
+}
+
+/// The CEO's seat is picked by the binary, not the model: the highest-quality
+/// approved model whose CURRENT marketplace price sits under the configured
+/// ceilings. A weak model must never be the one judging whether the company
+/// needs a strong one, and a static ladder goes stale the moment the order
+/// book moves — opus has traded below grok on cheap days.
+#[derive(Default)]
+pub struct SeatState {
+    /// slug -> (avg input, avg output) price per 1M, from the provider catalog.
+    prices: std::sync::Mutex<(std::collections::HashMap<String, (u64, u64)>, Option<std::time::Instant>)>,
+    /// Models benched after a failed call, until the instant stored here.
+    cooldown: std::sync::Mutex<std::collections::HashMap<String, std::time::Instant>>,
+    /// The seat chosen for the episode in flight (for close-time bookkeeping).
+    current: std::sync::Mutex<String>,
 }
 
 impl Orchestrator {
@@ -886,47 +899,86 @@ Drop superseded detail, resolved dead ends, and chatter.",
                     other => format!("ERROR: unknown action '{other}' (add/update/done/drop)"),
                 }
             }
-            "set_ceo_model" => {
-                if caller != "CEO" {
-                    return "ERROR: only the CEO can change the CEO's model".into();
-                }
-                let pool = self.ceo_pool();
-                let m = s(a, "model");
-                if pool.iter().any(|p| p == m) {
-                    self.ctx.store.kv_set("ceo_model", m);
-                    self.log_line("CEO", "model-change", &format!("CEO moving to {m}"));
-                    format!("done — you run on {m} from the next iteration. If it starts failing you revert to {} automatically.", self.ctx.cfg.ceo_model)
-                } else {
-                    format!(
-                        "approved pool (default first, it is the fail-safe floor):\n{}\ncurrently on: {}",
-                        pool.join("\n"),
-                        self.current_ceo_model()
-                    )
-                }
-            }
             _ => format!("unknown tool {name}"),
         }
     }
 
-    /// Models the CEO may run itself on: the configured floor plus the vetted pool.
-    fn ceo_pool(&self) -> Vec<String> {
-        let mut pool = vec![self.ctx.cfg.ceo_model.clone()];
-        for m in &self.ctx.cfg.ceo_models {
-            if !pool.contains(m) {
-                pool.push(m.clone());
+    /// Refresh the cached provider price bands when stale (5 min). Failure
+    /// keeps the previous cache: worst case the ladder runs on old prices,
+    /// which still beats a permanently frozen belief.
+    async fn refresh_seat_prices(&self) {
+        {
+            let p = self.seat.prices.lock().unwrap();
+            if p.1.is_some_and(|t| t.elapsed() < std::time::Duration::from_secs(300)) {
+                return;
             }
         }
-        pool
+        let Some(provider) = self.ctx.cfg.providers.first() else { return };
+        let url = format!("{}/models", provider.base_url.trim_end_matches('/'));
+        let Ok(resp) = self.ctx.http.get(&url).send().await else { return };
+        let Ok(v) = resp.json::<serde_json::Value>().await else { return };
+        let mut map = std::collections::HashMap::new();
+        for m in v["data"].as_array().into_iter().flatten() {
+            if let (Some(id), Some(i), Some(o)) = (
+                m["id"].as_str(),
+                m["input"]["average"].as_u64(),
+                m["output"]["average"].as_u64(),
+            ) {
+                map.insert(id.to_string(), (i, o));
+            }
+        }
+        if !map.is_empty() {
+            *self.seat.prices.lock().unwrap() = (map, Some(std::time::Instant::now()));
+        }
     }
 
-    /// The model the CEO runs on right now: its own persisted choice when that
-    /// is still in the approved pool, else the configured floor.
+    /// Pick the CEO's seat for this turn: first model in the quality-ordered
+    /// ceo_models list that is not benched and whose current average price
+    /// fits the ceilings; the configured floor when nothing qualifies. A model
+    /// missing from the catalog passes on quality order alone.
+    async fn pick_ceo_model(&self) -> String {
+        self.refresh_seat_prices().await;
+        let prices = self.seat.prices.lock().unwrap().0.clone();
+        let now = std::time::Instant::now();
+        let benched: Vec<String> = {
+            let cd = self.seat.cooldown.lock().unwrap();
+            cd.iter().filter(|(_, until)| **until > now).map(|(m, _)| m.clone()).collect()
+        };
+        let mut chosen = self.ctx.cfg.ceo_model.clone();
+        for m in &self.ctx.cfg.ceo_models {
+            if benched.contains(m) {
+                continue;
+            }
+            let slug = m.split('/').nth(1).unwrap_or(m);
+            if let Some((i, o)) = prices.get(slug) {
+                if *i > self.ctx.cfg.ceo_max_input_price || *o > self.ctx.cfg.ceo_max_output_price {
+                    continue;
+                }
+            }
+            chosen = m.clone();
+            break;
+        }
+        let mut cur = self.seat.current.lock().unwrap();
+        if *cur != chosen {
+            self.log_line("CEO", "seat", &format!("CEO seat: {chosen} (price-aware ladder)"));
+            *cur = chosen.clone();
+        }
+        chosen
+    }
+
+    /// The seat picked for the episode in flight (bookkeeping paths only).
     fn current_ceo_model(&self) -> String {
-        self.ctx
-            .store
-            .kv_get("ceo_model")
-            .filter(|m| self.ceo_pool().contains(m))
-            .unwrap_or_else(|| self.ctx.cfg.ceo_model.clone())
+        let cur = self.seat.current.lock().unwrap();
+        if cur.is_empty() { self.ctx.cfg.ceo_model.clone() } else { cur.clone() }
+    }
+
+    /// Bench a model after a failed call: the ladder skips it for 15 minutes.
+    fn bench_seat(&self, model: &str) {
+        self.seat
+            .cooldown
+            .lock()
+            .unwrap()
+            .insert(model.to_string(), std::time::Instant::now() + std::time::Duration::from_secs(900));
     }
 
     /// True when the heartbeat interval has elapsed; stamps the clock when so.
@@ -1192,6 +1244,13 @@ keep the board honest, then close with finish_episode(note)."
             // the poll disease. The step cap still bounds pure investigation.
             let mut did_advance = false;
             let mut warned_idle_close = false;
+            // The seat is pinned for the whole episode: a model never swaps
+            // mid-thought. Context survives a swap regardless — it lives in the
+            // transcript and the durable state, not in the model — but style
+            // and judgment should stay consistent within one episode. Only a
+            // failed call re-picks, and the replacement inherits the full
+            // transcript.
+            let mut ceo_model = self.pick_ceo_model().await;
 
             'turns: loop {
             if self.stop.load(Ordering::Relaxed) {
@@ -1203,7 +1262,6 @@ keep the board honest, then close with finish_episode(note)."
             }
             iter += 1;
             self.ctx.store.kv_set("iteration", &iter.to_string());
-            let ceo_model = self.current_ceo_model();
             // Rebuilt every iteration so newly created custom tools become callable at once.
             let mut schemas = tools::work_schemas();
             schemas.extend(tools::custom::management_schemas());
@@ -1356,11 +1414,9 @@ one low-stakes dispatch: hire onto one for a single ordinary task, then read the
                 let burn_block = match tools::credits::usage_snapshot(&self.ctx).await {
                     Some(snap) => format!(
                         "\n\nCREDIT BURN — prepaid balance and recent usage (raw):\n{snap}\n\
-You are currently running on {ceo_model}. Credits are finite: project the runway at the current pace, \
-and treat a premium model on your own seat as a stretch, not a residence — your loop runs every few \
-seconds all day, and most iterations are routine orchestration that the default handles fine. Drop \
-back with set_ceo_model when the work in front of you is routine; step up when real decisions are on \
-the table. Switching is free and instant in both directions. If the runway is short, that is a \
+You are currently running on {ceo_model} — your seat is picked automatically by the binary: the best \
+approved model whose live marketplace price fits the configured ceilings, with the default as floor. \
+Credits are finite: project the runway at the current pace. If the runway is short, that is a \
 treasury decision: top up, or cut the burn."
                     ),
                     None => String::new(),
@@ -1442,24 +1498,19 @@ Keep the board honest: add new bets, declare blocked_by, mark done what is done.
             let (msg, u) = match self.chat_fb("CEO", &ceo_model, &req, &schemas).await {
                 Ok(r) => r,
                 Err(e) => {
-                    // A self-chosen model that cannot answer even through the
-                    // fallback ladder must not strand the company: revert to the
-                    // configured floor and say so, rather than looping on it.
+                    // A ladder model that cannot answer even through the
+                    // fallback ladder must not strand the company: bench it and
+                    // let the next pick slide down a rung.
                     if ceo_model != self.ctx.cfg.ceo_model && truncation(&e).is_none() {
-                        self.ctx.store.kv_set("ceo_model", &self.ctx.cfg.ceo_model);
+                        self.bench_seat(&ceo_model);
                         self.log_line(
                             "CEO",
                             "model-revert",
-                            &format!("{ceo_model} failed ({e:#}); reverting the CEO to {}", self.ctx.cfg.ceo_model),
+                            &format!("{ceo_model} failed ({e:#}); benched 15m, sliding down the seat ladder"),
                         );
-                        history.push(Message::text(
-                            "user",
-                            &format!(
-                                "[System] Your chosen model {ceo_model} failed and you are back on {}. \
-                                 Pick a different pool model with set_ceo_model, or stay here.",
-                                self.ctx.cfg.ceo_model
-                            ),
-                        ));
+                        // The replacement model inherits the full transcript;
+                        // nothing about this episode is lost.
+                        ceo_model = self.pick_ceo_model().await;
                         continue;
                     }
                     // The CEO already retries forever, so an overrun would repeat
