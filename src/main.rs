@@ -384,6 +384,7 @@ mod tests {
             "evm_wallet_ops",
             "security_audit",
             "anti_slop_frontend",
+            "pons_launchpad",
         ] {
             assert!(names.contains(&n.to_string()), "missing seed '{n}' in {names:?}");
         }
