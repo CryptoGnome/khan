@@ -1,0 +1,3 @@
+Prompt: A lone Mongol khan warlord on horseback silhouetted on a dark ridge at night, overlooking a vast steppe where dozens of glowing amber campfires stretch to the horizon, the fires connected by faint gold circuit-like lines forming a luminous network across the land, epic cinematic digital painting, deep teal and black night sky with a huge low golden moon, embers drifting upward, rich gold and dark navy palette, dramatic rim lighting on the rider, monumental scale, sharp painterly detail
+Model: google/gemini-3.1-flash-image-preview
+API: chat

@@ -239,6 +239,12 @@ impl Store {
         // only measured signal per model is latency and failure rate, which favours
         // cheap fast models by construction and can never justify a better one.
         let _ = conn.execute("ALTER TABLE ratings ADD COLUMN model TEXT NOT NULL DEFAULT ''", []);
+        // Migration: review routines — a routine can dispatch an AGENT with a
+        // stored task on a schedule instead of running a shell command, so
+        // judgment checks (page critiques, code audits) become durable
+        // infrastructure instead of a remembered intention.
+        let _ = conn.execute("ALTER TABLE routines ADD COLUMN agent TEXT NOT NULL DEFAULT ''", []);
+        let _ = conn.execute("ALTER TABLE routines ADD COLUMN task TEXT NOT NULL DEFAULT ''", []);
         // Migration: objectives can declare what blocks them; blockedness is
         // derived at render time so it can never go stale.
         let _ = conn.execute("ALTER TABLE objectives ADD COLUMN blocked_by TEXT NOT NULL DEFAULT ''", []);
@@ -691,7 +697,10 @@ impl Store {
     pub fn list_routines(&self) -> Vec<(String, String, i64, String, String)> {
         let c = self.conn.lock().unwrap();
         let mut stmt = match c.prepare(
-            "SELECT name, command, interval_secs, COALESCE(purpose,''), COALESCE(last_status,'never ran') FROM routines WHERE enabled=1 ORDER BY name",
+            "SELECT name,
+                    CASE WHEN COALESCE(agent,'') != '' THEN 'review by ' || agent || ': ' || substr(task,1,120) ELSE command END,
+                    interval_secs, COALESCE(purpose,''), COALESCE(last_status,'never ran')
+             FROM routines WHERE enabled=1 ORDER BY name",
         ) {
             Ok(s) => s,
             Err(_) => return vec![],
@@ -701,16 +710,32 @@ impl Store {
             .unwrap_or_default()
     }
 
-    /// Routines whose interval has elapsed since their last run, as (name, command).
-    pub fn due_routines(&self, now_epoch: i64) -> Vec<(String, String)> {
+    /// Register a review routine: on schedule, `agent` is dispatched with
+    /// `task` and their report flows back through normal routing. Same
+    /// namespace as shell routines (same name = replace).
+    pub fn upsert_review_routine(&self, name: &str, agent: &str, task: &str, interval_secs: i64, purpose: &str) {
+        let c = self.conn.lock().unwrap();
+        let _ = c.execute(
+            "INSERT INTO routines(name, command, agent, task, interval_secs, purpose, enabled, last_run)
+             VALUES(?1, '', ?2, ?3, ?4, ?5, 1, 0)
+             ON CONFLICT(name) DO UPDATE SET command='', agent=?2, task=?3, interval_secs=?4, purpose=?5, enabled=1",
+            params![name, agent, task, interval_secs, purpose],
+        );
+    }
+
+    /// Routines whose interval has elapsed since their last run, as
+    /// (name, command, agent, task) — command empty for review routines,
+    /// agent empty for shell routines.
+    pub fn due_routines(&self, now_epoch: i64) -> Vec<(String, String, String, String)> {
         let c = self.conn.lock().unwrap();
         let mut stmt = match c.prepare(
-            "SELECT name, command FROM routines WHERE enabled=1 AND ?1 - last_run >= interval_secs ORDER BY name",
+            "SELECT name, command, COALESCE(agent,''), COALESCE(task,'') FROM routines
+             WHERE enabled=1 AND (last_run = 0 OR ?1 - last_run >= interval_secs) ORDER BY name",
         ) {
             Ok(s) => s,
             Err(_) => return vec![],
         };
-        stmt.query_map(params![now_epoch], |r| Ok((r.get(0)?, r.get(1)?)))
+        stmt.query_map(params![now_epoch], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
             .map(|it| it.filter_map(|x| x.ok()).collect())
             .unwrap_or_default()
     }

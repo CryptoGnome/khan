@@ -126,9 +126,6 @@ async fn main() -> Result<()> {
     // Live log viewer (web page + SSE stream). Railway sets PORT for public services.
     let port: u16 = std::env::var("PORT").ok().and_then(|p| p.parse().ok()).unwrap_or(8080);
     tokio::spawn(viewer::serve(store.clone(), port, workspace.clone()));
-    // Scheduled checks (add_routine) run inside the binary at zero model cost;
-    // only deviations reach the CEO, as routine alerts.
-    tokio::spawn(routines::serve(store.clone(), workspace.clone()));
     store.log("khan", "startup", &format!("CEO model {} | directive: {directive}", cfg.ceo_model));
 
     // Learn the real free-model caps for this key rather than assuming them: the
@@ -197,6 +194,14 @@ async fn main() -> Result<()> {
         tokens: Default::default(),
         pending: Default::default(),
     });
+    // Scheduled checks run inside the binary: shell routines at zero model
+    // cost, review routines as scheduled dispatches through the orchestrator.
+    // Only deviations (and review reports) reach the CEO.
+    tokio::spawn(routines::serve(
+        orch.ctx.store.clone(),
+        orch.ctx.workspace.clone(),
+        orch.clone(),
+    ));
     orch.run_ceo(&directive, fresh).await
 }
 
@@ -418,7 +423,10 @@ mod tests {
         let store = crate::state::Store::open(":memory:").unwrap();
         store.upsert_routine("claim-verify", "python3 check.py", 300, "claim rows match chain");
         // Never ran → due immediately; not due again right after a run.
-        assert_eq!(store.due_routines(1000), vec![("claim-verify".into(), "python3 check.py".into())]);
+        assert_eq!(
+            store.due_routines(1000),
+            vec![("claim-verify".into(), "python3 check.py".into(), "".into(), "".into())]
+        );
         store.mark_routine_run("claim-verify", 1000, "ok");
         assert!(store.due_routines(1100).is_empty(), "not due 100s after a 300s-interval run");
         assert_eq!(store.due_routines(1300).len(), 1, "due again once the interval elapses");
@@ -428,6 +436,20 @@ mod tests {
         assert_eq!(drained.len(), 1);
         assert!(drained[0].1.contains("row 40"));
         assert!(store.drain_routine_alerts().is_empty(), "alerts deliver once");
+        // Review routines share the schedule but carry an agent + task instead
+        // of a command, and render as such in the listing.
+        store.upsert_review_routine("site-outsider-review", "critic", "Critique khanbot.fun like a first-time visitor.", 86400, "layout drift");
+        let due = store.due_routines(2000);
+        let review = due.iter().find(|r| r.0 == "site-outsider-review").expect("review routine due");
+        assert_eq!(review.1, "");
+        assert_eq!(review.2, "critic");
+        assert!(review.3.contains("first-time visitor"));
+        let listed = store.list_routines();
+        let row = listed.iter().find(|r| r.0 == "site-outsider-review").unwrap();
+        assert!(row.1.starts_with("review by critic:"), "listing shows the review shape: {}", row.1);
+        // Same-name replace and delete work across both kinds.
+        store.upsert_review_routine("site-outsider-review", "critic2", "New brief.", 7200, "");
+        assert!(store.delete_routine("site-outsider-review"));
         // Removal unschedules.
         assert!(store.delete_routine("claim-verify"));
         assert!(store.due_routines(9999).is_empty());

@@ -47,7 +47,14 @@ fn ceo_schemas() -> Vec<Value> {
             "interval_secs": {"type": "integer", "description": "Seconds between runs, minimum 60"},
             "purpose": {"type": "string", "description": "One line on what deviation this catches"}}),
             json!(["name", "command", "interval_secs"])),
-        tool("remove_routine", "Delete a scheduled routine.", json!({"name": {"type": "string"}}), json!(["name"])),
+        tool("add_review_routine", "Schedule JUDGMENT on a cadence: an employee is dispatched with a stored task on an interval, and their report flows back through normal report routing (to the objective owner or you). Mechanical checks belong in add_routine; this is for checks that need a model's eyes — critique the live site like a first-time visitor, audit new workspace code adversarially, re-verify a premise. Same name = replace; remove with remove_routine.", json!({
+            "name": {"type": "string", "description": "Short unique name, e.g. 'site-outsider-review'"},
+            "agent": {"type": "string", "description": "Existing employee to dispatch"},
+            "task": {"type": "string", "description": "The full standing task, self-contained — it is sent verbatim every cycle"},
+            "interval_secs": {"type": "integer", "description": "Seconds between dispatches, minimum 3600 — reviews cost model tokens"},
+            "purpose": {"type": "string", "description": "One line on what this review catches"}}),
+            json!(["name", "agent", "task", "interval_secs"])),
+        tool("remove_routine", "Delete a scheduled routine (shell or review).", json!({"name": {"type": "string"}}), json!(["name"])),
         tool("list_routines", "List scheduled routines with their interval and last status.", json!({}), json!([])),
         tool("rate_work", "Rate a just-reviewed delegated report 1 (useless) to 5 (excellent). Ratings are tracked per agent and prompt version — they are the ground truth for deciding prompt improvements and rollbacks.", json!({
             "agent": {"type": "string"}, "score": {"type": "integer", "minimum": 1, "maximum": 5},
@@ -169,7 +176,7 @@ pub(crate) fn compact_threshold(ctx: Option<u32>, max_tokens: u32) -> usize {
 
 const CEO_TOOL_NAMES: &[&str] = &[
     "hire", "delegate", "delegate_parallel", "dispatch", "team_status", "rate_work", "fire", "list_team",
-    "add_routine", "remove_routine", "list_routines",
+    "add_routine", "add_review_routine", "remove_routine", "list_routines",
     "update_prompt", "rollback_prompt", "save_playbook", "finish", "set_ceo_model", "objectives",
     "finish_episode",
 ];
@@ -711,6 +718,19 @@ Drop superseded detail, resolved dead ends, and chatter.",
                 self.ctx.store.upsert_routine(name, command, interval, s(a, "purpose"));
                 format!("routine '{name}' scheduled every {interval}s — silent on pass, alerts you on failure or ALERT output")
             }
+            "add_review_routine" => {
+                let (name, agent, task) = (s(a, "name"), s(a, "agent"), s(a, "task"));
+                if name.is_empty() || agent.is_empty() || task.is_empty() {
+                    return "ERROR: name, agent and task are required".into();
+                }
+                if self.ctx.store.load_agent(agent).is_none() {
+                    return format!("ERROR: no such employee '{agent}'. hire them first.");
+                }
+                // Reviews cost model tokens every cycle — floor the cadence.
+                let interval = a["interval_secs"].as_i64().unwrap_or(0).max(3600);
+                self.ctx.store.upsert_review_routine(name, agent, task, interval, s(a, "purpose"));
+                format!("review routine '{name}' scheduled: {agent} is dispatched every {interval}s; their report reaches you (or the objective owner) like any other dispatch")
+            }
             "remove_routine" => {
                 if self.ctx.store.delete_routine(s(a, "name")) { "routine removed".into() } else { "no such routine".into() }
             }
@@ -968,6 +988,26 @@ Drop superseded detail, resolved dead ends, and chatter.",
             }
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
         }
+    }
+
+    /// Dispatch a due review routine's agent with its stored task. Called by
+    /// the routines runner. Ok(false) when the agent is mid-task (their saved
+    /// history would race — the review waits a full interval instead).
+    pub async fn dispatch_review(self: &Arc<Self>, routine: &str, agent: &str, task: &str) -> std::result::Result<bool, String> {
+        if self.ctx.store.load_agent(agent).is_none() {
+            return Err(format!("no such employee '{agent}' — fix or remove the '{routine}' review routine"));
+        }
+        let mut pending = self.pending.lock().await;
+        if pending.iter().any(|t| t.agent == agent) {
+            return Ok(false);
+        }
+        let task = format!("[Scheduled review — routine '{routine}'] {task}");
+        self.log_line("routine", "review-dispatch", &format!("{routine}: dispatched {agent}"));
+        let me = Arc::clone(self);
+        let (a2, t2) = (agent.to_string(), task.clone());
+        let handle = tokio::spawn(async move { me.run_employee(&a2, &t2).await });
+        pending.push(BackgroundTask { agent: agent.to_string(), task, objective: None, handle });
+        Ok(true)
     }
 
     /// Validate and set an objective's owner. Empty clears; anyone else must be
