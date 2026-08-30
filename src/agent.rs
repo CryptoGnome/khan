@@ -1464,12 +1464,15 @@ keep the board honest, then close with finish_episode(note)."
                 }
                 _ => self.pick_ceo_model().await,
             };
-            self.check_fuel().await;
-
             'turns: loop {
             if self.stop.load(Ordering::Relaxed) {
                 break 'turns;
             }
+            // Every iteration, not just episode start: a long launch episode
+            // once burned through the floor with no poll running, because the
+            // only check sat outside the loop. The 300s throttle inside makes
+            // this one real request per 5 minutes at most.
+            self.check_fuel().await;
             steps += 1;
             if steps > self.ctx.cfg.episode_max_steps {
                 break 'turns;
