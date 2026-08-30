@@ -392,6 +392,21 @@ mod tests {
         crate::tools::skills::seed(&store);
         let (desc, _) = store.get_skill("bridge_hygiene").unwrap();
         assert_eq!(desc, "evolved");
+        // A still-seed-origin skill DOES take a changed file as a new version:
+        // fake an older seed for a real file name, reseed, expect the file text.
+        store.retire_skill("evm_wallet_ops");
+        store
+            .save_skill("evm_wallet_ops", "old", "stale seed body", "seeded from the repo's skills/ directory")
+            .unwrap();
+        crate::tools::skills::seed(&store);
+        let (_, content) = store.get_skill("evm_wallet_ops").unwrap();
+        assert_ne!(content, "stale seed body", "changed seed file must ship as a new version");
+        // Retire removes every version and the index line.
+        assert!(store.retire_skill("bridge_hygiene"));
+        assert!(store.get_skill("bridge_hygiene").is_none());
+        // Loads land in the stats text.
+        store.log_skill_load("worker-1", "evm_wallet_ops");
+        assert!(store.skill_stats_text().contains("evm_wallet_ops"));
     }
 
     #[test]

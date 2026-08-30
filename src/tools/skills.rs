@@ -24,10 +24,10 @@ pub fn schemas() -> Vec<Value> {
 
 /// Seed curated skills from the repo's skills/ directory (baked into the
 /// image). Each file is <name>.md: first line the one-line description, the
-/// rest the content. A skill whose name already exists in the database is
-/// NEVER touched — the file is a seed for a fresh company, not an override of
-/// what the company has since learned; agents evolve and roll back seeded
-/// skills exactly like their own.
+/// rest the content. A changed file ships as a new version only while the
+/// skill's latest version is still seed-origin; anything the company has
+/// since written itself is never overridden — agents evolve and roll back
+/// seeded skills exactly like their own.
 pub fn seed(store: &crate::state::Store) {
     let dir = std::path::Path::new("skills");
     let Ok(entries) = std::fs::read_dir(dir) else { return };
@@ -37,8 +37,7 @@ pub fn seed(store: &crate::state::Store) {
             continue;
         }
         let Some(name) = path.file_stem().and_then(|s| s.to_str()) else { continue };
-        if !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') || store.get_skill(name).is_some()
-        {
+        if !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
             continue;
         }
         let Ok(text) = std::fs::read_to_string(&path) else { continue };
@@ -46,6 +45,14 @@ pub fn seed(store: &crate::state::Store) {
         let (desc, content) = (lines.next().unwrap_or("").trim(), lines.next().unwrap_or("").trim());
         if desc.is_empty() || content.is_empty() {
             continue;
+        }
+        // An improved seed file ships as a new version — but only while the
+        // skill's latest version is still seed-origin. The moment the company
+        // writes its own version, the file becomes a dead letter by design.
+        if let Some((cur, reason)) = store.skill_latest_meta(name) {
+            if !reason.starts_with("seeded") || cur == content {
+                continue;
+            }
         }
         if store.save_skill(name, desc, content, "seeded from the repo's skills/ directory").is_ok() {
             store.log("core", "skill-seeded", &format!("{name}: {desc}"));
@@ -71,9 +78,14 @@ pub fn create(ctx: &ToolCtx, args: &Value) -> Result<String> {
     })
 }
 
-pub fn load(ctx: &ToolCtx, name: &str) -> String {
+pub fn load(ctx: &ToolCtx, agent: &str, name: &str) -> String {
     match ctx.store.get_skill(name) {
-        Some((desc, content)) => format!("# Skill: {name}\n{desc}\n\n{content}"),
+        Some((desc, content)) => {
+            // Loads feed the outcome stats: each is joined to the loader's next
+            // rating so reflection judges skills on results, like prompts.
+            ctx.store.log_skill_load(agent, name);
+            format!("# Skill: {name}\n{desc}\n\n{content}")
+        }
         None => format!("no such skill '{name}' — check the skill index"),
     }
 }

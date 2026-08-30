@@ -134,7 +134,7 @@ pub async fn execute(ctx: &ToolCtx, agent: &str, name: &str, args: &Value) -> St
         "credits" => credits::run(ctx).await,
         "create_tool" => custom::create(ctx, args),
         "create_skill" => skills::create(ctx, args),
-        "use_skill" => Ok(skills::load(ctx, s(args, "name"))),
+        "use_skill" => Ok(skills::load(ctx, agent, s(args, "name"))),
         "rollback_skill" => match ctx.store.rollback_skill(s(args, "name")) {
             Ok(true) => Ok("rolled back to previous version".into()),
             Ok(false) => Ok("nothing to roll back".into()),

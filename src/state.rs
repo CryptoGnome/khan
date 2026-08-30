@@ -186,6 +186,9 @@ impl Store {
              CREATE TABLE IF NOT EXISTS messages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, msg TEXT NOT NULL,
                 created_at TEXT NOT NULL, delivered INTEGER NOT NULL DEFAULT 0);
+             CREATE TABLE IF NOT EXISTS skill_loads (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL,
+                agent TEXT NOT NULL, skill TEXT NOT NULL);
              CREATE TABLE IF NOT EXISTS telegram_chat (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL,
                 role TEXT NOT NULL, text TEXT NOT NULL);
@@ -1079,6 +1082,95 @@ impl Store {
         stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
             .map(|it| it.filter_map(|x| x.ok()).collect())
             .unwrap_or_default()
+    }
+
+    /// Latest version's provenance: (content, reason). The reason is how the
+    /// seeder tells an untouched seed (reason starts with "seeded") from a
+    /// version the company wrote itself.
+    pub fn skill_latest_meta(&self, name: &str) -> Option<(String, String)> {
+        let c = self.conn.lock().unwrap();
+        c.query_row(
+            "SELECT content, IFNULL(reason,'') FROM skill_defs WHERE name=?1 ORDER BY version DESC LIMIT 1",
+            params![name],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .ok()
+    }
+
+    /// Permanently remove a skill (all versions). rollback_skill undoes one
+    /// bad version; this is for a skill whose subject no longer exists.
+    pub fn retire_skill(&self, name: &str) -> bool {
+        let c = self.conn.lock().unwrap();
+        c.execute("DELETE FROM skill_defs WHERE name=?1", params![name]).map(|n| n > 0).unwrap_or(false)
+    }
+
+    pub fn log_skill_load(&self, agent: &str, skill: &str) {
+        let c = self.conn.lock().unwrap();
+        let _ = c.execute(
+            "INSERT INTO skill_loads(ts, agent, skill) VALUES(?1,?2,?3)",
+            params![chrono::Utc::now().to_rfc3339(), agent, skill],
+        );
+    }
+
+    /// Outcome stats for the reflection payload: each skill's loads over the
+    /// last 30 days joined to the loading agent's NEXT rating within 24h (the
+    /// task the load served), worst average first — plus, once the load log is
+    /// two weeks deep, the skills nothing has loaded in 30 days. Empty string
+    /// when there is nothing worth saying.
+    pub fn skill_stats_text(&self) -> String {
+        let c = self.conn.lock().unwrap();
+        let cutoff = (chrono::Utc::now() - chrono::Duration::days(30)).to_rfc3339();
+        let mut lines: Vec<String> = Vec::new();
+        if let Ok(mut stmt) = c.prepare(
+            "SELECT l.skill, COUNT(*) AS loads, AVG(r.score) AS avg_score, COUNT(r.score) AS rated
+             FROM skill_loads l
+             LEFT JOIN ratings r ON r.id = (
+                 SELECT id FROM ratings WHERE agent = l.agent AND created_at > l.ts
+                   AND created_at < datetime(l.ts, '+1 day') ORDER BY id LIMIT 1)
+             WHERE l.ts > ?1 GROUP BY l.skill ORDER BY avg_score IS NULL, avg_score LIMIT 10",
+        ) {
+            let rows = stmt
+                .query_map(params![cutoff], |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, i64>(1)?,
+                        r.get::<_, Option<f64>>(2)?,
+                        r.get::<_, i64>(3)?,
+                    ))
+                })
+                .map(|it| it.filter_map(|x| x.ok()).collect::<Vec<_>>())
+                .unwrap_or_default();
+            for (skill, loads, avg, rated) in rows {
+                match avg {
+                    Some(a) if rated >= 3 => {
+                        lines.push(format!("- {skill}: {loads} loads, avg outcome {a:.1}/5 over {rated} rated tasks"))
+                    }
+                    _ => lines.push(format!("- {skill}: {loads} loads, too few rated tasks to judge")),
+                }
+            }
+        }
+        // Unused list only once the load log is mature enough to mean something.
+        let oldest: Option<String> =
+            c.query_row("SELECT MIN(ts) FROM skill_loads", [], |r| r.get(0)).ok().flatten();
+        let mature = oldest.is_some_and(|t| t < (chrono::Utc::now() - chrono::Duration::days(14)).to_rfc3339());
+        if mature {
+            if let Ok(mut stmt) = c.prepare(
+                "SELECT name FROM skill_defs s WHERE version=(SELECT MAX(version) FROM skill_defs WHERE name=s.name)
+                 AND name NOT IN (SELECT DISTINCT skill FROM skill_loads WHERE ts > ?1) ORDER BY name LIMIT 15",
+            ) {
+                let unused: Vec<String> = stmt
+                    .query_map(params![cutoff], |r| r.get::<_, String>(0))
+                    .map(|it| it.filter_map(|x| x.ok()).collect())
+                    .unwrap_or_default();
+                if !unused.is_empty() {
+                    lines.push(format!(
+                        "- UNLOADED 30d (candidates to retire_skill or merge — every index line is paid for each turn): {}",
+                        unused.join(", ")
+                    ));
+                }
+            }
+        }
+        lines.join("\n")
     }
 
     pub fn rollback_skill(&self, name: &str) -> Result<bool> {

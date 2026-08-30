@@ -68,6 +68,10 @@ fn ceo_schemas() -> Vec<Value> {
             json!(["name", "content", "reason"])),
         tool("rollback_prompt", "Revert a prompt to its previous version (use if a change made things worse).", json!({
             "name": {"type": "string"}}), json!(["name"])),
+        tool("retire_skill", "Permanently delete a skill (ALL versions) from the library. For skills whose subject no longer exists or that reflection shows unloaded for 30+ days — every index line is paid for by every agent every turn. To undo one bad version, use rollback_skill instead; to improve, create_skill with the same name.", json!({
+            "name": {"type": "string"},
+            "reason": {"type": "string", "description": "Why this skill no longer earns its index line"}}),
+            json!(["name", "reason"])),
         tool("save_playbook", "Save a durable lesson/playbook entry that will be recalled in future relevant work.", json!({
             "topic": {"type": "string"}, "content": {"type": "string"}}),
             json!(["topic", "content"])),
@@ -174,7 +178,7 @@ pub(crate) fn compact_threshold(ctx: Option<u32>, max_tokens: u32) -> usize {
 const CEO_TOOL_NAMES: &[&str] = &[
     "hire", "delegate", "delegate_parallel", "dispatch", "team_status", "rate_work", "fire", "list_team",
     "add_routine", "add_review_routine", "remove_routine", "list_routines",
-    "update_prompt", "rollback_prompt", "save_playbook", "finish", "objectives",
+    "update_prompt", "rollback_prompt", "retire_skill", "save_playbook", "finish", "objectives",
     "finish_episode", "message_founder",
 ];
 
@@ -833,6 +837,15 @@ Drop superseded detail, resolved dead ends, and chatter.",
             "save_playbook" => {
                 self.ctx.store.remember("CEO", s(a, "topic"), s(a, "content"), "playbook");
                 "playbook saved".into()
+            }
+            "retire_skill" => {
+                let name = s(a, "name");
+                if self.ctx.store.retire_skill(name) {
+                    self.log_line("CEO", "skill-retired", &format!("{name}: {}", s(a, "reason")));
+                    format!("skill '{name}' retired — gone from every agent's index")
+                } else {
+                    format!("no such skill '{name}'")
+                }
             }
             "finish" => {
                 let report = s(a, "report");
@@ -1607,6 +1620,15 @@ Use this with live model prices to estimate spend and rebalance the team's model
                 } else {
                     format!("\n\nEmployee performance ratings (use these — not vibes — to judge prompt changes):\n{stats}")
                 };
+                let sk = self.ctx.store.skill_stats_text();
+                let skill_block = if sk.is_empty() {
+                    String::new()
+                } else {
+                    format!(
+                        "\n\nSKILL OUTCOMES (loads joined to the loader's next rating — judge skills on results, \
+like prompts; a low-scoring skill teaches something wrong, fix it with create_skill):\n{sk}"
+                    )
+                };
                 // The catalog is baked into the seeded prompt, so a config change would
                 // otherwise never reach a running company. Re-state it each reflection.
                 let catalog = format!(
@@ -1718,7 +1740,7 @@ If a prompt (yours or an employee's) is causing weak results, improve it with up
 or rollback_prompt if a recent change hurt. If a custom tool erred or is missing, improve or build it with \
 create_tool (rollback_tool reverts a bad version). If you or employees keep re-figuring-out the same procedure, \
 capture it as a skill with create_skill; improve skills that led agents astray (rollback_skill reverts). \
-Save one-off lessons with save_playbook. Then continue the mission.\n\n{log}{stats_block}{capacity_block}{portfolio_block}{health_block}{catalog}{model_block}{untried_block}{burn_block}\n\n{toks}"
+Save one-off lessons with save_playbook. Then continue the mission.\n\n{log}{stats_block}{skill_block}{capacity_block}{portfolio_block}{health_block}{catalog}{model_block}{untried_block}{burn_block}\n\n{toks}"
                 )));
             }
 
