@@ -47,6 +47,7 @@ pub async fn serve(store: Arc<Store>, http: reqwest::Client, token: String, chat
                 continue;
             }
             store.log("core", "telegram", "founder message received");
+            store.add_telegram_chat("founder", text);
             store.queue_message(&format!(
                 "[via Telegram] {text}\n(The founder sent this from their phone — answer with the \
                  message_founder tool so the reply reaches them there.)"

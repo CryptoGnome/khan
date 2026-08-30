@@ -919,6 +919,7 @@ Drop superseded detail, resolved dead ends, and chatter.",
                 }
                 match crate::telegram::send(&self.ctx.http, &token, chat, text).await {
                     Ok(()) => {
+                        self.ctx.store.add_telegram_chat("ceo", text);
                         self.log_line("CEO", "telegram-out", "replied to the founder");
                         "sent to the founder's Telegram".into()
                     }
@@ -955,6 +956,56 @@ Drop superseded detail, resolved dead ends, and chatter.",
         }
         if !map.is_empty() {
             *self.seat.prices.lock().unwrap() = (map, Some(std::time::Instant::now()));
+        }
+    }
+
+    /// Fold the older Telegram conversation into a long-term brief once the
+    /// stored chat passes ~200k tokens (~800k chars). The newest 40 exchanges
+    /// stay verbatim; everything older is merged into the brief by the utility
+    /// model, keeping only what stays necessary — standing instructions,
+    /// decisions, commitments, open threads — and dropping the chatter. Runs
+    /// only when a Telegram message drains, so it costs nothing in between.
+    async fn compact_telegram(&self) {
+        const KEEP: usize = 40;
+        const MAX_CHARS: usize = 800_000;
+        if self.ctx.store.telegram_chat_chars() <= MAX_CHARS {
+            return;
+        }
+        let old = self.ctx.store.telegram_old(KEEP);
+        let Some(&(last_id, _, _)) = old.last().map(|r| r) else { return };
+        let lines = old.iter().map(|(_, r, t)| format!("{r}: {t}")).collect::<Vec<_>>().join("\n");
+        let prior = self.ctx.store.kv_get("telegram_brief");
+        let req = vec![
+            Message::text(
+                "system",
+                "You maintain the long-term brief of the conversation between an autonomous company's \
+CEO and its founder. Older messages are being dropped; update the brief with them and return the \
+updated brief only. Keep ONLY what stays necessary: the founder's standing instructions and \
+preferences, decisions made and why, commitments either side gave, open threads awaiting an \
+answer, and identifiers (addresses, names, figures) still in use. Drop greetings, superseded \
+detail, and anything already acted on and closed.",
+            ),
+            Message::text(
+                "user",
+                format!(
+                    "EXISTING BRIEF:\n{}\n\nDROPPED MESSAGES:\n{lines}",
+                    prior.as_deref().unwrap_or("(none yet)")
+                ),
+            ),
+        ];
+        match self.chat_fb("CEO", &self.ctx.cfg.utility_model(), &req, &[]).await {
+            Ok((msg, u)) => {
+                self.add_usage(u);
+                let brief = msg.content.unwrap_or_default();
+                if brief.trim().is_empty() {
+                    self.log_line("CEO", "compact-failed", "telegram brief came back empty; chat kept");
+                    return;
+                }
+                self.ctx.store.kv_set("telegram_brief", &brief);
+                self.ctx.store.delete_telegram_upto(last_id);
+                self.log_line("CEO", "telegram-compacted", &format!("{} old messages folded into the brief", old.len()));
+            }
+            Err(e) => self.log_line("CEO", "compact-failed", &format!("telegram brief: {e:#}")),
         }
     }
 
@@ -1443,8 +1494,31 @@ keep the board honest, then close with finish_episode(note)."
             // instructions. The transcript is disposable, so each is also banked
             // in the scratch until the episode closes: a restart mid-episode
             // replays them instead of eating them.
+            let mut tg_context_injected = false;
             for m in self.ctx.store.drain_messages() {
                 event_kind = "founder".into();
+                // A Telegram message arrives with the conversation so far: the
+                // long-term brief (compacted down to what stayed necessary)
+                // plus the recent exchanges verbatim. Episodes are disposable;
+                // this is what makes "as I said earlier" work across them.
+                if m.starts_with("[via Telegram]") && !tg_context_injected {
+                    tg_context_injected = true;
+                    let brief = self.ctx.store.kv_get("telegram_brief");
+                    let tail = self.ctx.store.telegram_tail(30);
+                    if brief.is_some() || !tail.is_empty() {
+                        let recent =
+                            tail.iter().map(|(r, t)| format!("{r}: {t}")).collect::<Vec<_>>().join("\n");
+                        history.push(Message::text(
+                            "user",
+                            format!(
+                                "[Telegram conversation context — background, not new instructions]\n\
+                                 LONG-TERM BRIEF:\n{}\n\nRECENT EXCHANGES:\n{recent}",
+                                brief.as_deref().unwrap_or("(none yet)")
+                            ),
+                        ));
+                    }
+                    self.compact_telegram().await;
+                }
                 // Telegram is a private line: the public log records that the
                 // founder wrote, never what. khan tell stays public as before.
                 if m.starts_with("[via Telegram]") {

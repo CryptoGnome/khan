@@ -368,6 +368,31 @@ mod tests {
     }
 
     #[test]
+    fn telegram_chat_tail_old_and_delete_slice_correctly() {
+        let store = crate::state::Store::open(":memory:").unwrap();
+        for i in 1..=10 {
+            let role = if i % 2 == 1 { "founder" } else { "ceo" };
+            store.add_telegram_chat(role, &format!("msg {i}"));
+        }
+        // Tail: newest 3, oldest first.
+        let tail = store.telegram_tail(3);
+        assert_eq!(
+            tail.iter().map(|(_, t)| t.as_str()).collect::<Vec<_>>(),
+            vec!["msg 8", "msg 9", "msg 10"]
+        );
+        assert_eq!(store.telegram_chat_chars(), 10 * 5 + 1); // "msg N" x10, one two-digit
+        // Old: everything except the newest 3, oldest first — the compaction slice.
+        let old = store.telegram_old(3);
+        assert_eq!(old.len(), 7);
+        assert_eq!(old.first().unwrap().2, "msg 1");
+        assert_eq!(old.last().unwrap().2, "msg 7");
+        // Deleting through the slice leaves exactly the tail.
+        store.delete_telegram_upto(old.last().unwrap().0);
+        assert_eq!(store.telegram_tail(100).len(), 3);
+        assert!(store.telegram_old(3).is_empty());
+    }
+
+    #[test]
     fn stale_plans_get_flagged_and_fresh_ones_do_not() {
         let store = crate::state::Store::open(":memory:").unwrap();
         let o = store.add_objective("email lane", 1);

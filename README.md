@@ -82,8 +82,11 @@ viewer gives you a live window into what the company is doing from anywhere.
    - `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` *(optional)* — a direct line
      between founder and CEO. Messages from that one chat id land exactly like
      `khan tell`; the CEO replies (and proactively pings you) with its
-     `message_founder` tool. Any other chat that finds the bot is dropped and
-     logged. Unset = the feature doesn't exist.
+     `message_founder` tool. The conversation is remembered: recent exchanges
+     ride into every founder episode verbatim, and older ones are compacted
+     into a long-term brief that keeps only what stays necessary. Any other
+     chat that finds the bot is dropped and logged. Unset = the feature
+     doesn't exist.
    - `FETCH_PROXY` *(optional)* — a residential proxy URL
      (`http://user:pass@gateway:port`) for web fetching. Datacenter IPs are
      walled off from much of the web (search engines, CDNs, many sites);

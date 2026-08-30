@@ -186,6 +186,9 @@ impl Store {
              CREATE TABLE IF NOT EXISTS messages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, msg TEXT NOT NULL,
                 created_at TEXT NOT NULL, delivered INTEGER NOT NULL DEFAULT 0);
+             CREATE TABLE IF NOT EXISTS telegram_chat (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL,
+                role TEXT NOT NULL, text TEXT NOT NULL);
              CREATE TABLE IF NOT EXISTS ratings (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, agent TEXT NOT NULL, score INTEGER NOT NULL,
                 note TEXT, prompt_version INTEGER, created_at TEXT NOT NULL);
@@ -810,6 +813,60 @@ impl Store {
             "INSERT INTO messages(msg, created_at) VALUES(?1,?2)",
             params![msg, chrono::Utc::now().to_rfc3339()],
         );
+    }
+
+    // --- founder <-> CEO Telegram conversation (long-term chat memory) ---
+
+    pub fn add_telegram_chat(&self, role: &str, text: &str) {
+        let c = self.conn.lock().unwrap();
+        let _ = c.execute(
+            "INSERT INTO telegram_chat(ts, role, text) VALUES(?1,?2,?3)",
+            params![chrono::Utc::now().to_rfc3339(), role, text],
+        );
+    }
+
+    /// The last `n` exchanges, oldest first, as (role, text).
+    pub fn telegram_tail(&self, n: usize) -> Vec<(String, String)> {
+        let c = self.conn.lock().unwrap();
+        let mut stmt = match c
+            .prepare("SELECT role, text FROM (SELECT id, role, text FROM telegram_chat ORDER BY id DESC LIMIT ?1) ORDER BY id")
+        {
+            Ok(s) => s,
+            Err(_) => return vec![],
+        };
+        stmt.query_map(params![n as i64], |r| Ok((r.get(0)?, r.get(1)?)))
+            .map(|rows| rows.flatten().collect())
+            .unwrap_or_default()
+    }
+
+    /// Total stored chat size in characters (compaction trigger).
+    pub fn telegram_chat_chars(&self) -> usize {
+        let c = self.conn.lock().unwrap();
+        c.query_row("SELECT IFNULL(SUM(LENGTH(text)),0) FROM telegram_chat", [], |r| {
+            r.get::<_, i64>(0)
+        })
+        .unwrap_or(0) as usize
+    }
+
+    /// Everything except the newest `keep` rows, oldest first, as
+    /// (id, role, text) — the slice a compaction folds into the brief.
+    pub fn telegram_old(&self, keep: usize) -> Vec<(i64, String, String)> {
+        let c = self.conn.lock().unwrap();
+        let mut stmt = match c.prepare(
+            "SELECT id, role, text FROM telegram_chat \
+             WHERE id NOT IN (SELECT id FROM telegram_chat ORDER BY id DESC LIMIT ?1) ORDER BY id",
+        ) {
+            Ok(s) => s,
+            Err(_) => return vec![],
+        };
+        stmt.query_map(params![keep as i64], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .map(|rows| rows.flatten().collect())
+            .unwrap_or_default()
+    }
+
+    pub fn delete_telegram_upto(&self, id: i64) {
+        let c = self.conn.lock().unwrap();
+        let _ = c.execute("DELETE FROM telegram_chat WHERE id <= ?1", params![id]);
     }
 
     /// True when undelivered founder messages or routine alerts are queued —
