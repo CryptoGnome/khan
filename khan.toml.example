@@ -16,9 +16,12 @@ ceo_model = "bu0y/deepseekv4flash"
 # the company needs a strong one, and a static order goes stale with the order
 # book: opus's low band has traded below grok's.
 # All probed (tool-call smoke + scam-refusal/capacity judgment trap):
-# opus5 reasons deepest, grok46 best all-around with production history,
-# sonnet5 sharpest judgment, gemini37flash near-frontier at ~40% of their
-# price, glm53flash production-proven (200+ calls, 0 failures) and near-free.
+# glm53flash (the 2026-08 "Ox Alpha" drop) is near-frontier on agentic
+# behavior at ~1/14 grok's price, with full vision, 1M context and flat
+# pricing — its one cost is token hunger (~2-3x frontier tokens per task,
+# fine at its price, slower wall-clock). opus5 reasons deepest, grok46 best
+# all-around with production history, sonnet5 sharpest judgment,
+# gemini37flash near-frontier at ~40% of their price.
 ceo_models = [
   "bu0y/glm53flash",     # first choice: ~14x cheaper than grok, worker-proven (200+ calls,
                          # 0 failures) — a trial in the big seat; grok is the fallback rung,
