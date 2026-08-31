@@ -214,12 +214,12 @@ async fn app_token(ctx: &ToolCtx) -> Result<String> {
     }
     let id = ctx.cfg.secret("X_CLIENT_ID").context("X_CLIENT_ID not configured")?;
     let secret = ctx.cfg.secret("X_CLIENT_SECRET").context("X_CLIENT_SECRET not configured")?;
-    let basic = base64::engine::general_purpose::STANDARD.encode(format!("{id}:{secret}"));
+    // This grant wants the client credentials as form params, not Basic auth
+    // ("Missing required parameter [client_secret]" otherwise).
     let resp = ctx
         .http
         .post("https://api.x.com/2/oauth2/token")
-        .header("Authorization", format!("Basic {basic}"))
-        .form(&[("grant_type", "client_credentials")])
+        .form(&[("grant_type", "client_credentials"), ("client_id", id), ("client_secret", secret)])
         .send()
         .await
         .context("app token request failed")?;
