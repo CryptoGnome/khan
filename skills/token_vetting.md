@@ -45,6 +45,23 @@ that won't answer — all read as "not clean", never as "probably fine".
    large share of the pool's liquidity — you cannot exit through a door
    smaller than you are.
 
+## PASS-WITH-CAVEAT IS A FAIL
+There is no third verdict. When a hard gate cannot get real data — a
+funding-cluster check running on a weak proxy, a sybil pattern you "could
+not disprove", holder history that wouldn't load — the gate FAILS CLOSED,
+same as bad data. Writing the caveat down and passing anyway is the exact
+rationalization this skill exists to block: the caveat is the finding.
+(Live incident: a batched-distribution pattern across ten identical-balance
+wallets was noted "could not disprove same-actor" and passed — the founder
+killed the position.)
+
+## Banned thesis classes
+The operator may ban an entire thesis class (a copycat meta, a narrative
+family that keeps producing traps). A banned class is a hard gate: no token
+from it is vetted, "the best one in the class" included — buying the
+survivor of a copycat meta is being fifth to the joke. A ban only reopens
+on explicit operator say-so. Record active bans in OUR INSTANCE.
+
 ## External scanners: veto-only, never approval
 Third-party rug scanners and security APIs (their flags, scores, insider maps)
 may VETO a token — a "rugged" flag or terrible score kills it. They may never
