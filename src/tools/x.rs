@@ -516,9 +516,15 @@ pub async fn topup(ctx: &ToolCtx, tx_signature: &str) -> Result<String> {
     if ctx.store.x_ledger_has(sig) {
         bail!("this transaction is already credited on the ledger — one tx, one credit");
     }
+    // The founder's configured RPC beats the public one (rate limits, flaky
+    // windows); the public endpoint stays as the keyless fallback.
+    let rpc = std::env::var("SOLANA_RPC")
+        .ok()
+        .filter(|u| !u.trim().is_empty())
+        .unwrap_or_else(|| "https://api.mainnet-beta.solana.com".into());
     let resp = ctx
         .http
-        .post("https://api.mainnet-beta.solana.com")
+        .post(&rpc)
         .json(&json!({
             "jsonrpc": "2.0", "id": 1, "method": "getTransaction",
             "params": [sig, {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 0}]

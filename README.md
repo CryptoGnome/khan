@@ -112,7 +112,8 @@ viewer gives you a live window into what the company is doing from anywhere.
    - `CC_FUND_SOL_ADDRESS` *(optional)* — the Solana address that recharges
      the X pay-per-use wallet: agents top up by sending USDC (SPL, mainnet)
      to it, then call `x_topup(tx_signature)`; the binary verifies the
-     transfer on-chain (public mainnet RPC) and credits the ledger with the
+     transfer on-chain (via `SOLANA_RPC` when set, else the public mainnet
+     RPC) and credits the ledger with the
      verified amount, once per transaction. Unset = top-ups are refused with
      an alert-the-founder message.
    - `GITHUB_TOKEN` *(optional)* — a personal access token (public_repo
