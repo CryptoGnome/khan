@@ -299,6 +299,11 @@ token count is printed. **There is no spend cap — watch it.**
   the CEO sees broken infrastructure as a *pattern* and routes around it
   (diagnose → build a replacement with `create_tool` → save the workaround as
   a skill) instead of silently retrying a dead tool forever.
+- **The CEO directs, it does not do** — `write_file`/`create_tool` are
+  stripped from its schema, and its hands-on execution (shell, SQL, custom
+  scripts) is budgeted at 2 calls per episode: past that the tool refuses
+  with a dispatch redirect. Reads, dispatching, and rating are unlimited —
+  delegation is the point; every budgeted tool is callable by an employee.
 - **Self-evolution** — prompts live in `khan.db`, versioned. Reflection rides
   the heartbeat episodes: the CEO reviews the activity log and outcome
   ratings, may rewrite its own or employees' prompts (`update_prompt`), roll

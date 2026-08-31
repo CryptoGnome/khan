@@ -216,6 +216,25 @@ fn manager_schemas() -> Vec<Value> {
         .collect()
 }
 
+/// The CEO's per-episode allowance for hands-on execution — shell, sql, and
+/// custom-script runs. Founder doctrine (2026-08-31): the CEO does NO work
+/// beyond deciding and planning who does what — delegation is the whole
+/// point, work gets done faster in parallel hands. Two calls covers the rare
+/// rating spot-check ("SELECT the row it claims"); everything else dispatches.
+/// Every budgeted tool is callable by any employee, so nothing time-critical
+/// is lost at the cap — sends and kill-exits dispatch like any other work.
+/// Plain reads (read_file, web_fetch), dispatch, and ratings are unlimited.
+pub(crate) const CEO_EXEC_BUDGET: u32 = 2;
+
+/// True when a tool call is the CEO doing work rather than directing or
+/// reading: shell, sql, or any custom registry tool (a name that is neither
+/// a built-in nor a CEO control tool).
+pub(crate) fn ceo_exec_budgeted(tname: &str) -> bool {
+    tname == "shell"
+        || tname == "sql"
+        || (!tools::custom::RESERVED.contains(&tname) && !CEO_TOOL_NAMES.contains(&tname))
+}
+
 fn employee_finish_schema() -> Value {
     tool("finish", "Finish the delegated task and report the result to the CEO.", json!({
         "report": {"type": "string"}}), json!(["report"]))
@@ -1548,6 +1567,14 @@ keep the board honest, then close with finish_episode(note)."
             let mut event_kind = if heartbeat { "heartbeat" } else { "event" }.to_string();
             let mut steps: u64 = 0;
             let mut episode_note: Option<String> = None;
+            // The CEO's own hands-on execution this episode — shell, sql, and
+            // custom-script runs. Bounded because instruction alone did not
+            // hold: on 2026-08-31 the CEO logged 350 actions in 2h (88 shells,
+            // hand-running kill-checks, re-running green routines) while its
+            // busiest employee logged 90. Directing and reading stay unlimited;
+            // doing is budgeted, and past the cap the tool refuses with a
+            // dispatch redirect.
+            let mut exec_spent: u32 = 0;
             let mut obs_streak: u32 = 0;
             // Auto-close only arms after the episode has advanced something:
             // reading before acting is investigation, reading after acting is
@@ -2060,6 +2087,16 @@ Keep the board honest: add new bets, declare blocked_by, mark done what is done.
                     }
                     let out = if CEO_TOOL_NAMES.contains(&tname.as_str()) {
                         tools::truncate(self.ceo_tool("CEO", &tname, &a).await)
+                    } else if ceo_exec_budgeted(&tname) && {
+                        exec_spent += 1;
+                        exec_spent > CEO_EXEC_BUDGET
+                    } {
+                        self.log_line("CEO", "exec-budget", &format!("{tname} refused — episode execution budget ({CEO_EXEC_BUDGET}) spent"));
+                        format!(
+                            "REFUSED: your episode's hands-on execution budget ({CEO_EXEC_BUDGET} shell/sql/custom calls) is spent. \
+                             You are the CEO — every one of these tools is callable by an employee: dispatch the work with clear \
+                             instructions and rate the result. If this was verification, the report plus one spot-check was enough."
+                        )
                     } else {
                         tools::execute(&self.ctx, "CEO", &tname, &a).await
                     };

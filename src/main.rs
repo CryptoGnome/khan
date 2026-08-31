@@ -362,6 +362,23 @@ mod tests {
     }
 
     #[test]
+    fn ceo_execution_budget_classifies_doing_vs_directing() {
+        use crate::agent::ceo_exec_budgeted as b;
+        // Doing: shell, sql, and custom registry tools (an employee can run
+        // every one of them — sends and kill-exits included — so nothing is
+        // lost at the cap).
+        for t in ["shell", "sql", "sol_send", "pump_sell", "page_health", "khan_db_query"] {
+            assert!(b(t), "{t} must count against the execution budget");
+        }
+        // Directing and reading stay unlimited.
+        for t in ["dispatch", "delegate", "rate_work", "team_status", "objectives", "finish_episode",
+                  "message_founder", "read_file", "list_files", "recall", "web_fetch", "web_search",
+                  "use_skill", "credits", "x_post", "x_read"] {
+            assert!(!b(t), "{t} must stay unbudgeted");
+        }
+    }
+
+    #[test]
     fn sql_tool_description_carries_the_live_table_list() {
         let dir = std::env::temp_dir().join(format!("khan-sqlhint-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
