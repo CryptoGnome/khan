@@ -430,6 +430,7 @@ mod tests {
             "image_generation",
             "x_api_ops",
             "trading_discipline",
+            "token_vetting",
         ] {
             assert!(names.contains(&n.to_string()), "missing seed '{n}' in {names:?}");
         }
