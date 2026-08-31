@@ -91,8 +91,9 @@ viewer gives you a live window into what the company is doing from anywhere.
      OAuth 2.0 credentials from your own X developer-portal app (confidential
      client, scopes `tweet.read tweet.write users.read offline.access`; the
      refresh token comes from a one-time PKCE authorization of the account).
-     With all three set, every agent gets an `x_post` tool that posts as the
-     account via the official API; credentials are captured into memory at
+     With all three set, every agent gets `x_post` and `x_read` (mentions /
+     recent search) tools that act as the account via the official API;
+     credentials are captured into memory at
      load and never reach an agent shell, and the rotating refresh token is
      persisted in the database after first use (the env value is a one-time
      seed). Unset = the tool doesn't exist.

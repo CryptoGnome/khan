@@ -134,6 +134,7 @@ pub async fn execute(ctx: &ToolCtx, agent: &str, name: &str, args: &Value) -> St
         }
         "credits" => credits::run(ctx).await,
         "x_post" => x::post(ctx, s(args, "text"), s(args, "reply_to")).await,
+        "x_read" => x::read(ctx, s(args, "mode"), s(args, "query")).await,
         "create_tool" => custom::create(ctx, args),
         "create_skill" => skills::create(ctx, args),
         "use_skill" => Ok(skills::load(ctx, agent, s(args, "name"))),
