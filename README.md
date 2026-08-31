@@ -87,6 +87,15 @@ viewer gives you a live window into what the company is doing from anywhere.
      into a long-term brief that keeps only what stays necessary. Any other
      chat that finds the bot is dropped and logged. Unset = the feature
      doesn't exist.
+   - `X_CLIENT_ID` + `X_CLIENT_SECRET` + `X_REFRESH_TOKEN` *(optional)* —
+     OAuth 2.0 credentials from your own X developer-portal app (confidential
+     client, scopes `tweet.read tweet.write users.read offline.access`; the
+     refresh token comes from a one-time PKCE authorization of the account).
+     With all three set, every agent gets an `x_post` tool that posts as the
+     account via the official API; credentials are captured into memory at
+     load and never reach an agent shell, and the rotating refresh token is
+     persisted in the database after first use (the env value is a one-time
+     seed). Unset = the tool doesn't exist.
    - `FETCH_PROXY` *(optional)* — a residential proxy URL
      (`http://user:pass@gateway:port`) for web fetching. Datacenter IPs are
      walled off from much of the web (search engines, CDNs, many sites);

@@ -156,7 +156,18 @@ impl Config {
         // The Telegram founder line: the token matches the sensitive pattern and
         // would be scrubbed below, so capture it (and the chat id, for symmetry)
         // into memory first.
-        for k in ["TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"] {
+        // The founder-provided X (Twitter) OAuth 2.0 credentials ride the same
+        // path: captured here, used only inside the x_post tool, never visible
+        // to an agent shell (the purchased-account era ended with a
+        // founder-owned developer-portal app instead). X_REFRESH_TOKEN is a
+        // one-time seed — rotation lives in kv after first use.
+        for k in [
+            "TELEGRAM_BOT_TOKEN",
+            "TELEGRAM_CHAT_ID",
+            "X_CLIENT_ID",
+            "X_CLIENT_SECRET",
+            "X_REFRESH_TOKEN",
+        ] {
             if let Ok(v) = std::env::var(k) {
                 self.keys.insert(k.into(), v);
             }
@@ -178,6 +189,12 @@ impl Config {
         let token = self.keys.get("TELEGRAM_BOT_TOKEN")?.clone();
         let chat = self.keys.get("TELEGRAM_CHAT_ID")?.parse().ok()?;
         Some((token, chat))
+    }
+
+    /// A captured non-provider secret by env-var name (X credentials etc.),
+    /// or None if it was never set.
+    pub fn secret(&self, name: &str) -> Option<&str> {
+        self.keys.get(name).map(String::as_str)
     }
 
     /// The API key for a provider, or None if it was never set.

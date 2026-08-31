@@ -1,5 +1,6 @@
 pub mod credits;
 pub mod custom;
+pub mod x;
 pub mod skills;
 pub(crate) mod fs;
 mod image;
@@ -132,6 +133,7 @@ pub async fn execute(ctx: &ToolCtx, agent: &str, name: &str, args: &Value) -> St
             Ok(if hits.is_empty() { "no memories found".into() } else { hits.join("\n---\n") })
         }
         "credits" => credits::run(ctx).await,
+        "x_post" => x::post(ctx, s(args, "text"), s(args, "reply_to")).await,
         "create_tool" => custom::create(ctx, args),
         "create_skill" => skills::create(ctx, args),
         "use_skill" => Ok(skills::load(ctx, agent, s(args, "name"))),
