@@ -256,7 +256,9 @@ token count is printed. **There is no spend cap — watch it.**
 - **Work tools** (all agents): file read/write/list (confined to `workspace/`),
   shell (with local `git` for version control; the GitHub CLI is blocked so
   agents can never reach your GitHub login), web fetch + DuckDuckGo search,
-  SQL against a scratch `workspace.db`, `generate_image` (real renders via
+  SQL against a scratch `workspace.db` (the tool's description carries the
+  live table list, and a wrong name gets the real schema back in the error),
+  `generate_image` (real renders via
   OpenRouter image models, ~$0.01 each, the key never enters an agent shell),
   and `remember`/`recall` memory. Oversized tool output isn't dropped: the
   full text is saved to `workspace/.spill/` and the truncation marker names

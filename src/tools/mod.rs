@@ -82,6 +82,22 @@ pub fn work_schemas() -> Vec<Value> {
     ]
 }
 
+/// Stamp the live workspace.db table list into the sql tool's description.
+/// The schema-on-error reply teaches columns after a miss, but agents still
+/// paid a model iteration per guessed name (10 misses in 90 minutes,
+/// 2026-08-31) — the table list belongs where the query gets written.
+/// Schemas rebuild every iteration, so new tables appear at once.
+pub fn hint_sql_tables(workspace: &std::path::Path, schemas: &mut [Value]) {
+    let Some(names) = sql::table_names(workspace) else { return };
+    for t in schemas.iter_mut() {
+        if t["function"]["name"] == "sql" {
+            if let Some(d) = t["function"]["description"].as_str() {
+                t["function"]["description"] = format!("{d} Existing tables: {names}. A name not in this list does not exist — check the list before inventing one.").into();
+            }
+        }
+    }
+}
+
 fn s<'a>(args: &'a Value, k: &str) -> &'a str {
     args[k].as_str().unwrap_or("")
 }

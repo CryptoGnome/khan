@@ -19,6 +19,27 @@ pub fn run(ctx: &ToolCtx, query: &str) -> Result<String> {
     }
 }
 
+/// The scratch DB's table names, comma-joined — None when the db doesn't
+/// exist yet or holds nothing. Read-only open so a missing file is never
+/// created as a side effect of building tool schemas.
+pub fn table_names(workspace: &std::path::Path) -> Option<String> {
+    let conn = Connection::open_with_flags(
+        workspace.join("workspace.db"),
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .ok()?;
+    let mut stmt = conn
+        .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
+        .ok()?;
+    let names: Vec<String> =
+        stmt.query_map([], |r| r.get::<_, String>(0)).ok()?.flatten().collect();
+    if names.is_empty() {
+        None
+    } else {
+        Some(names.join(", "))
+    }
+}
+
 /// Compact one-line-per-table schema summary for error replies.
 fn schema_hint(conn: &Connection) -> String {
     let mut out = Vec::new();

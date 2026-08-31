@@ -362,6 +362,29 @@ mod tests {
     }
 
     #[test]
+    fn sql_tool_description_carries_the_live_table_list() {
+        let dir = std::env::temp_dir().join(format!("khan-sqlhint-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        // No workspace.db yet: the description stays untouched (and no db file
+        // is created as a side effect).
+        let mut schemas = crate::tools::work_schemas();
+        let before = schemas.iter().find(|t| t["function"]["name"] == "sql").unwrap()["function"]["description"].as_str().unwrap().to_string();
+        crate::tools::hint_sql_tables(&dir, &mut schemas);
+        assert!(!dir.join("workspace.db").exists(), "read-only open must not create the db");
+        assert_eq!(schemas.iter().find(|t| t["function"]["name"] == "sql").unwrap()["function"]["description"].as_str().unwrap(), before);
+        // With tables present, their names land in the sql tool's description —
+        // agents see what exists before writing the query, not after a miss.
+        let conn = rusqlite::Connection::open(dir.join("workspace.db")).unwrap();
+        conn.execute_batch("CREATE TABLE closed_positions(mint, asset); CREATE TABLE revenue_ideas(id, name);").unwrap();
+        drop(conn);
+        crate::tools::hint_sql_tables(&dir, &mut schemas);
+        let desc = schemas.iter().find(|t| t["function"]["name"] == "sql").unwrap()["function"]["description"].as_str().unwrap().to_string();
+        assert!(desc.contains("closed_positions") && desc.contains("revenue_ideas"), "table names in description: {desc}");
+        assert!(desc.starts_with(&before), "hint appends, never replaces");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
     fn x_post_cost_applies_the_url_surcharge() {
         use crate::tools::x::post_cost;
         assert_eq!(post_cost("shipped a new build today"), 0.015);
