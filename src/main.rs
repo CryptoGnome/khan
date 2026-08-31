@@ -425,6 +425,7 @@ mod tests {
             "founder_payout",
             "wallet_anti_dusting",
             "image_generation",
+            "x_api_ops",
         ] {
             assert!(names.contains(&n.to_string()), "missing seed '{n}' in {names:?}");
         }
