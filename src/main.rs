@@ -319,6 +319,12 @@ mod tests {
         assert!(out.contains("full output saved to .spill/"), "marker should name the spill file: {}", &out[out.len() - 120..]);
         let spilled = std::fs::read_dir(dir.join(".spill")).unwrap().next().unwrap().unwrap();
         assert_eq!(std::fs::read_to_string(spilled.path()).unwrap(), big);
+        // The directory cleans itself: a generous max_age keeps the file, a
+        // zero max_age (everything is "old") removes it.
+        crate::tools::purge_spill(&dir.join(".spill"), std::time::Duration::from_secs(3600));
+        assert!(std::fs::read_dir(dir.join(".spill")).unwrap().next().is_some(), "fresh spill must survive the sweep");
+        crate::tools::purge_spill(&dir.join(".spill"), std::time::Duration::ZERO);
+        assert!(std::fs::read_dir(dir.join(".spill")).unwrap().next().is_none(), "aged-out spill must be removed");
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

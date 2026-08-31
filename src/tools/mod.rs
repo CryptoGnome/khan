@@ -100,15 +100,39 @@ pub fn truncate(mut s: String) -> String {
     s
 }
 
+/// How long a spill file stays useful: an agent reads the tail back within the
+/// episode that produced it, so a week is generous.
+const SPILL_MAX_AGE: std::time::Duration = std::time::Duration::from_secs(7 * 24 * 3600);
+
+/// Delete spill files older than `max_age`. Best-effort: an unreadable entry
+/// or failed remove is skipped, never an error — cleanup must not break the
+/// tool result it rides on.
+pub(crate) fn purge_spill(dir: &std::path::Path, max_age: std::time::Duration) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for e in entries.flatten() {
+        let old = e
+            .metadata()
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.elapsed().ok())
+            .is_some_and(|age| age > max_age);
+        if old {
+            let _ = std::fs::remove_file(e.path());
+        }
+    }
+}
+
 /// Over-limit tool output is relocated, not dropped: the full text lands in
 /// workspace/.spill/ and the marker names the file, so an agent recovers the
-/// tail with read_file instead of re-running an expensive command. Spill files
-/// accumulate for the life of the workspace — accepted ceiling; they are plain
-/// text an agent can prune.
+/// tail with read_file instead of re-running an expensive command. Each new
+/// spill sweeps week-old ones, so the directory cleans itself on the same
+/// path that fills it — no cadence to schedule, nothing to clean in a
+/// workspace that never spills.
 pub fn truncate_spill(workspace: &std::path::Path, tool: &str, s: String) -> String {
     if s.len() <= MAX_RESULT {
         return s;
     }
+    purge_spill(&workspace.join(".spill"), SPILL_MAX_AGE);
     let file = format!("{tool}-{}.txt", chrono::Utc::now().timestamp_micros());
     let saved = std::fs::create_dir_all(workspace.join(".spill"))
         .and_then(|()| std::fs::write(workspace.join(".spill").join(&file), &s))
