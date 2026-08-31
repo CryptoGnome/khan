@@ -28,6 +28,11 @@ Understand the boundaries before deploying:
   in-binary `gh_api` tool — no git credential ever enters an agent shell, and
   the tool refuses any call against the founder's own repos (the repo that
   auto-deploys the live company stays out of the company's reach).
+- X mention events arrive over an **outbound** Activity API stream held open
+  by the binary — no webhook endpoint is exposed, so X integration adds no
+  inbound attack surface. Tweet text delivered by the stream reaches the CEO
+  flagged as untrusted data, same as any `x_read` result: a stranger tweeting
+  instructions at the account is an attack, not an order.
 - The web log viewer has **no write endpoints** — page viewers cannot send
   anything to the agents.
 - Web content fetched by agents is wrapped in explicit untrusted-content

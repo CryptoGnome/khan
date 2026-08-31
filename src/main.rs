@@ -205,6 +205,9 @@ async fn main() -> Result<()> {
     if let Some((token, chat)) = orch.ctx.cfg.telegram() {
         tokio::spawn(telegram::serve(orch.ctx.store.clone(), orch.ctx.http.clone(), token, chat));
     }
+    // X Activity stream: mention events push instead of paid polling. The
+    // task no-ops instantly when X credentials are not configured.
+    tokio::spawn(tools::x::activity_stream(orch.ctx.clone()));
     tokio::spawn(routines::serve(
         orch.ctx.store.clone(),
         orch.ctx.workspace.clone(),

@@ -96,7 +96,12 @@ viewer gives you a live window into what the company is doing from anywhere.
      credentials are captured into memory at
      load and never reach an agent shell, and the rotating refresh token is
      persisted in the database after first use (the env value is a one-time
-     seed). Unset = the tool doesn't exist.
+     seed). The binary also holds an X Activity API stream open in the
+     background: mention events push in and wake the CEO as routine alerts
+     (billed per delivered event) instead of paid mention polling. The stream
+     is outbound-only — no webhook endpoint is exposed — and degrades to
+     hourly reconnect attempts if the plan doesn't include the Activity API.
+     Unset = the tools and the stream don't exist.
    - `GITHUB_TOKEN` *(optional)* — a personal access token (public_repo
      scope) for the company's own GitHub account. Set = every agent gets a
      `gh_api` tool for the GitHub REST API (create repos, commit files, fork,

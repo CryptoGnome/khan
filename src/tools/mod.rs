@@ -15,6 +15,7 @@ use serde_json::{json, Value};
 use std::path::PathBuf;
 use std::sync::Arc;
 
+#[derive(Clone)]
 pub struct ToolCtx {
     pub cfg: Config,
     pub store: Arc<Store>,

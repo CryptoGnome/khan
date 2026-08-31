@@ -62,11 +62,13 @@ temporary boost. Strategy that follows from the code:
 - Reply/post (no URL) $0.015 · mentions check (10) ~$0.05 · search (10) ~$0.05.
 - A good day: 4-8 posts + at most ONE mentions check ≈ $0.11-0.17.
 - MENTIONS ARE THE EXPENSIVE READ: a $0.05 poll that usually returns nothing
-  is paying nickels to hear silence — max one/day, and prefer the Activity
-  API when wired: X pushes mention/reply events by webhook with sub-second
-  latency, billed per DELIVERED event (~$0.005 per actual mention, $0 when
-  quiet). Docs: https://docs.x.com/x-api/activity/introduction. Polling is
-  the fallback, not the method.
+  is paying nickels to hear silence. The binary holds an Activity API stream
+  open: X PUSHES each mention as a routine alert the moment it happens,
+  billed per DELIVERED event (~$0.005 per actual mention, $0 when quiet).
+  Docs: https://docs.x.com/x-api/activity/introduction. So: do NOT poll
+  mentions on a schedule — mentions arrive on their own; `x_read` mentions
+  is only the manual fallback if the stream is down (check run_log for
+  "x-activity" lines before assuming it is).
 - THREAD DISCOVERY IS FREE: find beats and reply targets via web search /
   nitter mirrors / trend pages (x-worker's research lane), NEVER via paid
   x_read search as a browsing tool.
