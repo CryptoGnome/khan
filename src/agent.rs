@@ -491,15 +491,15 @@ Drop superseded detail, resolved dead ends, and chatter.",
         let Some((mut role, mut prompt_name, mut model, hist_json)) = self.ctx.store.load_agent(name) else {
             return format!("ERROR: no such employee '{name}'. hire them first or check list_team.");
         };
-        let sys = crate::prompts::employee_system(
-            &self
-                .ctx
-                .store
-                .get_prompt(&prompt_name)
-                .unwrap_or_default()
-                .replace("{name}", name)
-                .replace("{role}", &role),
-        );
+        // Refuse-don't-drop, same as the history below: a missing prompt row
+        // used to hand the employee an EMPTY system prompt silently. Fall back
+        // to the base their kind seeds from, and say so where reflection reads.
+        let prompt = self.ctx.store.get_prompt(&prompt_name).unwrap_or_else(|| {
+            let base_name = if self.ctx.store.is_manager(name) { "manager_base" } else { "employee_base" };
+            self.log_line(name, "prompt-error", &format!("prompt '{prompt_name}' is missing; falling back to {base_name}"));
+            self.ctx.store.get_prompt(base_name).unwrap_or_default()
+        });
+        let sys = crate::prompts::employee_system(&prompt.replace("{name}", name).replace("{role}", &role));
         // Refuse-don't-drop: a corrupt saved history used to be silently swapped
         // for a fresh one — the employee lost every prior turn with nothing in
         // the log. Starting fresh is still the only way forward, but it happens
