@@ -38,11 +38,19 @@ pub async fn serve(store: Arc<Store>, workspace: PathBuf, orch: Arc<Orchestrator
                 store.mark_routine_run(&name, chrono::Utc::now().timestamp(), &status);
                 continue;
             }
-            let (out, ok) = shell::run_in_dir(&workspace, &command, Default::default())
+            let o = shell::run_in_dir(&workspace, &command, Default::default())
                 .await
-                .unwrap_or_else(|e| (format!("ERROR: routine failed to start: {e:#}"), false));
-            let alert = !ok || out.contains("ALERT");
-            store.mark_routine_run(&name, chrono::Utc::now().timestamp(), if alert { "ALERT" } else { "ok" });
+                .unwrap_or_else(|e| shell::ShellOutcome {
+                    text: format!("ERROR: routine failed to start: {e:#}"),
+                    success: false,
+                    timed_out: false,
+                });
+            let out = o.text;
+            let alert = !o.success || out.contains("ALERT");
+            // A hang is its own status, not just a failure: a routine that times
+            // out every cycle needs a different fix than one that exits nonzero.
+            let status = if o.timed_out { "ALERT (timeout)" } else if alert { "ALERT" } else { "ok" };
+            store.mark_routine_run(&name, chrono::Utc::now().timestamp(), status);
             if alert {
                 let tail: String = out
                     .chars()

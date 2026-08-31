@@ -22,7 +22,10 @@ Understand the boundaries before deploying:
   `/proc/<pid>/environ` as well as from every shell child agents spawn. Other
   secret-shaped environment variables are removed at the same time.
 - The GitHub CLI (`gh`) is blocked in the agent shell so agents can never use
-  a personal GitHub login; only local `git` is available. When the founder
+  a personal GitHub login; only local `git` is available. The guard sits on
+  the shared execution path (custom-tool launches included), and custom-tool
+  scripts are scanned for `gh` lines at create time — best-effort against
+  indirection, with the token layers below as the real backstop. When the founder
   provides a company GitHub token (`GITHUB_TOKEN`, public_repo scope), it is
   captured into memory like the API keys and exposed only through the
   in-binary `gh_api` tool — no git credential ever enters an agent shell, and

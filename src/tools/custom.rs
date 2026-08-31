@@ -64,6 +64,14 @@ pub fn create(ctx: &ToolCtx, args: &Value) -> Result<String> {
     if script.trim().is_empty() {
         bail!("script must not be empty");
     }
+    // The launcher command a custom tool runs through never mentions gh — the
+    // script body is where a gh call would hide, so it is scanned at create
+    // time with the same line-level check the shell uses. Ceiling: this catches
+    // command-position invocations (bash/powershell lines, python os.system
+    // one-liners), not gh reached through argv-list indirection.
+    if shell::touches_gh(script) {
+        bail!("script invokes gh, which is not available (it would use the founder's personal GitHub login). Use the gh_api tool for GitHub work.");
+    }
     let v = ctx.store.save_tool(
         &name,
         args["description"].as_str().unwrap_or(""),

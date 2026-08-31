@@ -24,14 +24,23 @@ fn interpreter(command: &str) -> (&'static str, Vec<String>) {
     ("sh", vec!["-c".into(), command.into()])
 }
 
+/// One command's outcome, each fact reported on its own: a timeout is not the
+/// same failure as a nonzero exit, and folding one into the other forces
+/// callers to parse prose (routines want to alert differently on hangs).
+pub struct ShellOutcome {
+    pub text: String,
+    pub success: bool,
+    pub timed_out: bool,
+}
+
 /// Run one command in `dir` with the scrubbed env and 120s timeout — the same
-/// execution agents get from the shell tool. Returns the combined output and
-/// whether the command succeeded (routines key alerts off that flag).
+/// execution agents get from the shell tool. Routines key alerts off the
+/// outcome flags.
 pub async fn run_in_dir(
     dir: &std::path::Path,
     command: &str,
     extra_env: std::collections::HashMap<String, String>,
-) -> Result<(String, bool)> {
+) -> Result<ShellOutcome> {
     let (prog, prog_args) = interpreter(command);
     let mut cmd = Command::new(prog);
     cmd.args(&prog_args).current_dir(dir);
@@ -61,11 +70,19 @@ pub async fn run_in_dir(
         } else if !out.status.success() {
             text.push_str(&format!("\n[exit code {}]", out.status.code().unwrap_or(-1)));
         }
-        Ok::<(String, bool), anyhow::Error>((text, out.status.success()))
+        Ok::<ShellOutcome, anyhow::Error>(ShellOutcome {
+            text,
+            success: out.status.success(),
+            timed_out: false,
+        })
     };
     match tokio::time::timeout(Duration::from_secs(120), fut).await {
         Ok(r) => r,
-        Err(_) => Ok(("ERROR: command timed out after 120s and was killed".into(), false)),
+        Err(_) => Ok(ShellOutcome {
+            text: "ERROR: command timed out after 120s and was killed".into(),
+            success: false,
+            timed_out: true,
+        }),
     }
 }
 
@@ -77,12 +94,19 @@ pub async fn run_with_env(
     cwd: Option<&str>,
     extra_env: std::collections::HashMap<String, String>,
 ) -> Result<String> {
+    // The gh guard lives here, not in run(), so every agent-driven execution
+    // path — shell tool and custom-tool launcher alike — routes through it.
+    if touches_gh(command) {
+        return Ok(GH_BLOCKED.into());
+    }
     let dir = match cwd {
         Some(c) if !c.is_empty() => ctx.workspace.join(c),
         _ => ctx.workspace.clone(),
     };
-    run_in_dir(&dir, command, extra_env).await.map(|(text, _)| text)
+    run_in_dir(&dir, command, extra_env).await.map(|o| o.text)
 }
+
+pub const GH_BLOCKED: &str = "ERROR: gh is not available (it would use the founder's personal GitHub login). Plain git works for local version control in the workspace.";
 
 /// True if a command line invokes gh/hub anywhere in it. Plain git is fine
 /// (local version control), but the GitHub CLIs would reach the founder's
@@ -103,8 +127,5 @@ pub fn touches_gh(command: &str) -> bool {
 }
 
 pub async fn run(ctx: &ToolCtx, command: &str, cwd: Option<&str>) -> Result<String> {
-    if touches_gh(command) {
-        return Ok("ERROR: gh is not available (it would use the founder's personal GitHub login). Plain git works for local version control in the workspace.".into());
-    }
     run_with_env(ctx, command, cwd, std::collections::HashMap::new()).await
 }

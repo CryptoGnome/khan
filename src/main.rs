@@ -297,6 +297,41 @@ mod tests {
         for c in ["python x.py", "git init", "git commit -m x", "C:/bin/git.exe log", "Get-Content github.md", "echo 'gh is a tool'", "dir"] {
             assert!(!g(c), "{c} should be allowed");
         }
+        // Custom-tool scripts are scanned with the same check at create time —
+        // it must catch a gh call buried mid-script, line by line.
+        assert!(g("echo start\ngh api user\necho end"), "multi-line script with gh line should be blocked");
+        assert!(!g("import json, os\nargs = json.loads(os.environ['KHAN_TOOL_ARGS'])\nprint(args)"), "benign python script should pass");
+    }
+
+    #[test]
+    fn oversized_tool_output_spills_to_workspace() {
+        use crate::tools::{truncate_spill, MAX_RESULT};
+        let dir = std::env::temp_dir().join(format!("khan-spill-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        // Short output passes through untouched, no spill dir created.
+        assert_eq!(truncate_spill(&dir, "shell", "small".into()), "small");
+        assert!(!dir.join(".spill").exists());
+        // Oversized output is cut but the full text survives in .spill/ and the
+        // marker names the file so an agent can read_file the rest.
+        let big = "x".repeat(MAX_RESULT + 500);
+        let out = truncate_spill(&dir, "shell", big.clone());
+        assert!(out.len() < big.len());
+        assert!(out.contains("full output saved to .spill/"), "marker should name the spill file: {}", &out[out.len() - 120..]);
+        let spilled = std::fs::read_dir(dir.join(".spill")).unwrap().next().unwrap().unwrap();
+        assert_eq!(std::fs::read_to_string(spilled.path()).unwrap(), big);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn shell_outcome_reports_facts_independently() {
+        // exit code and timeout are separate facts — routines alert on each
+        // differently, and neither should have to be parsed out of prose.
+        let dir = std::env::temp_dir();
+        let ok = crate::tools::shell::run_in_dir(&dir, "echo hi", Default::default()).await.unwrap();
+        assert!(ok.success && !ok.timed_out);
+        assert!(ok.text.contains("hi"));
+        let bad = crate::tools::shell::run_in_dir(&dir, "exit 3", Default::default()).await.unwrap();
+        assert!(!bad.success && !bad.timed_out);
     }
 
     #[test]

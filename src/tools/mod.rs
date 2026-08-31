@@ -100,6 +100,31 @@ pub fn truncate(mut s: String) -> String {
     s
 }
 
+/// Over-limit tool output is relocated, not dropped: the full text lands in
+/// workspace/.spill/ and the marker names the file, so an agent recovers the
+/// tail with read_file instead of re-running an expensive command. Spill files
+/// accumulate for the life of the workspace — accepted ceiling; they are plain
+/// text an agent can prune.
+pub fn truncate_spill(workspace: &std::path::Path, tool: &str, s: String) -> String {
+    if s.len() <= MAX_RESULT {
+        return s;
+    }
+    let file = format!("{tool}-{}.txt", chrono::Utc::now().timestamp_micros());
+    let saved = std::fs::create_dir_all(workspace.join(".spill"))
+        .and_then(|()| std::fs::write(workspace.join(".spill").join(&file), &s))
+        .is_ok();
+    let mut cut = MAX_RESULT;
+    while !s.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    let marker = if saved {
+        format!("\n...[truncated — full output saved to .spill/{file}; read_file it if you need the rest]")
+    } else {
+        "\n...[truncated]".to_string()
+    };
+    format!("{}{marker}", &s[..cut])
+}
+
 /// Execute a work tool. Never returns Err — errors become the tool result string.
 pub async fn execute(ctx: &ToolCtx, agent: &str, name: &str, args: &Value) -> String {
     // The CEO directs; it does not build. These are stripped from its schema
@@ -170,5 +195,5 @@ pub async fn execute(ctx: &ToolCtx, agent: &str, name: &str, args: &Value) -> St
         let brief: String = text.chars().take(400).collect();
         ctx.store.log(agent, &format!("{name}-error"), &brief);
     }
-    truncate(text)
+    truncate_spill(&ctx.workspace, name, text)
 }

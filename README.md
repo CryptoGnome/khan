@@ -247,7 +247,9 @@ token count is printed. **There is no spend cap — watch it.**
   agents can never reach your GitHub login), web fetch + DuckDuckGo search,
   SQL against a scratch `workspace.db`, `generate_image` (real renders via
   OpenRouter image models, ~$0.01 each, the key never enters an agent shell),
-  and `remember`/`recall` memory.
+  and `remember`/`recall` memory. Oversized tool output isn't dropped: the
+  full text is saved to `workspace/.spill/` and the truncation marker names
+  the file, so an agent reads the rest back instead of re-running the command.
 - **Memory** — SQLite FTS5. Relevant memories are auto-injected into context;
   recall also scans skill bodies and surfaces matching excerpts, so a fact
   recorded in a skill contradicts a false claim wherever that claim travels;
@@ -255,7 +257,8 @@ token count is printed. **There is no spend cap — watch it.**
 - **Custom tools** — any agent can call `create_tool` to turn a Python or
   PowerShell script into a real, schema-described tool that every agent can
   call from then on (the script reads its JSON args from the `KHAN_TOOL_ARGS`
-  env var and prints its result). Tools are versioned in `khan.db` like
+  env var and prints its result; scripts that invoke the blocked GitHub CLI
+  are refused at create time). Tools are versioned in `khan.db` like
   prompts: `create_tool` with the same name makes a new version,
   `rollback_tool` reverts a bad one. The CEO can also delegate tool-building
   to an employee.

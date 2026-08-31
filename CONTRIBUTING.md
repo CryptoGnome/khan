@@ -9,6 +9,11 @@ Thanks for your interest — contributions are welcome.
   or an existing dependency can't do it.
 - **Match the existing style.** Plain Rust, minimal abstractions, comments
   only where the code can't explain itself.
+- **Postmortems earn a guardrail.** An incident write-up (`docs/kernel-*.md`
+  and the like) is finished when it names the concrete test, guard, or check
+  added so the same class of failure fails loudly next time — not when the
+  one-off bug is fixed. The docs are dated point-in-time records; never
+  retro-edit them.
 - **Don't weaken the security layers.** The immutable prompt preamble, env
   scrubbing, `gh` blocking, and the read-only log viewer are load-bearing.
   Changes touching them get extra scrutiny (see [SECURITY.md](SECURITY.md)).
