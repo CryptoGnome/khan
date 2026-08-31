@@ -203,14 +203,48 @@ pub async fn activity_stream(ctx: ToolCtx) {
     }
 }
 
+/// App-only bearer token for the Activity endpoints — the stream explicitly
+/// rejects user-context auth ("Supported authentication types are [OAuth 2.0
+/// Application-Only]", observed 2026-08-31). X_BEARER_TOKEN from the portal
+/// wins when set; otherwise the client_credentials grant mints one from the
+/// same confidential client the user-context flow uses.
+async fn app_token(ctx: &ToolCtx) -> Result<String> {
+    if let Some(t) = ctx.cfg.secret("X_BEARER_TOKEN") {
+        return Ok(t.to_string());
+    }
+    let id = ctx.cfg.secret("X_CLIENT_ID").context("X_CLIENT_ID not configured")?;
+    let secret = ctx.cfg.secret("X_CLIENT_SECRET").context("X_CLIENT_SECRET not configured")?;
+    let basic = base64::engine::general_purpose::STANDARD.encode(format!("{id}:{secret}"));
+    let resp = ctx
+        .http
+        .post("https://api.x.com/2/oauth2/token")
+        .header("Authorization", format!("Basic {basic}"))
+        .form(&[("grant_type", "client_credentials")])
+        .send()
+        .await
+        .context("app token request failed")?;
+    let status = resp.status();
+    let body = resp.text().await.unwrap_or_default();
+    if !status.is_success() {
+        bail!(
+            "app-only token grant returned {status}: {} — set X_BEARER_TOKEN from the portal's Keys & Tokens instead",
+            body.chars().take(300).collect::<String>()
+        );
+    }
+    let v: Value = serde_json::from_str(&body).context("app token response not json")?;
+    Ok(v["access_token"].as_str().context("no access_token in app token response")?.to_string())
+}
+
 /// One stream lifetime: refresh auth, make sure the mention subscription
 /// exists, then hold the stream open and surface each delivered event.
 async fn run_stream_once(ctx: &ToolCtx, http: &reqwest::Client) -> Result<()> {
-    let token = access_token(ctx).await?;
-    let user_id = own_user_id(ctx, &token).await?;
-    // Advisory, not a gate: the subscriptions endpoint 403s OAuth 2.0 user
-    // tokens (known X-side gap, 2026-08) even when the console manages the
-    // subscription fine — a failed check must never keep the stream closed.
+    // user-context token only to learn our own user id (cached in kv)
+    let user_token = access_token(ctx).await?;
+    let user_id = own_user_id(ctx, &user_token).await?;
+    let token = app_token(ctx).await?;
+    // Advisory, not a gate: the console can manage the subscription even
+    // when this call is refused — a failed check must never keep the stream
+    // closed.
     if let Err(e) = ensure_subscription(ctx, http, &token, &user_id).await {
         ctx.store.log("x-activity", "stream", &format!(
             "subscription check failed ({}) — connecting stream anyway; manage the subscription in the developer console",

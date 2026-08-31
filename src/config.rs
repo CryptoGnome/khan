@@ -168,6 +168,9 @@ impl Config {
             "X_CLIENT_ID",
             "X_CLIENT_SECRET",
             "X_REFRESH_TOKEN",
+            // app-only bearer for the Activity stream (optional; the
+            // client_credentials grant is the fallback when unset)
+            "X_BEARER_TOKEN",
         ] {
             if let Ok(v) = std::env::var(k) {
                 self.keys.insert(k.into(), v);

@@ -101,6 +101,9 @@ viewer gives you a live window into what the company is doing from anywhere.
      (billed per delivered event) instead of paid mention polling. The stream
      is outbound-only — no webhook endpoint is exposed — and degrades to
      hourly reconnect attempts if the plan doesn't include the Activity API.
+     The stream authenticates app-only: set `X_BEARER_TOKEN` (the app's
+     bearer token from Keys & Tokens) or leave it unset and the binary mints
+     one via the client-credentials grant.
      Unset = the tools and the stream don't exist.
    - `GITHUB_TOKEN` *(optional)* — a personal access token (public_repo
      scope) for the company's own GitHub account. Set = every agent gets a
