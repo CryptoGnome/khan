@@ -129,6 +129,26 @@ async fn main() -> Result<()> {
     let port: u16 = std::env::var("PORT").ok().and_then(|p| p.parse().ok()).unwrap_or(8080);
     tokio::spawn(viewer::serve(store.clone(), port, workspace.clone()));
     store.log("khan", "startup", &format!("CEO model {} | directive: {directive}", cfg.ceo_model));
+    // Crash-loop tripwire: a healthy process starts once per deploy. Three
+    // startups inside 15 minutes means the binary is dying on its own, and
+    // the founder hears it from the binary directly — no model in the loop
+    // (the 2026-08-31 em-dash panic looped for 13 minutes before a human
+    // noticed by accident).
+    let recent = store.recent_startup_count(15 * 60);
+    if recent >= 3 {
+        if let Some((token, chat)) = cfg.telegram() {
+            let msg = format!(
+                "⚠️ khan is crash-looping: {recent} startups in the last 15 minutes. \
+The binary is dying and restarting on its own — check the Railway deploy logs. \
+Episodes lose their in-flight dispatches on every crash."
+            );
+            let http = reqwest::Client::new();
+            if telegram::send(&http, &token, chat, &msg).await.is_err() {
+                eprintln!("[khan] crash-loop alert could not reach Telegram");
+            }
+        }
+        store.log("khan", "crash-loop", &format!("{recent} startups in 15m — founder alerted"));
+    }
 
     // Learn the real free-model caps for this key rather than assuming them: the
     // daily limit is 50 or 1000 depending on whether credits were ever purchased,

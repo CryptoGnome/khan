@@ -134,7 +134,9 @@ viewer gives you a live window into what the company is doing from anywhere.
 - **Nudge without redeploying:** open a shell on the service (`railway ssh`)
   and run `khan tell "drop the pricing page, focus on the scraper"` — the CEO
   wakes on it immediately. With the Telegram line configured, texting the bot
-  from your phone does the same thing, and the CEO texts back.
+  from your phone does the same thing, and the CEO texts back. The binary
+  also texts you unprompted when it detects itself crash-looping (three
+  startups inside 15 minutes) — no model in that loop.
 - **Stop the spend:** stop/remove the service. khan has **no built-in spend
   cap** (by design) — a cloud worker keeps calling the API until you stop it.
 

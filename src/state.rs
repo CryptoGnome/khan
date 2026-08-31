@@ -274,6 +274,19 @@ impl Store {
         self.log_tx.subscribe()
     }
 
+    /// Startups logged within the last `window_secs` — the crash-loop
+    /// tripwire reads this right after logging its own startup row.
+    pub fn recent_startup_count(&self, window_secs: i64) -> i64 {
+        let since = (chrono::Utc::now() - chrono::Duration::seconds(window_secs)).to_rfc3339();
+        let c = self.conn.lock().unwrap();
+        c.query_row(
+            "SELECT count(*) FROM run_log WHERE event='startup' AND ts > ?1",
+            params![since],
+            |r| r.get(0),
+        )
+        .unwrap_or(0)
+    }
+
     pub fn kv_get(&self, k: &str) -> Option<String> {
         let c = self.conn.lock().unwrap();
         c.query_row("SELECT v FROM kv WHERE k=?1", params![k], |r| r.get(0)).ok()
