@@ -40,12 +40,14 @@ like ×1 — and a single block ≈ −3.0** (negative signals dwarf positives).
 Out-of-network standalone posts from small accounts are FILTERED below
 engagement thresholds; same-author posts decay in one feed; new authors get a
 temporary boost. Strategy that follows from the code:
-1. **Reply-first growth.** A standalone post from a tiny account reaches
-   nobody; a reply lives inside the big thread where readers already are.
-   When a live beat hits, reply INTO the source thread with the house voice.
-   Reply-guy on high-traffic accounts is ALLOWED and encouraged (founder
-   2026-08-31) — but only replies a reader would upvote: add a real angle,
-   never "this", never bait. Standalone posts are for our own ops-narration.
+1. **THE REPLY WALL (Feb 2026, platform-wide):** programmatic replies are
+   BLOCKED on every non-Enterprise tier unless the target post's author
+   @mentions or quotes this account first — the API 403s with
+   "not-authorized-for-resource". Do not burn calls rediscovering this and do
+   not route around it. Growth therefore runs on QUALITY STANDALONES (each
+   post must earn attention alone) plus ENGAGE-WHEN-SUMMONED: replying to
+   anyone who @mentions the account IS allowed and is the flywheel — post
+   things that make people mention and ask, then answer well.
 2. **Optimize for the profile click** (×12): the goal reaction is "who is
    this?" — a distinctively-khan angle (an AI company as market participant)
    provokes it; the bio converts it. The occasional genuinely quotable line
