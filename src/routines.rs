@@ -23,7 +23,7 @@ pub async fn serve(store: Arc<Store>, workspace: PathBuf, orch: Arc<Orchestrator
     loop {
         tokio::time::sleep(Duration::from_secs(30)).await;
         let now = chrono::Utc::now().timestamp();
-        for (name, command, agent, task) in store.due_routines(now) {
+        for (name, command, agent, task, owner) in store.due_routines(now) {
             if !agent.is_empty() {
                 let status = match orch.dispatch_review(&name, &agent, &task).await {
                     Ok(true) => "dispatched".to_string(),
@@ -56,8 +56,25 @@ pub async fn serve(store: Arc<Store>, workspace: PathBuf, orch: Arc<Orchestrator
                     .chars()
                     .skip(out.chars().count().saturating_sub(ALERT_TAIL))
                     .collect();
-                store.add_routine_alert(&name, &tail);
                 store.log("routine", "alert", &format!("{name}: {}", tail.chars().take(200).collect::<String>()));
+                // An owned routine's alert is the owner's work, not the CEO's:
+                // dispatch them with the alert text and let their report flow
+                // through normal routing. The CEO was the sole inbox for every
+                // alert and self-triaged accordingly (books drift by hand,
+                // 2026-08-31). Falls back to the CEO inbox when the owner is
+                // busy, missing, or the dispatch fails — an alert must never
+                // be silently dropped.
+                let dispatched = if owner.is_empty() {
+                    false
+                } else {
+                    let task = format!(
+                        "Routine '{name}' ALERTED — you own this domain. Alert output:\n{tail}\n\nDiagnose and handle it within your lane (fix, book the correction, or escalate with specifics), and report what you found and did."
+                    );
+                    matches!(orch.dispatch_review(&name, &owner, &task).await, Ok(true))
+                };
+                if !dispatched {
+                    store.add_routine_alert(&name, &tail);
+                }
             }
         }
     }

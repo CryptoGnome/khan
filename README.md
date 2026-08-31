@@ -245,6 +245,10 @@ token count is printed. **There is no spend cap — watch it.**
 - **Live steering** — `khan tell "..."` from a second terminal (or a Telegram
   message from the allowlisted founder chat) queues a founder message; the
   running CEO wakes on it immediately. No restart needed.
+- **Routines have owners** — a routine can name the employee who owns its
+  domain, and its alerts then dispatch straight to that owner (report
+  routing brings back the outcome); only ownerless alerts wake the CEO,
+  which is the signal to assign or hire an owner.
 - **Routines** — the CEO schedules its own recurring checks: shell routines
   run inside the binary at zero model cost and only surface deviations
   (nonzero exit or `ALERT` output), while review routines dispatch an agent on

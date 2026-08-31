@@ -859,12 +859,21 @@ mod tests {
     #[test]
     fn routines_schedule_and_alert_flow() {
         let store = crate::state::Store::open(":memory:").unwrap();
-        store.upsert_routine("claim-verify", "python3 check.py", 300, "claim rows match chain");
+        store.upsert_routine("claim-verify", "python3 check.py", 300, "claim rows match chain", "");
         // Never ran → due immediately; not due again right after a run.
         assert_eq!(
             store.due_routines(1000),
-            vec![("claim-verify".into(), "python3 check.py".into(), "".into(), "".into())]
+            vec![("claim-verify".into(), "python3 check.py".into(), "".into(), "".into(), "".into())]
         );
+        // Owner assignment: alerts route to the owner; listing says who owns
+        // them; clearing routes back to the CEO.
+        assert!(store.set_routine_owner("claim-verify", "cfo-1"));
+        assert!(!store.set_routine_owner("no-such-routine", "cfo-1"));
+        assert_eq!(store.due_routines(1000)[0].4, "cfo-1");
+        let listed = store.list_routines();
+        assert!(listed[0].4.contains("alerts owned by cfo-1"), "{}", listed[0].4);
+        assert!(store.set_routine_owner("claim-verify", ""));
+        assert!(store.list_routines()[0].4.contains("alerts wake the CEO"), "{}", store.list_routines()[0].4);
         store.mark_routine_run("claim-verify", 1000, "ok");
         assert!(store.due_routines(1100).is_empty(), "not due 100s after a 300s-interval run");
         assert_eq!(store.due_routines(1300).len(), 1, "due again once the interval elapses");

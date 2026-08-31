@@ -7,7 +7,7 @@ use std::collections::HashMap;
 pub const RESERVED: &[&str] = &[
     "read_file", "write_file", "list_files", "shell", "web_fetch", "web_search", "sql",
     "remember", "recall", "credits", "finish", "hire", "delegate", "fire", "list_team",
-    "update_prompt", "rollback_prompt", "save_playbook", "create_tool", "rollback_tool",
+    "update_prompt", "rollback_prompt", "save_playbook", "create_tool", "rollback_tool", "own_routine",
     "create_skill", "use_skill", "rollback_skill",
     // Conditional built-ins (present only when configured) are reserved too —
     // a custom tool shadowing x_post would route posts around the budget ledger.

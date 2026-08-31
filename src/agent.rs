@@ -42,12 +42,17 @@ fn ceo_schemas() -> Vec<Value> {
             "kind": {"type": "string", "enum": ["profit", "growth", "infra", "explore"], "description": "Portfolio category — every objective needs one, and the weekly portfolio review judges each by its own yardstick. profit: exists to earn (launches, fees, trading) — judged revenue vs cost. growth: buys audience (social presence, listings, content) — judged cost per attention and trend, NEVER on revenue. infra: keeps the company running (automation, bookkeeping, site plumbing) — judged reliability and cost trend. explore: buys knowledge (premise checks, probes) — judged learning per capped dollar."}}),
             json!(["action"])),
         tool("team_status", "List background tasks started with dispatch: who is still working and on what.", json!({}), json!([])),
-        tool("add_routine", "Schedule a shell command the binary runs itself, forever, at zero model cost. Silent when it passes; if it exits nonzero, times out, or prints ALERT, the output lands in your inbox as a routine alert. Any check you have performed the same way roughly three times belongs here — verification scripts, health checks, reconciliation. Same name = replace.", json!({
+        tool("add_routine", "Schedule a shell command the binary runs itself, forever, at zero model cost. Silent when it passes; if it exits nonzero, times out, or prints ALERT, the alert is DISPATCHED to the routine's owner (set one — an alert is the domain owner's work, not yours); with no owner it lands in your inbox. Any check you have performed the same way roughly three times belongs here — verification scripts, health checks, reconciliation. Same name = replace.", json!({
             "name": {"type": "string", "description": "Short unique name, e.g. 'claim-cycle-verify'"},
             "command": {"type": "string", "description": "Shell command, run from the workspace. Print ALERT plus details to flag a problem; print nothing special when healthy."},
             "interval_secs": {"type": "integer", "description": "Seconds between runs, minimum 60"},
+            "owner": {"type": "string", "description": "Existing employee who owns this domain — its alerts dispatch to them with the alert text, and their report routes back normally. Empty = alerts wake you instead."},
             "purpose": {"type": "string", "description": "One line on what deviation this catches"}}),
             json!(["name", "command", "interval_secs"])),
+        tool("own_routine", "Assign an existing routine's alerts to an owning employee (empty owner = back to your inbox). An alert is the domain owner's work: routed alerts dispatch the owner directly and never interrupt you.", json!({
+            "name": {"type": "string", "description": "The routine's name"},
+            "owner": {"type": "string", "description": "Existing employee to own its alerts, or empty to clear"}}),
+            json!(["name"])),
         tool("add_review_routine", "Schedule JUDGMENT on a cadence: an employee is dispatched with a stored task on an interval, and their report flows back through normal report routing (to the objective owner or you). Mechanical checks belong in add_routine; this is for checks that need a model's eyes — critique the live site like a first-time visitor, audit new workspace code adversarially, re-verify a premise. Same name = replace; remove with remove_routine.", json!({
             "name": {"type": "string", "description": "Short unique name, e.g. 'site-outsider-review'"},
             "agent": {"type": "string", "description": "Existing employee to dispatch"},
@@ -178,7 +183,7 @@ pub(crate) fn compact_threshold(ctx: Option<u32>, max_tokens: u32) -> usize {
 
 const CEO_TOOL_NAMES: &[&str] = &[
     "hire", "delegate", "delegate_parallel", "dispatch", "team_status", "rate_work", "fire", "list_team",
-    "add_routine", "add_review_routine", "remove_routine", "list_routines",
+    "add_routine", "add_review_routine", "remove_routine", "list_routines", "own_routine",
     "update_prompt", "rollback_prompt", "retire_skill", "save_playbook", "finish", "objectives",
     "finish_episode", "message_founder",
 ];
@@ -829,9 +834,34 @@ Drop superseded detail, resolved dead ends, and chatter.",
                 if crate::tools::shell::touches_gh(command) {
                     return "ERROR: gh is not available in routines (it would use the founder's personal GitHub login).".into();
                 }
+                let owner = s(a, "owner");
+                if !owner.is_empty() && self.ctx.store.load_agent(owner).is_none() {
+                    return format!("ERROR: no such employee '{owner}' to own this routine. hire them first, or omit owner.");
+                }
                 let interval = a["interval_secs"].as_i64().unwrap_or(0).max(60);
-                self.ctx.store.upsert_routine(name, command, interval, s(a, "purpose"));
-                format!("routine '{name}' scheduled every {interval}s — silent on pass, alerts you on failure or ALERT output")
+                self.ctx.store.upsert_routine(name, command, interval, s(a, "purpose"), owner);
+                if owner.is_empty() {
+                    format!("routine '{name}' scheduled every {interval}s — silent on pass; alerts wake YOU. Assign a domain owner with own_routine so alerts dispatch to them instead.")
+                } else {
+                    format!("routine '{name}' scheduled every {interval}s — silent on pass; alerts dispatch to {owner}")
+                }
+            }
+            "own_routine" => {
+                let (name, owner) = (s(a, "name"), s(a, "owner"));
+                if name.is_empty() {
+                    return "ERROR: name is required".into();
+                }
+                if !owner.is_empty() && self.ctx.store.load_agent(owner).is_none() {
+                    return format!("ERROR: no such employee '{owner}'. hire them first.");
+                }
+                if !self.ctx.store.set_routine_owner(name, owner) {
+                    return format!("ERROR: no routine named '{name}' — list_routines shows what exists.");
+                }
+                if owner.is_empty() {
+                    format!("routine '{name}' alerts now wake you again")
+                } else {
+                    format!("routine '{name}' alerts now dispatch to {owner}")
+                }
             }
             "add_review_routine" => {
                 let (name, agent, task) = (s(a, "name"), s(a, "agent"), s(a, "task"));

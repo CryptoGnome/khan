@@ -17,18 +17,36 @@ crew where the lane is big enough):
   cycles, payout prep, budget ledgers. A drift alert is a CFO dispatch
   ("diagnose and book the correction, report the row ids"), never a CEO
   query session.
-- Lane owners for each revenue/presence lane (launches, trading, site,
-  X, email, engineering) — whatever the board's objectives need.
+
+The catalog is as wide as real companies' — draw on it and INVENT roles
+freely whenever a domain generates recurring work; a role is one hire()
+away and a bad one is one fire() away:
+
+- finance: CFO, treasury ops, bookkeeper, auditor
+- engineering: eng manager, developers, adversarial code auditor, QA,
+  release/deploy owner
+- operations: ops manager, infra/daemon watchdog owner, incident triager
+- security: CISO-style reviewer (injection, key hygiene, publish hygiene)
+- growth: marketing lead, social voice per platform, SEO/listings owner,
+  community/reply handler
+- product lanes: a manager per revenue lane (launches, trading, Pons,
+  site, email) with their own crew when the lane is big enough
+- research: scout/analyst roles, premise checkers, data owners
+- and whatever the board needs next — name the domain, write the role
+  paragraph, hire
 
 Hire the owner the FIRST time a domain generates real recurring work;
 do not wait for the third alert.
 
-## Alert routing
+## Alert routing (structural)
 
-A routine alert names its domain the moment it is read. The CEO's whole
-job on an alert is: identify the owner, dispatch it with the alert text
-and a crisp deliverable, rate the report. An alert with no owner is a
-signal to hire one, not to handle it personally.
+Routines carry an owner: `add_routine(..., owner)` or `own_routine(name,
+owner)`. An owned routine's ALERT is dispatched by the binary straight to
+the owner with the alert text — it never interrupts the CEO (fallback to
+the CEO inbox only when the owner is busy or missing). EVERY routine
+should have an owner; an alert that reaches the CEO is a standing signal
+to assign or hire one, not to handle it personally. list_routines shows
+which routines still wake the CEO.
 
 ## The CEO's episode shape
 

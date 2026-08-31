@@ -273,6 +273,12 @@ impl Store {
         // social presence for earning nothing or lets "it's marketing" excuse
         // unlimited spend.
         let _ = conn.execute("ALTER TABLE objectives ADD COLUMN kind TEXT NOT NULL DEFAULT ''", []);
+        // Migration: routines can have an owning agent; a shell routine's
+        // ALERT then dispatches the owner to handle it instead of waking the
+        // CEO. Structural org design: the CEO was the sole inbox for every
+        // alert, so it self-triaged books drift by hand (2026-08-31) instead
+        // of a finance owner handling it in parallel.
+        let _ = conn.execute("ALTER TABLE routines ADD COLUMN owner TEXT NOT NULL DEFAULT ''", []);
         Ok(Store { conn: Mutex::new(conn), log_tx: broadcast::channel(512).0 })
     }
 
@@ -856,14 +862,23 @@ explore (buys knowledge).\n{}\n",
 
     // --- routines (scheduled checks the binary runs itself — zero model cost) ---
 
-    pub fn upsert_routine(&self, name: &str, command: &str, interval_secs: i64, purpose: &str) {
+    pub fn upsert_routine(&self, name: &str, command: &str, interval_secs: i64, purpose: &str, owner: &str) {
         let c = self.conn.lock().unwrap();
         let _ = c.execute(
-            "INSERT INTO routines(name, command, interval_secs, purpose, enabled, last_run)
-             VALUES(?1,?2,?3,?4,1,0)
-             ON CONFLICT(name) DO UPDATE SET command=?2, interval_secs=?3, purpose=?4, enabled=1",
-            params![name, command, interval_secs, purpose],
+            "INSERT INTO routines(name, command, interval_secs, purpose, enabled, last_run, owner)
+             VALUES(?1,?2,?3,?4,1,0,?5)
+             ON CONFLICT(name) DO UPDATE SET command=?2, interval_secs=?3, purpose=?4, enabled=1, owner=?5",
+            params![name, command, interval_secs, purpose, owner],
         );
+    }
+
+    /// Assign (or clear, with "") the owning agent of an existing routine.
+    /// Returns false when no such routine exists.
+    pub fn set_routine_owner(&self, name: &str, owner: &str) -> bool {
+        let c = self.conn.lock().unwrap();
+        c.execute("UPDATE routines SET owner=?2 WHERE name=?1", params![name, owner])
+            .map(|n| n > 0)
+            .unwrap_or(false)
     }
 
     pub fn delete_routine(&self, name: &str) -> bool {
@@ -877,7 +892,11 @@ explore (buys knowledge).\n{}\n",
         let mut stmt = match c.prepare(
             "SELECT name,
                     CASE WHEN COALESCE(agent,'') != '' THEN 'review by ' || agent || ': ' || substr(task,1,120) ELSE command END,
-                    interval_secs, COALESCE(purpose,''), COALESCE(last_status,'never ran')
+                    interval_secs, COALESCE(purpose,''),
+                    COALESCE(last_status,'never ran')
+                      || CASE WHEN COALESCE(agent,'') != '' THEN ''
+                              WHEN COALESCE(owner,'') != '' THEN ' — alerts owned by ' || owner
+                              ELSE ' — alerts wake the CEO (assign an owner with own_routine)' END
              FROM routines WHERE enabled=1 ORDER BY name",
         ) {
             Ok(s) => s,
@@ -904,16 +923,16 @@ explore (buys knowledge).\n{}\n",
     /// Routines whose interval has elapsed since their last run, as
     /// (name, command, agent, task) — command empty for review routines,
     /// agent empty for shell routines.
-    pub fn due_routines(&self, now_epoch: i64) -> Vec<(String, String, String, String)> {
+    pub fn due_routines(&self, now_epoch: i64) -> Vec<(String, String, String, String, String)> {
         let c = self.conn.lock().unwrap();
         let mut stmt = match c.prepare(
-            "SELECT name, command, COALESCE(agent,''), COALESCE(task,'') FROM routines
+            "SELECT name, command, COALESCE(agent,''), COALESCE(task,''), COALESCE(owner,'') FROM routines
              WHERE enabled=1 AND (last_run = 0 OR ?1 - last_run >= interval_secs) ORDER BY name",
         ) {
             Ok(s) => s,
             Err(_) => return vec![],
         };
-        stmt.query_map(params![now_epoch], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+        stmt.query_map(params![now_epoch], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))
             .map(|it| it.filter_map(|x| x.ok()).collect())
             .unwrap_or_default()
     }
