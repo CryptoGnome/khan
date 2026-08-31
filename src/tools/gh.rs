@@ -19,11 +19,12 @@ pub fn schemas(ctx: &ToolCtx) -> Vec<Value> {
         "parameters": {"type": "object", "properties": {
             "method": {"type": "string", "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"]},
             "path": {"type": "string", "description": "API path starting with /, e.g. /user/repos or /repos/{owner}/{repo}/contents/{path}"},
-            "body": {"type": "string", "description": "Optional JSON request body as a string"}},
+            "body": {"type": "string", "description": "Optional JSON request body as a string"},
+            "body_file": {"type": "string", "description": "Optional path to a file holding the JSON request body — use INSTEAD of body for anything large (file commits, blobs): inline tool arguments get truncated past a few KB and a truncated blob push silently commits junk"}},
             "required": ["method", "path"]}}})]
 }
 
-pub async fn api(ctx: &ToolCtx, method: &str, path: &str, body: &str) -> Result<String> {
+pub async fn api(ctx: &ToolCtx, method: &str, path: &str, body: &str, body_file: &str) -> Result<String> {
     let token = ctx.cfg.secret("GITHUB_TOKEN").context("GITHUB_TOKEN not configured")?;
     let path = path.trim();
     if !path.starts_with('/') {
@@ -48,7 +49,21 @@ pub async fn api(ctx: &ToolCtx, method: &str, path: &str, body: &str) -> Result<
         .bearer_auth(token)
         .header("User-Agent", "khan-company")
         .header("Accept", "application/vnd.github+json");
-    let body = body.trim();
+    // Large bodies (file commits, blobs) ride a file: the tool-argument
+    // channel truncates inline strings past a few KB, and a truncated blob
+    // push silently commits junk (live-hit: a 94KB README arrived as 13
+    // bytes, junk blob 8f354e33 — caught only because the worker verified
+    // the returned sha against its staged payload).
+    let body_file = body_file.trim();
+    let owned;
+    let body = if !body_file.is_empty() {
+        let p = std::path::Path::new(body_file);
+        let p = if p.is_absolute() { p.to_path_buf() } else { ctx.workspace.join(p) };
+        owned = std::fs::read_to_string(&p).with_context(|| format!("cannot read body_file {}", p.display()))?;
+        owned.trim()
+    } else {
+        body.trim()
+    };
     if !body.is_empty() {
         let parsed: Value = serde_json::from_str(body).context("body must be valid JSON")?;
         req = req.json(&parsed);
