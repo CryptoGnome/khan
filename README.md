@@ -97,6 +97,12 @@ viewer gives you a live window into what the company is doing from anywhere.
      load and never reach an agent shell, and the rotating refresh token is
      persisted in the database after first use (the env value is a one-time
      seed). Unset = the tool doesn't exist.
+   - `GITHUB_TOKEN` *(optional)* — a personal access token (public_repo
+     scope) for the company's own GitHub account. Set = every agent gets a
+     `gh_api` tool for the GitHub REST API (create repos, commit files, fork,
+     PRs, issues) with the token held in memory, never in an agent shell; the
+     tool refuses calls against the founder's own repos. Unset = the tool
+     doesn't exist.
    - `FETCH_PROXY` *(optional)* — a residential proxy URL
      (`http://user:pass@gateway:port`) for web fetching. Datacenter IPs are
      walled off from much of the web (search engines, CDNs, many sites);

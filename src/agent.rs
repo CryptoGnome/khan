@@ -552,6 +552,7 @@ Drop superseded detail, resolved dead ends, and chatter.",
             schemas.extend(tools::skills::schemas());
             schemas.extend(tools::credits::schemas(&self.ctx));
             schemas.extend(tools::x::schemas(&self.ctx));
+            schemas.extend(tools::gh::schemas(&self.ctx));
             let manages = self.ctx.store.is_manager(name);
             if manages {
                 schemas.extend(manager_schemas());
@@ -1589,6 +1590,7 @@ keep the board honest, then close with finish_episode(note)."
             schemas.extend(tools::skills::schemas());
             schemas.extend(tools::credits::schemas(&self.ctx));
             schemas.extend(tools::x::schemas(&self.ctx));
+            schemas.extend(tools::gh::schemas(&self.ctx));
             schemas.extend(ceo_schemas());
             // The founder line only exists as a tool when it is configured:
             // an unconfigured tool that always errors teaches the model to

@@ -164,6 +164,7 @@ impl Config {
         for k in [
             "TELEGRAM_BOT_TOKEN",
             "TELEGRAM_CHAT_ID",
+            "GITHUB_TOKEN",
             "X_CLIENT_ID",
             "X_CLIENT_SECRET",
             "X_REFRESH_TOKEN",

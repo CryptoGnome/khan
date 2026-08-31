@@ -22,7 +22,12 @@ Understand the boundaries before deploying:
   `/proc/<pid>/environ` as well as from every shell child agents spawn. Other
   secret-shaped environment variables are removed at the same time.
 - The GitHub CLI (`gh`) is blocked in the agent shell so agents can never use
-  a personal GitHub login; only local `git` is available.
+  a personal GitHub login; only local `git` is available. When the founder
+  provides a company GitHub token (`GITHUB_TOKEN`, public_repo scope), it is
+  captured into memory like the API keys and exposed only through the
+  in-binary `gh_api` tool — no git credential ever enters an agent shell, and
+  the tool refuses any call against the founder's own repos (the repo that
+  auto-deploys the live company stays out of the company's reach).
 - The web log viewer has **no write endpoints** — page viewers cannot send
   anything to the agents.
 - Web content fetched by agents is wrapped in explicit untrusted-content
