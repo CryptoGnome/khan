@@ -221,6 +221,11 @@ fn employee_finish_schema() -> Value {
         "report": {"type": "string"}}), json!(["report"]))
 }
 
+fn finish_episode_schema() -> Value {
+    tool("finish_episode", "Close this episode with the handoff note for your next self.", json!({
+        "note": {"type": "string"}}), json!(["note"]))
+}
+
 fn args_of(call: &crate::llm::ToolCall) -> Value {
     serde_json::from_str(&call.function.arguments).unwrap_or(json!({}))
 }
@@ -2102,6 +2107,37 @@ Keep the board honest: add new bets, declare blocked_by, mark done what is done.
                 );
             }
             } // 'turns
+
+            // The cut-offs used to end the episode without a word — the step cap
+            // and the quiescence break both just left 'turns, and 40% of
+            // episodes closed synthesized (165 of 409 on 2026-08-31). Same
+            // disease the employee loop had at its iteration cap, same cure:
+            // before synthesizing, demand the handoff directly — one extra
+            // call, finish_episode the only tool on the table.
+            if episode_note.is_none() && !self.stop.load(Ordering::Relaxed) {
+                history.push(Message::text(
+                    "user",
+                    "This episode is over — this is your final turn. Call finish_episode(note) NOW: \
+                     what changed, what is in flight and with whom, and what the next episode must \
+                     do or know. Do not start new work.",
+                ));
+                if let Ok((msg, u)) = self.chat_fb("CEO", &ceo_model, &history, &[finish_episode_schema()]).await {
+                    self.add_usage(u);
+                    history.push(msg.clone());
+                    for call in msg.tool_calls.unwrap_or_default() {
+                        if call.function.name == "finish_episode" {
+                            episode_note =
+                                Some(format!("[filed at the cut-off]\n{}", s(&args_of(&call), "note").chars().take(1500).collect::<String>()));
+                            history.push(Message::tool_result(&call.id, "episode closed"));
+                        }
+                    }
+                    if episode_note.is_none() {
+                        if let Some(c) = msg.content.as_deref().map(str::trim).filter(|c| !c.is_empty()) {
+                            episode_note = Some(format!("[filed at the cut-off]\n{}", c.chars().take(1500).collect::<String>()));
+                        }
+                    }
+                }
+            }
 
             // Close the episode: the note is the only part of this transcript
             // that survives. Synthesized from the tail when the model never
