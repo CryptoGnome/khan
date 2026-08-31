@@ -560,6 +560,12 @@ mod tests {
         assert!(review.contains("farcaster voice — ~0% of the company's attention"));
         // The unclassified lane is called out and told how to classify.
         assert!(review.contains("UNCLASSIFIED") && review.contains("unlabeled bet"));
+        // A money lane without a stated numeric premise is flagged — the review
+        // argues actuals-vs-premise, never streaks. Growth lanes are exempt.
+        assert!(review.contains("no PREMISE line"), "unpremised profit lane must be flagged: {review}");
+        assert!(!review.contains("farcaster voice —\n  ⚠"), "growth lanes are not premise-flagged");
+        assert!(store.update_objective(launches, None, None, Some("PREMISE: ~1 in 15 graduates; a graduation pays ~50x the per-trial cost; trial budget 30 under floor math"), None, None));
+        assert!(!store.portfolio_review_text("2000-01-01T00:00:00Z").contains("no PREMISE line"), "stated premise clears the flag");
         // A done objective leaves the review.
         assert!(store.update_objective(mystery, None, None, None, None, Some("done")));
         assert!(!store.portfolio_review_text("2000-01-01T00:00:00Z").contains("unlabeled bet"));

@@ -585,12 +585,12 @@ impl Store {
     pub fn portfolio_review_text(&self, since_ts: &str) -> String {
         let c = self.conn.lock().unwrap();
         let Ok(mut stmt) = c.prepare(
-            "SELECT id, title, kind, owner, note FROM objectives WHERE status='active' ORDER BY rank, id",
+            "SELECT id, title, kind, owner, note, plan FROM objectives WHERE status='active' ORDER BY rank, id",
         ) else {
             return String::new();
         };
-        let objs: Vec<(i64, String, String, String, String)> = stmt
-            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))
+        let objs: Vec<(i64, String, String, String, String, String)> = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)))
             .map(|it| it.filter_map(|x| x.ok()).collect())
             .unwrap_or_default();
         drop(stmt);
@@ -631,7 +631,7 @@ impl Store {
                 }
             }
         }
-        let line = |(id, title, _k, owner, note): &(i64, String, String, String, String)| {
+        let line = |(id, title, kind, owner, note, plan): &(i64, String, String, String, String, String)| {
             let share = if total_turns > 0 {
                 100 * turns_by_obj.get(id).copied().unwrap_or(0) / total_turns
             } else {
@@ -643,6 +643,16 @@ impl Store {
             }
             if !note.is_empty() {
                 l.push_str(&format!(" — {}", note.chars().take(100).collect::<String>()));
+            }
+            // A money lane without a stated numeric premise can never be
+            // falsified — every review then argues from vibes (a losing streak
+            // in a low-hit-rate lane is near information-free; only actuals vs
+            // a stated premise carry signal). The review nags until the plan
+            // states the bet.
+            if matches!(kind.as_str(), "profit" | "explore") && !plan.to_uppercase().contains("PREMISE") {
+                l.push_str(
+                    "\n  ⚠ no PREMISE line in its plan — state the numeric bet (expected return and cost; for lottery-shaped lanes the hit rate × payoff × trial-count budget) so this review can compare actuals against it instead of reacting to streaks.",
+                );
             }
             l
         };
