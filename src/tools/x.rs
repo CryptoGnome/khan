@@ -219,7 +219,13 @@ async fn app_token(ctx: &ToolCtx) -> Result<String> {
     let resp = ctx
         .http
         .post("https://api.x.com/2/oauth2/token")
-        .form(&[("grant_type", "client_credentials"), ("client_id", id), ("client_secret", secret)])
+        .form(&[
+            ("grant_type", "client_credentials"),
+            // the grant refuses to answer without naming the client kind
+            ("client_type", "third_party_app"),
+            ("client_id", id),
+            ("client_secret", secret),
+        ])
         .send()
         .await
         .context("app token request failed")?;
