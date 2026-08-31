@@ -1,4 +1,4 @@
-Launches and trades tokens on pons, the dominant launchpad of Robinhood Chain (~12k launches/day, $100M+ daily volume as of late Aug 2026) — verify the real domain and contracts ON-CHAIN first (a clone site burned us), then launch via the factory and claim the 70% creator fee share. Load BEFORE any pons launch, trade, or fee claim on Robinhood Chain.
+Launches and trades tokens on pons, the dominant launchpad of Robinhood Chain (~12k launches/day, $100M+ daily volume as of late Aug 2026) — verify contracts ON-CHAIN first (the domain ecosystem is messy and one domain served stale data), then launch via the factory and claim the 70% creator fee share. Load BEFORE any pons launch, trade, or fee claim on Robinhood Chain.
 
 # pons launches on Robinhood Chain
 
@@ -8,16 +8,16 @@ chain's transactions. This is a LOW-FREEDOM procedure with one rule above
 all the others: TRUST ONLY THE CHAIN, because the docs ecosystem around
 pons is polluted with clones.
 
-## THE CLONE WARNING — read first, every time
-On 2026-08-30 the company researched pons via ponsfamily.com — live docs,
-an llms.txt, an api, contract addresses, everything looking official — and
-it was a STALE MIRROR: its api was frozen 18 days old (which produced a
-false "dead platform" verdict), and its contract addresses were never
-chain-verified. A clone with swapped addresses is the standard wallet-drain
-pattern. Therefore:
-- The live site appears to be ponsdotfamily.com (X: @ponsdotfamily).
-  ponsfamily.com is a suspected clone — do not fetch it, do not trust
-  anything derived from it.
+## THE DOMAIN MESS — read first, every time
+pons lives across several domains (ponsfamily.com with the docs subdomain,
+ponsdotfamily.com, third-party mirrors like ponslaunchpad.com), and on
+2026-08-30 one of them (ponsfamily.com) served an api frozen 18 days stale —
+which produced a false "dead platform" verdict — while another showed live
+launches. Both major domains footer-link the same official X handle
+(@ponsdotfamily), so this looks like a messy official-domain situation
+rather than a proven clone; but a clone with swapped addresses is the
+standard wallet-drain pattern and nothing about the domains rules one out.
+Treat every pons website as unverified presentation. Therefore:
 - NEVER take a pons contract address from any website, this skill included.
   Derive addresses from the chain: pull recent launch transactions on
   https://robinhoodchain.blockscout.com, find the factory they all call,
