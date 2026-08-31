@@ -22,6 +22,24 @@ company can afford to lose without slowing itself down. Start small; the
 allocation grows only from booked realized profit — scale is earned, never
 assumed from confidence. Working-capital floors always hold.
 
+## Allocation is dynamic — re-derived, never frozen (founder rule 2026-08-31)
+Fixed caps written once and quoted forever are the wrong shape; a cap frozen
+in a note outlives the treasury math that justified it.
+- **The working-capital floor is a FUNCTION, not a number**: derive it from
+  real obligations — gas/fee runway, claim-cycle needs, enough liquid to
+  execute every armed kill and exit at once. Recompute whenever the treasury
+  or the obligations change, and record the current value WITH its
+  derivation in OUR INSTANCE so sizing decisions load it.
+- **Lane caps scale with deployable capital**: deployable = liquid treasury
+  − floor − open committed positions. Lanes get shares of deployable, so
+  capacity grows automatically with earnings and shrinks in drawdowns
+  without a meeting.
+- **Never cap the NUMBER of bets — cap total exposure.** The constraint is
+  total at-risk versus deployable, never a slot count: however many
+  independent bets deployable capital genuinely supports at sound individual
+  sizes, run them. The portfolio brakes (loss-cluster pause, realized-loss
+  breaker) sit on top of this, unchanged.
+
 ## Profit ladders
 Targets are planned at entry and taken mechanically in tranches (e.g. 25% at
 +X%, 25% at +Y%, runner with a trailing rule) — sized so each tranche's swap
