@@ -45,8 +45,16 @@ Verify the coin via `https://frontend-api-v3.pump.fun/coins/<mint>` (retry 3×, 
 ## Step 6 — graduation watch + exit
 Graduation = curve filled (~85 SOL raised); liquidity migrates to PumpSwap (not Raydium), LP burned. THE POST-GRADUATION DUMP IS STRUCTURAL AND FAST: ~4/5 graduates dead within 24h, median liquidity −57% in the first 30 min. A small dev stake (≤0.2% supply) has no reason to ride it: disclose via one ledger line first (through the idempotence check), then sell 100% via a Jupiter swap, verify on-chain, close the position, re-sync SOL.
 
+## Metadata socials (founder rule 2026-08-31)
+Owned launches ALWAYS carry the company X account in the `twitter` metadata
+field — a real account behind the token reads as a builder, not a rug, and
+the account exists to be found. When a launch deserves its own presence
+(judgment call, not mandatory), stand up a subdomain site for it and put
+that URL in `website` too. Metadata is immutable: decide the socials before
+the pin, not after. The exception is the separate-identity experiment below.
+
 ## Separate-identity experiment rules
-Novel name/ticker/art, zero flagship branding or near-misses anywhere (metadata omits website/socials). Dev buy under a small experiment cap; flagship position never touched; separate position rows. Probe ticker availability (pump.fun search / DexScreener, 0 existing pairs) before committing.
+Novel name/ticker/art, zero flagship branding or near-misses anywhere (metadata omits website/socials — the whole point is no link back). Dev buy under a small experiment cap; flagship position never touched; separate position rows. Probe ticker availability (pump.fun search / DexScreener, 0 existing pairs) before committing.
 
 ## Gotchas (all live-encountered)
 - max_sol_cost = solLamports × 1.01 — assert with tolerance.
