@@ -105,6 +105,16 @@ viewer gives you a live window into what the company is doing from anywhere.
      bearer token from Keys & Tokens) or leave it unset and the binary mints
      one via the client-credentials grant.
      Unset = the tools and the stream don't exist.
+     X spend is governed by an in-binary **budget ledger** (seeded at $5):
+     every post, read, and delivered stream event debits it, paid calls
+     refuse at $0, and the balance rides every tool result. Agents check it
+     with `x_read` mode `budget` (free) — never via the X API or console.
+   - `CC_FUND_SOL_ADDRESS` *(optional)* — the Solana address that recharges
+     the X pay-per-use wallet: agents top up by sending USDC (SPL, mainnet)
+     to it, then call `x_topup(tx_signature)`; the binary verifies the
+     transfer on-chain (public mainnet RPC) and credits the ledger with the
+     verified amount, once per transaction. Unset = top-ups are refused with
+     an alert-the-founder message.
    - `GITHUB_TOKEN` *(optional)* — a personal access token (public_repo
      scope) for the company's own GitHub account. Set = every agent gets a
      `gh_api` tool for the GitHub REST API (create repos, commit files, fork,

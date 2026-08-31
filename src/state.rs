@@ -208,6 +208,12 @@ impl Store {
                 name TEXT PRIMARY KEY, command TEXT NOT NULL, interval_secs INTEGER NOT NULL,
                 purpose TEXT, enabled INTEGER NOT NULL DEFAULT 1,
                 last_run INTEGER NOT NULL DEFAULT 0, last_status TEXT);
+             CREATE TABLE IF NOT EXISTS x_ledger (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL,
+                kind TEXT NOT NULL, amount_usd REAL NOT NULL, detail TEXT NOT NULL);
+             INSERT INTO x_ledger(ts, kind, amount_usd, detail)
+                SELECT datetime('now'), 'topup', 5.0, 'founder seed'
+                WHERE NOT EXISTS (SELECT 1 FROM x_ledger);
              CREATE TABLE IF NOT EXISTS routine_alerts (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL,
                 name TEXT NOT NULL, detail TEXT NOT NULL, delivered INTEGER NOT NULL DEFAULT 0);
@@ -658,6 +664,11 @@ explore (buys knowledge).\n{}\n",
         out
     }
 
+    pub fn kv_del(&self, k: &str) {
+        let c = self.conn.lock().unwrap();
+        let _ = c.execute("DELETE FROM kv WHERE k=?1", params![k]);
+    }
+
     pub fn kv_set(&self, k: &str, v: &str) {
         let c = self.conn.lock().unwrap();
         let _ = c.execute("INSERT INTO kv(k,v) VALUES(?1,?2) ON CONFLICT(k) DO UPDATE SET v=?2", params![k, v]);
@@ -921,6 +932,88 @@ explore (buys knowledge).\n{}\n",
             "INSERT INTO routine_alerts(ts, name, detail) VALUES(?1,?2,?3)",
             params![chrono::Utc::now().to_rfc3339(), name, redact(detail)],
         );
+    }
+
+    /// The X budget ledger: the ONLY balance the company ever sees (there is no
+    /// balance endpoint on the pay-per-use plan, and agents must never guess
+    /// from the X console). Seeded with the founder's $5; every API call
+    /// debits, on-chain-verified USDC top-ups credit.
+    pub fn x_balance(&self) -> f64 {
+        let c = self.conn.lock().unwrap();
+        c.query_row(
+            "SELECT COALESCE(SUM(CASE WHEN kind='topup' THEN amount_usd ELSE -amount_usd END), 0) FROM x_ledger",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(0.0)
+    }
+
+    /// Record a spend and return the new balance. The first debit that takes
+    /// the balance under $1 raises one routine alert (kv-flagged so a low
+    /// balance nags once, not on every call; a top-up re-arms it).
+    pub fn x_debit(&self, amount_usd: f64, detail: &str) -> f64 {
+        {
+            let c = self.conn.lock().unwrap();
+            let _ = c.execute(
+                "INSERT INTO x_ledger(ts, kind, amount_usd, detail) VALUES(datetime('now'),'spend',?1,?2)",
+                params![amount_usd, detail],
+            );
+        }
+        let bal = self.x_balance();
+        if bal < 1.0 && self.kv_get("x_low_alerted").is_none() {
+            self.kv_set("x_low_alerted", "1");
+            self.add_routine_alert(
+                "x-budget",
+                &format!("X budget is down to ${bal:.3}. Paid X calls refuse at $0 — top up BEFORE it runs out: send USDC on Solana to the fund address (x_read mode budget shows it), then record the tx with x_topup."),
+            );
+        }
+        bal
+    }
+
+    /// Credit a verified top-up and return the new balance. Re-arms the
+    /// low-balance alert.
+    pub fn x_topup_credit(&self, amount_usd: f64, detail: &str) -> f64 {
+        {
+            let c = self.conn.lock().unwrap();
+            let _ = c.execute(
+                "INSERT INTO x_ledger(ts, kind, amount_usd, detail) VALUES(datetime('now'),'topup',?1,?2)",
+                params![amount_usd, detail],
+            );
+        }
+        self.kv_del("x_low_alerted");
+        self.x_balance()
+    }
+
+    /// True if a ledger row already references this detail substring — the
+    /// dedup that stops one Solana tx from being credited twice.
+    pub fn x_ledger_has(&self, needle: &str) -> bool {
+        let c = self.conn.lock().unwrap();
+        c.query_row(
+            "SELECT COUNT(*) FROM x_ledger WHERE detail LIKE '%' || ?1 || '%'",
+            params![needle],
+            |r| r.get::<_, i64>(0),
+        )
+        .map(|n| n > 0)
+        .unwrap_or(false)
+    }
+
+    /// Newest ledger rows, one line each, for the budget view.
+    pub fn x_ledger_tail(&self, n: i64) -> Vec<String> {
+        let c = self.conn.lock().unwrap();
+        let mut stmt = match c.prepare(
+            "SELECT ts, kind, amount_usd, detail FROM x_ledger ORDER BY id DESC LIMIT ?1",
+        ) {
+            Ok(s) => s,
+            Err(_) => return vec![],
+        };
+        stmt.query_map(params![n], |r| {
+            let (ts, kind, amt, detail): (String, String, f64, String) =
+                (r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?);
+            let sign = if kind == "topup" { "+" } else { "-" };
+            Ok(format!("[{ts}] {sign}${amt:.3} {detail}"))
+        })
+        .map(|it| it.filter_map(|x| x.ok()).collect())
+        .unwrap_or_default()
     }
 
     /// Undelivered routine alerts, oldest first, as (name, detail); marks them delivered.

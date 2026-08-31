@@ -31,6 +31,11 @@ Understand the boundaries before deploying:
   in-binary `gh_api` tool — no git credential ever enters an agent shell, and
   the tool refuses any call against the founder's own repos (the repo that
   auto-deploys the live company stays out of the company's reach).
+- X spend runs on an in-binary prepaid ledger. Top-ups are credited only
+  after the binary verifies the claimed USDC transfer on Solana mainnet RPC
+  (destination, mint, and amount from the chain — never the agent's word),
+  one credit per transaction signature. The RPC read is direct and outbound
+  (never through the fetch proxy) and writes nothing on-chain.
 - X mention events arrive over an **outbound** Activity API stream held open
   by the binary — no webhook endpoint is exposed, so X integration adds no
   inbound attack surface. Tweet text delivered by the stream reaches the CEO

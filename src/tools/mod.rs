@@ -205,6 +205,7 @@ pub async fn execute(ctx: &ToolCtx, agent: &str, name: &str, args: &Value) -> St
         "credits" => credits::run(ctx).await,
         "x_post" => x::post(ctx, s(args, "text"), s(args, "reply_to")).await,
         "x_read" => x::read(ctx, s(args, "mode"), s(args, "query")).await,
+        "x_topup" => x::topup(ctx, s(args, "tx_signature")).await,
         "gh_api" => gh::api(ctx, s(args, "method"), s(args, "path"), s(args, "body"), s(args, "body_file")).await,
         "create_tool" => custom::create(ctx, args),
         "create_skill" => skills::create(ctx, args),

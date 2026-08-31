@@ -9,6 +9,9 @@ pub const RESERVED: &[&str] = &[
     "remember", "recall", "credits", "finish", "hire", "delegate", "fire", "list_team",
     "update_prompt", "rollback_prompt", "save_playbook", "create_tool", "rollback_tool",
     "create_skill", "use_skill", "rollback_skill",
+    // Conditional built-ins (present only when configured) are reserved too —
+    // a custom tool shadowing x_post would route posts around the budget ledger.
+    "x_post", "x_read", "x_topup", "gh_api", "generate_image",
 ];
 
 /// Schemas for the tool-registry management tools (available to every agent).

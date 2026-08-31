@@ -336,6 +336,92 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
+    #[test]
+    fn x_ledger_tracks_budget_and_alerts_once_when_low() {
+        let store = crate::state::Store::open(":memory:").unwrap();
+        // Seeded with the founder's $5 exactly once.
+        assert!((store.x_balance() - 5.0).abs() < 1e-9);
+        // Spends debit; the first dip under $1 raises ONE alert, not one per call.
+        store.x_debit(0.015, "x_post 111");
+        assert!((store.x_balance() - 4.985).abs() < 1e-9);
+        store.x_debit(4.0, "x_post burst");
+        store.x_debit(0.005, "activity event");
+        let alerts = store.drain_routine_alerts();
+        assert_eq!(alerts.iter().filter(|(n, _)| n == "x-budget").count(), 1, "low-balance alert fires once");
+        assert!(alerts.iter().any(|(_, d)| d.contains("x_topup")), "alert carries the top-up path");
+        // A verified top-up credits, dedups by tx signature, and re-arms the alert.
+        store.x_topup_credit(3.0, "USDC top-up, tx 5sig9");
+        assert!((store.x_balance() - 3.98).abs() < 1e-6);
+        assert!(store.x_ledger_has("5sig9"));
+        assert!(!store.x_ledger_has("othersig"));
+        store.x_debit(3.5, "x_post big day");
+        assert_eq!(store.drain_routine_alerts().iter().filter(|(n, _)| n == "x-budget").count(), 1, "top-up re-arms the alert");
+        let tail = store.x_ledger_tail(3);
+        assert_eq!(tail.len(), 3);
+        assert!(tail[0].contains("-$3.500"), "newest first with signed amounts: {}", tail[0]);
+    }
+
+    #[test]
+    fn x_post_cost_applies_the_url_surcharge() {
+        use crate::tools::x::post_cost;
+        assert_eq!(post_cost("shipped a new build today"), 0.015);
+        for t in ["see https://khanbot.fun/log", "http://a.b", "at www.example.com now"] {
+            assert_eq!(post_cost(t), 0.200, "{t} should bill the URL rate");
+        }
+    }
+
+    #[test]
+    fn usdc_delta_reads_only_our_address_and_mint() {
+        use crate::tools::x::usdc_delta;
+        let mint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+        let tx = serde_json::json!({"result": {"meta": {
+            "err": null,
+            "preTokenBalances": [
+                {"mint": mint, "owner": "FundAddr", "uiTokenAmount": {"uiAmount": 10.0}},
+                {"mint": mint, "owner": "SenderAddr", "uiTokenAmount": {"uiAmount": 50.0}}
+            ],
+            "postTokenBalances": [
+                {"mint": mint, "owner": "FundAddr", "uiTokenAmount": {"uiAmount": 15.0}},
+                {"mint": mint, "owner": "SenderAddr", "uiTokenAmount": {"uiAmount": 45.0}},
+                {"mint": "SomeOtherMint", "owner": "FundAddr", "uiTokenAmount": {"uiAmount": 999.0}}
+            ]
+        }}});
+        assert!((usdc_delta(&tx, "FundAddr") - 5.0).abs() < 1e-9, "credits the USDC that arrived");
+        assert!(usdc_delta(&tx, "SenderAddr") < 0.0, "the sender's delta is negative, never creditable");
+        // A fund account that did not exist before the transfer has no pre row.
+        let fresh = serde_json::json!({"result": {"meta": {
+            "preTokenBalances": [],
+            "postTokenBalances": [{"mint": mint, "owner": "FundAddr", "uiTokenAmount": {"uiAmount": 2.5}}]
+        }}});
+        assert!((usdc_delta(&fresh, "FundAddr") - 2.5).abs() < 1e-9);
+    }
+
+    #[tokio::test]
+    async fn solana_rpc_request_shape_probe() {
+        // Probes the getTransaction wire shape against the public mainnet RPC
+        // (no key needed). A signature that cannot exist must come back as a
+        // JSON-RPC result of null — proving the request shape is accepted.
+        // Self-skips when offline so the suite stays runnable anywhere.
+        let body = serde_json::json!({
+            "jsonrpc": "2.0", "id": 1, "method": "getTransaction",
+            "params": ["1".repeat(64), {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 0}]
+        });
+        let resp = match reqwest::Client::new()
+            .post("https://api.mainnet-beta.solana.com")
+            .json(&body)
+            .send()
+            .await
+        {
+            Ok(r) => r,
+            Err(_) => {
+                eprintln!("solana_rpc_request_shape_probe: skipped (offline)");
+                return;
+            }
+        };
+        let v: serde_json::Value = serde_json::from_str(&resp.text().await.unwrap_or_default()).expect("rpc response not json");
+        assert!(v["result"].is_null() && v["error"].is_null(), "rpc rejected the request shape: {v}");
+    }
+
     #[tokio::test]
     async fn live_request_shape_probe() {
         // "Probe provider-facing request shapes live before shipping", made
