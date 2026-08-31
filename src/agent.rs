@@ -500,7 +500,17 @@ Drop superseded detail, resolved dead ends, and chatter.",
                 .replace("{name}", name)
                 .replace("{role}", &role),
         );
-        let mut history: Vec<Message> = serde_json::from_str(&hist_json).unwrap_or_default();
+        // Refuse-don't-drop: a corrupt saved history used to be silently swapped
+        // for a fresh one — the employee lost every prior turn with nothing in
+        // the log. Starting fresh is still the only way forward, but it happens
+        // loudly where reflection reads.
+        let mut history: Vec<Message> = match serde_json::from_str(&hist_json) {
+            Ok(h) => h,
+            Err(e) => {
+                self.log_line(name, "history-error", &format!("saved history failed to parse ({e}); starting fresh"));
+                Vec::new()
+            }
+        };
         if history.is_empty() {
             history.push(Message::text("system", sys));
         } else {

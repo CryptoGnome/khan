@@ -312,11 +312,19 @@ mod tests {
         assert_eq!(truncate_spill(&dir, "shell", "small".into()), "small");
         assert!(!dir.join(".spill").exists());
         // Oversized output is cut but the full text survives in .spill/ and the
-        // marker names the file so an agent can read_file the rest.
-        let big = "x".repeat(MAX_RESULT + 500);
+        // marker names the file so an agent can read_file the rest. The TAIL is
+        // what stays visible — errors land at the end of output.
+        let big = format!("HEAD-{}-TAIL", "x".repeat(MAX_RESULT + 500));
         let out = truncate_spill(&dir, "shell", big.clone());
         assert!(out.len() < big.len());
-        assert!(out.contains("full output saved to .spill/"), "marker should name the spill file: {}", &out[out.len() - 120..]);
+        assert!(out.starts_with("[truncated"), "marker leads the kept slice: {}", &out[..80]);
+        assert!(out.contains("full output saved to .spill/"), "marker should name the spill file: {}", &out[..160]);
+        assert!(out.ends_with("-TAIL") && !out.contains("HEAD-"), "the end of shell output must stay visible");
+        // Document-like tools keep the HEAD: an oversized web page must not
+        // lose its leading BEGIN-UNTRUSTED marker to a tail cut.
+        let page = format!("[BEGIN UNTRUSTED WEB CONTENT]{}", "y".repeat(MAX_RESULT + 500));
+        let out = truncate_spill(&dir, "web_fetch", page);
+        assert!(out.starts_with("[BEGIN UNTRUSTED WEB CONTENT]"), "untrusted marker must survive truncation");
         let spilled = std::fs::read_dir(dir.join(".spill")).unwrap().next().unwrap().unwrap();
         assert_eq!(std::fs::read_to_string(spilled.path()).unwrap(), big);
         // The directory cleans itself: a generous max_age keeps the file, a
@@ -326,6 +334,35 @@ mod tests {
         crate::tools::purge_spill(&dir.join(".spill"), std::time::Duration::ZERO);
         assert!(std::fs::read_dir(dir.join(".spill")).unwrap().next().is_none(), "aged-out spill must be removed");
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn live_request_shape_probe() {
+        // "Probe provider-facing request shapes live before shipping", made
+        // runnable: sends one real 16-token streamed request through
+        // build_request and asserts the gateway accepts the wire shape.
+        // Self-skips without a key so CI and keyless checkouts stay green.
+        let Ok(key) = std::env::var("OPENROUTER_API_KEY") else {
+            eprintln!("live_request_shape_probe: skipped (no OPENROUTER_API_KEY)");
+            return;
+        };
+        let body = Client::build_request(
+            "openai/gpt-4o-mini",
+            &[Message::text("user", "Reply with the word ok.")],
+            &crate::tools::work_schemas(),
+            16,
+        );
+        let resp = reqwest::Client::new()
+            .post("https://openrouter.ai/api/v1/chat/completions")
+            .bearer_auth(key)
+            .json(&body)
+            .send()
+            .await
+            .expect("probe request failed to send");
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        assert!(status.is_success(), "provider rejected the request shape: {status} — {}", text.chars().take(300).collect::<String>());
+        assert!(text.contains("data:"), "expected an SSE stream back, got: {}", text.chars().take(200).collect::<String>());
     }
 
     #[tokio::test]

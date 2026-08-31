@@ -137,16 +137,35 @@ pub fn truncate_spill(workspace: &std::path::Path, tool: &str, s: String) -> Str
     let saved = std::fs::create_dir_all(workspace.join(".spill"))
         .and_then(|()| std::fs::write(workspace.join(".spill").join(&file), &s))
         .is_ok();
-    let mut cut = MAX_RESULT;
-    while !s.is_char_boundary(cut) {
-        cut -= 1;
-    }
-    let marker = if saved {
-        format!("\n...[truncated — full output saved to .spill/{file}; read_file it if you need the rest]")
+    // Which slice stays visible depends on the tool. Shell-like output (shell,
+    // sql, custom tool scripts) buries its error under the preamble, so the
+    // TAIL is what matters. Document-like tools lead with what matters — and
+    // web content leads with the BEGIN-UNTRUSTED marker, which must never be
+    // cut away from an oversized page.
+    let keep_tail = !matches!(tool, "web_fetch" | "web_search" | "read_file" | "list_files" | "x_read" | "gh_api" | "recall");
+    if keep_tail {
+        let mut start = s.len() - MAX_RESULT;
+        while !s.is_char_boundary(start) {
+            start += 1;
+        }
+        let marker = if saved {
+            format!("[truncated — showing the end; full output saved to .spill/{file}, read_file it if you need the start]\n...")
+        } else {
+            "[truncated — showing the end]\n...".to_string()
+        };
+        format!("{marker}{}", &s[start..])
     } else {
-        "\n...[truncated]".to_string()
-    };
-    format!("{}{marker}", &s[..cut])
+        let mut cut = MAX_RESULT;
+        while !s.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        let marker = if saved {
+            format!("\n...[truncated — full output saved to .spill/{file}; read_file it if you need the rest]")
+        } else {
+            "\n...[truncated]".to_string()
+        };
+        format!("{}{marker}", &s[..cut])
+    }
 }
 
 /// Execute a work tool. Never returns Err — errors become the tool result string.

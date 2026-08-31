@@ -249,8 +249,10 @@ token count is printed. **There is no spend cap — watch it.**
   OpenRouter image models, ~$0.01 each, the key never enters an agent shell),
   and `remember`/`recall` memory. Oversized tool output isn't dropped: the
   full text is saved to `workspace/.spill/` and the truncation marker names
-  the file, so an agent reads the rest back instead of re-running the command
-  (spill files self-purge after a week, swept on each new spill).
+  the file, so an agent reads the rest back instead of re-running the command.
+  Shell-style output keeps its tail visible (errors land at the end); web and
+  file content keeps its head (the untrusted-content marker leads). Spill
+  files self-purge after a week, swept on each new spill.
 - **Memory** — SQLite FTS5. Relevant memories are auto-injected into context;
   recall also scans skill bodies and surfaces matching excerpts, so a fact
   recorded in a skill contradicts a false claim wherever that claim travels;
