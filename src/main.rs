@@ -452,6 +452,12 @@ mod tests {
             "trading_discipline",
             "token_vetting",
             "meme_culture",
+            "no_baked_page_data",
+            "page_refresh_verification",
+            "vault_is_not_an_account",
+            "safe_apply_to_live_tool",
+            "build_in_public",
+            "research_sources",
         ] {
             assert!(names.contains(&n.to_string()), "missing seed '{n}' in {names:?}");
         }
