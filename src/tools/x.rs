@@ -208,7 +208,15 @@ pub async fn activity_stream(ctx: ToolCtx) {
 async fn run_stream_once(ctx: &ToolCtx, http: &reqwest::Client) -> Result<()> {
     let token = access_token(ctx).await?;
     let user_id = own_user_id(ctx, &token).await?;
-    ensure_subscription(ctx, http, &token, &user_id).await?;
+    // Advisory, not a gate: the subscriptions endpoint 403s OAuth 2.0 user
+    // tokens (known X-side gap, 2026-08) even when the console manages the
+    // subscription fine — a failed check must never keep the stream closed.
+    if let Err(e) = ensure_subscription(ctx, http, &token, &user_id).await {
+        ctx.store.log("x-activity", "stream", &format!(
+            "subscription check failed ({}) — connecting stream anyway; manage the subscription in the developer console",
+            e.to_string().chars().take(200).collect::<String>()
+        ));
+    }
     let resp = http
         .get("https://api.x.com/2/activity/stream")
         .bearer_auth(&token)
