@@ -6,7 +6,7 @@ pub mod skills;
 pub(crate) mod fs;
 mod image;
 pub mod shell;
-mod sql;
+pub mod sql;
 mod web;
 
 use crate::config::Config;

@@ -861,6 +861,33 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    #[test]
+    fn sql_error_for_bad_name_carries_the_real_schema() {
+        // Agents guessed column names (mint/symbol against positions' actual
+        // asset/note) and burned a model iteration per guess — the error now
+        // teaches the schema in the same reply.
+        let cfg: crate::config::Config = toml::from_str(
+            "ceo_model = \"p/m\"\n[[providers]]\nname = \"p\"\nbase_url = \"http://x\"\napi_key_env = \"X\"\npaid_models = [\"m\"]\n",
+        )
+        .unwrap();
+        let root = std::env::temp_dir().join("khan-sql-hint-test");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let ctx = crate::tools::ToolCtx {
+            cfg,
+            store: std::sync::Arc::new(crate::state::Store::open(":memory:").unwrap()),
+            workspace: root.clone(),
+            http: reqwest::Client::new(),
+            http_proxy: None,
+        };
+        crate::tools::sql::run(&ctx, "CREATE TABLE positions(id INTEGER, asset TEXT, note TEXT)").unwrap();
+        let err = crate::tools::sql::run(&ctx, "SELECT mint FROM positions").unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("no such column"), "original error kept: {msg}");
+        assert!(msg.contains("positions(id, asset, note)"), "schema hint attached: {msg}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     /// A truncated answer must be recognisable as such, because the three callers
     /// each treat it differently from an ordinary failure: no model fallback, no
     /// dead employee, no silent CEO retry.
