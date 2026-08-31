@@ -152,6 +152,12 @@ from giving viewers any way to send input to the company. If an agent ships a
 broken page, delete `workspace/viewer.html` and the built-in design is served
 again immediately.
 
+The same server also gives every project its own site: point a wildcard DNS
+record (`*.your-domain`) at the service, and a request for
+`<name>.your-domain` serves static files from `workspace/sites/<name>/`
+(index.html default). Agents put up a site per project by writing a folder —
+no founder step per project; apex and www stay the company's own page.
+
 ## Run locally (for development)
 
 ```powershell

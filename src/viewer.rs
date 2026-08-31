@@ -19,6 +19,7 @@ pub async fn serve(store: Arc<Store>, port: u16, workspace: PathBuf) {
     if !page_path.exists() {
         let _ = std::fs::write(&page_path, PAGE);
     }
+    let sites_dir = workspace.join("sites");
     let listener = match TcpListener::bind(("0.0.0.0", port)).await {
         Ok(l) => l,
         Err(e) => {
@@ -31,14 +32,91 @@ pub async fn serve(store: Arc<Store>, port: u16, workspace: PathBuf) {
         if let Ok((sock, _)) = listener.accept().await {
             let store = store.clone();
             let page_path = page_path.clone();
+            let sites_dir = sites_dir.clone();
             tokio::spawn(async move {
-                let _ = handle(sock, store, page_path).await;
+                let _ = handle(sock, store, page_path, sites_dir).await;
             });
         }
     }
 }
 
-async fn handle(mut sock: TcpStream, store: Arc<Store>, page_path: PathBuf) -> std::io::Result<()> {
+/// Serve a static file from a per-project site directory, or None when the
+/// request isn't for a subdomain site. A wildcard DNS record points every
+/// `<name>.<apex>` at this server, and a site exists the moment an agent
+/// writes `workspace/sites/<name>/index.html` — no founder step per project.
+async fn try_site(
+    sock: &mut TcpStream,
+    sites_dir: &std::path::Path,
+    host: &str,
+    path: &str,
+    hsts: &str,
+) -> Option<std::io::Result<()>> {
+    // Only hosts with a subdomain label beyond the apex (name.domain.tld),
+    // and never www — the apex and www stay the company's own page.
+    let host = host.split(':').next().unwrap_or("");
+    let labels: Vec<&str> = host.split('.').collect();
+    if labels.len() < 3 || labels[0] == "www" {
+        return None;
+    }
+    let name = labels[0];
+    if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+        return None;
+    }
+    let dir = sites_dir.join(name);
+    if !dir.is_dir() {
+        return None;
+    }
+    // Path sanitation: strip query, reject traversal, default to index.html.
+    let path = path.split('?').next().unwrap_or("/");
+    if path.contains("..") {
+        return None;
+    }
+    let rel = path.trim_start_matches('/');
+    let mut file = dir.join(if rel.is_empty() { "index.html" } else { rel });
+    if file.is_dir() {
+        file = file.join("index.html");
+    }
+    let body = match std::fs::read(&file) {
+        Ok(b) => b,
+        Err(_) => {
+            return Some(
+                sock.write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                    .await,
+            )
+        }
+    };
+    let mime = match file.extension().and_then(|e| e.to_str()).unwrap_or("") {
+        "html" | "htm" => "text/html; charset=utf-8",
+        "css" => "text/css",
+        "js" => "application/javascript",
+        "json" => "application/json",
+        "svg" => "image/svg+xml",
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "ico" => "image/x-icon",
+        "txt" | "md" => "text/plain; charset=utf-8",
+        "woff2" => "font/woff2",
+        _ => "application/octet-stream",
+    };
+    let head = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: {mime}\r\nContent-Length: {}\r\n{hsts}Connection: close\r\n\r\n",
+        body.len()
+    );
+    Some(async {
+        sock.write_all(head.as_bytes()).await?;
+        sock.write_all(&body).await
+    }
+    .await)
+}
+
+async fn handle(
+    mut sock: TcpStream,
+    store: Arc<Store>,
+    page_path: PathBuf,
+    sites_dir: PathBuf,
+) -> std::io::Result<()> {
     let mut req = Vec::new();
     let mut buf = [0u8; 2048];
     while !req.windows(4).any(|w| w == b"\r\n\r\n") && req.len() < 8192 {
@@ -64,6 +142,15 @@ async fn handle(mut sock: TcpStream, store: Arc<Store>, page_path: PathBuf) -> s
     // One year, no includeSubDomains: apex and www each get their own header when
     // visited, and nothing here should speak for subdomains that may not have TLS.
     let hsts = if secure { "Strict-Transport-Security: max-age=31536000\r\n" } else { "" };
+
+    // Subdomain project sites first: <name>.<apex> serves workspace/sites/<name>/.
+    let host = head
+        .lines()
+        .find_map(|l| l.to_ascii_lowercase().strip_prefix("host:").map(|h| h.trim().to_string()))
+        .unwrap_or_default();
+    if let Some(res) = try_site(&mut sock, &sites_dir, &host, path, hsts).await {
+        return res;
+    }
 
     if path.starts_with("/logs") {
         // Subscribe before replaying history so no event can fall in the gap;
