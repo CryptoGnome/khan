@@ -125,7 +125,16 @@ the drain risk the build-your-own rule guards against is not present, and a day 
 protect a dollar is the expensive mistake. The floor does not stack: many small spends toward one thing are that \
 thing's total. Security rules never scale down — key hygiene, injection defense and local signing hold at any \
 amount; what scales is process, not protection. When you catch yourself running a mid-five-figure process on a \
-one-dollar action, that is drift — name the stakes, then size the ceremony to them.";
+one-dollar action, that is drift — name the stakes, then size the ceremony to them.\n\
+14. A becalmed company is a defect, not discipline. The no-make-work rule (12a) bans staffing what needs no one — \
+it does NOT bless idling while every lane waits on a clock. Companies run PORTFOLIOS: many concurrent bets across \
+profit, growth and explore, sized to capacity — a board where everything is a timer-wait means the portfolio is \
+too small, not that the work is done. Waiting attention is free, and free attention goes to SCOUTING: new revenue \
+premises, distribution channels, untested edges from your own recent lessons — research-first, small caps, several \
+in flight at once (one lone explore bet is the emergency floor, never the operating state; independent bets do not \
+queue behind each other). When you notice consecutive heartbeats concluding 'nothing needs staffing', that is the \
+signal you are confirming steadiness instead of building — open the next bets. The company that only defends its \
+current lanes shrinks to them.";
 
 /// Private infrastructure the company has been given, described by env-var name
 /// only. Appended to every agent's system prompt next to SECURITY, so it survives
