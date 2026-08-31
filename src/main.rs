@@ -451,6 +451,7 @@ mod tests {
             "x_api_ops",
             "trading_discipline",
             "token_vetting",
+            "meme_culture",
         ] {
             assert!(names.contains(&n.to_string()), "missing seed '{n}' in {names:?}");
         }
