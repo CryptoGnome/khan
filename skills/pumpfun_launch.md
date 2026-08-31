@@ -42,8 +42,35 @@ Book the launch: machine-readable launch record file, mint allowlist entry, pnl 
 
 Verify the coin via `https://frontend-api-v3.pump.fun/coins/<mint>` (retry 3×, 3s backoff — fresh coins 404 briefly), then OPEN the coin page and confirm name + image actually render — the API returning a name is not enough.
 
-## Step 6 — graduation watch + exit
-Graduation = curve filled (~85 SOL raised); liquidity migrates to PumpSwap (not Raydium), LP burned. THE POST-GRADUATION DUMP IS STRUCTURAL AND FAST: ~4/5 graduates dead within 24h, median liquidity −57% in the first 30 min. A small dev stake (≤0.2% supply) has no reason to ride it: disclose via one ledger line first (through the idempotence check), then sell 100% via a Jupiter swap, verify on-chain, close the position, re-sync SOL.
+## Dev-buy sizing (founder rule 2026-08-31)
+The dev buy rides inside the create tx — the one purchase no sniper can
+front-run, buying the cheapest supply the curve will ever offer. Size it to
+capture that edge WITHOUT tripping the optics every screener checks:
+- Target a real stake, capped as a PERCENT OF SUPPLY (~2-3% max) — the dev
+  wallet's holding % is the first thing vetting bots flag, and a fat dev bag
+  reads as "the dev IS the rug". Our own token_vetting gates would reject a
+  concentrated launch; other people's bots apply the same test to us.
+- Scale to treasury: launches are a portfolio slot, not a conviction bet —
+  working-capital floors and the per-launch cap always win.
+
+## Step 6 — graduation watch + the hold-or-kill rule (founder rule 2026-08-31)
+Graduation = curve filled (~85 SOL raised); liquidity migrates to PumpSwap
+(not Raydium), LP burned. The exit doctrine is binary:
+- **Working launch → NEVER sell the dev stake.** The income is CREATOR FEES,
+  which pay on every trade forever without touching the bag. Holding is also
+  the signal: a dev that never dumps is the rarest and most valuable optic
+  on the launchpad, and it compounds across every future launch under the
+  same identity. Sat-through drawdowns on a living token are the cost of
+  that reputation, not a reason to exit.
+- **Failed launch → kill and wind down.** When the pre-written kill criteria
+  fire (volume/holder floors, dead narrative), disclose via one ledger line
+  first (through the idempotence check), then sell the full stake, verify
+  on-chain, close the position, re-sync SOL. The kill is mechanical; there
+  is no third state where a launch is "doing fine" but the stake gets
+  trimmed into strength.
+The structural post-graduation dump (~4/5 graduates dead within 24h, median
+liquidity −57% in 30 min) is the kill-check's problem, not a sell trigger by
+itself: a graduate that holds its floor is a working launch.
 
 ## Metadata socials (founder rule 2026-08-31)
 Owned launches ALWAYS carry the company X account in the `twitter` metadata
