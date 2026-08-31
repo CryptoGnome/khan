@@ -216,15 +216,25 @@ fn manager_schemas() -> Vec<Value> {
         .collect()
 }
 
-/// The CEO's per-episode allowance for hands-on execution — shell, sql, and
-/// custom-script runs. Founder doctrine (2026-08-31): the CEO does NO work
-/// beyond deciding and planning who does what — delegation is the whole
-/// point, work gets done faster in parallel hands. Two calls covers the rare
-/// rating spot-check ("SELECT the row it claims"); everything else dispatches.
-/// Every budgeted tool is callable by any employee, so nothing time-critical
-/// is lost at the cap — sends and kill-exits dispatch like any other work.
-/// Plain reads (read_file, web_fetch), dispatch, and ratings are unlimited.
-pub(crate) const CEO_EXEC_BUDGET: u32 = 2;
+/// The CEO's per-episode ration of hands-on execution — shell, sql, and
+/// custom-script runs. Founder doctrine (2026-08-31): the CEO decides and
+/// plans who does what; delegation is the point. But finding things out is
+/// allowed, so the guard escalates instead of slamming shut: past SOFT every
+/// budgeted call still runs but carries an are-you-sure-this-isn't-employee-
+/// work challenge; past HARD the tool refuses — that many hands-on calls in
+/// one episode is a doom loop, not discovery (350 CEO actions in 2h, 88 of
+/// them shell, while its busiest employee logged 90). Every budgeted tool is
+/// callable by any employee — sends and kill-exits dispatch like any other
+/// work. Plain reads, dispatch, and ratings are unlimited.
+///
+/// Thresholds calibrated on 2026-08-31's 81 live episodes: 57% used ≤4
+/// hands-on calls (discovery — untouched), the 5-12 band was legitimate
+/// investigation (challenged, never blocked), and only the 13-15 tail — the
+/// exact kill-check/routine-grinding episodes the guard exists for — sat
+/// past 12. More than 12 hands-on calls in a 12-step episode is an
+/// employee's transcript, not a CEO's.
+pub(crate) const CEO_EXEC_SOFT: u32 = 4;
+pub(crate) const CEO_EXEC_HARD: u32 = 12;
 
 /// True when a tool call is the CEO doing work rather than directing or
 /// reading: shell, sql, or any custom registry tool (a name that is neither
@@ -2087,16 +2097,24 @@ Keep the board honest: add new bets, declare blocked_by, mark done what is done.
                     }
                     let out = if CEO_TOOL_NAMES.contains(&tname.as_str()) {
                         tools::truncate(self.ceo_tool("CEO", &tname, &a).await)
-                    } else if ceo_exec_budgeted(&tname) && {
+                    } else if ceo_exec_budgeted(&tname) {
                         exec_spent += 1;
-                        exec_spent > CEO_EXEC_BUDGET
-                    } {
-                        self.log_line("CEO", "exec-budget", &format!("{tname} refused — episode execution budget ({CEO_EXEC_BUDGET}) spent"));
-                        format!(
-                            "REFUSED: your episode's hands-on execution budget ({CEO_EXEC_BUDGET} shell/sql/custom calls) is spent. \
-                             You are the CEO — every one of these tools is callable by an employee: dispatch the work with clear \
-                             instructions and rate the result. If this was verification, the report plus one spot-check was enough."
-                        )
+                        if exec_spent > CEO_EXEC_HARD {
+                            self.log_line("CEO", "exec-budget", &format!("{tname} refused — {CEO_EXEC_HARD} hands-on calls this episode is a doom loop"));
+                            format!(
+                                "REFUSED: this is hands-on call #{exec_spent} this episode — past discovery, into a doom loop. \
+                                 You are the CEO: every one of these tools is callable by an employee. Dispatch the work with \
+                                 clear instructions and rate the result, or close the episode."
+                            )
+                        } else if exec_spent > CEO_EXEC_SOFT {
+                            let out = tools::execute(&self.ctx, "CEO", &tname, &a).await;
+                            format!(
+                                "{out}\n\n[exec check: hands-on call #{exec_spent} this episode — are you sure this is CEO work, \
+                                 or should it be delegated? An employee can run this same tool; at {CEO_EXEC_HARD} the tool refuses.]"
+                            )
+                        } else {
+                            tools::execute(&self.ctx, "CEO", &tname, &a).await
+                        }
                     } else {
                         tools::execute(&self.ctx, "CEO", &tname, &a).await
                     };
