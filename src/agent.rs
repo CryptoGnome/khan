@@ -181,6 +181,27 @@ pub(crate) fn compact_threshold(ctx: Option<u32>, max_tokens: u32) -> usize {
         .clamp(Orchestrator::COMPACT_FLOOR, Orchestrator::COMPACT_AT)
 }
 
+/// Authoritative tank line stitched above the raw /account/usage payload in the
+/// reflection burn block. The raw body keeps a per-model "last error" that can
+/// be DAYS stale — on 2026-08-31 a 41h-old 402 in it read as a live fuel
+/// emergency and cost two episodes of re-diagnosis — so the kernel's own fresh
+/// poll (check_fuel, ≤5 min old) must sit next to it and outrank it.
+pub(crate) fn fuel_anchor(gauge: Option<(u64, std::time::Instant, f64)>) -> String {
+    match gauge {
+        Some((avail, when, ema)) => format!(
+            "[KERNEL TANK READING — authoritative: ${:.2} available, polled {}s ago, burn ~${:.2}/day. \
+Per-model 'last error' rows in the raw payload below persist until that model errors again and can be \
+days old; never treat one as current against this line.]\n",
+            avail as f64 / 1e6,
+            when.elapsed().as_secs(),
+            ema * 24.0 / 1e6
+        ),
+        None => "[No kernel fuel poll yet this run — 'last error' rows in the raw payload below can be \
+days stale; verify availableMicros via GET /account before treating any 402 as current.]\n"
+            .to_string(),
+    }
+}
+
 const CEO_TOOL_NAMES: &[&str] = &[
     "hire", "delegate", "delegate_parallel", "dispatch", "team_status", "rate_work", "fire", "list_team",
     "add_routine", "add_review_routine", "remove_routine", "list_routines", "own_routine",
@@ -1891,11 +1912,12 @@ one low-stakes dispatch: hire onto one for a single ordinary task, then read the
                 // so a premium self-assignment burns faster than any employee.
                 let burn_block = match tools::credits::usage_snapshot(&self.ctx).await {
                     Some(snap) => format!(
-                        "\n\nCREDIT BURN — prepaid balance and recent usage (raw):\n{snap}\n\
+                        "\n\nCREDIT BURN — prepaid balance and recent usage (raw):\n{}{snap}\n\
 You are currently running on {ceo_model} — your seat is picked automatically by the binary: the best \
 approved model whose live marketplace price fits the configured ceilings, with the default as floor. \
 Credits are finite: project the runway at the current pace. If the runway is short, that is a \
-treasury decision: top up, or cut the burn."
+treasury decision: top up, or cut the burn.",
+                        fuel_anchor(*self.seat.gauge.lock().unwrap())
                     ),
                     None => String::new(),
                 };

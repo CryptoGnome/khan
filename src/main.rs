@@ -379,6 +379,26 @@ mod tests {
     }
 
     #[test]
+    fn fuel_anchor_outranks_stale_payload_errors() {
+        // With a gauge reading: the authoritative dollar figure leads, and the
+        // stale-error warning is present (the 08-31 false emergency: a 41h-old
+        // 402 in the raw usage payload read as a live $0.038 tank).
+        let line = crate::agent::fuel_anchor(Some((
+            52_690_988,
+            std::time::Instant::now(),
+            916_000.0, // micro$/hr EMA -> ~$21.98/day
+        )));
+        assert!(line.contains("$52.69 available"), "{line}");
+        assert!(line.contains("authoritative"), "{line}");
+        assert!(line.contains("days old"), "{line}");
+        // Without a poll yet: no invented number, but the caution still stands
+        // and names the canonical verification path.
+        let cold = crate::agent::fuel_anchor(None);
+        assert!(!cold.contains('$') || !cold.contains("available,"), "{cold}");
+        assert!(cold.contains("GET /account"), "{cold}");
+    }
+
+    #[test]
     fn sql_tool_description_carries_the_live_table_list() {
         let dir = std::env::temp_dir().join(format!("khan-sqlhint-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
