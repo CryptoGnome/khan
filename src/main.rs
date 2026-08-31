@@ -488,6 +488,20 @@ mod tests {
     }
 
     #[test]
+    fn recall_excerpt_truncation_survives_multibyte_content() {
+        // 2026-08-31 crash loop: excerpt.truncate(400) landed mid-char on a
+        // skill body full of em-dashes, panicking the thread and poisoning
+        // the store mutex — the whole binary died on every recall after.
+        let store = crate::state::Store::open(":memory:").unwrap();
+        // Line long enough that the 400-byte cut falls inside a multi-byte
+        // char with high probability across the repeated 3-byte em-dashes.
+        let line = format!("creator fee change — {} — creator fee dates", "—".repeat(300));
+        store.save_skill("fees", "fee facts", &line, "test").unwrap();
+        let hits = store.recall("creator fee change dates", 5);
+        assert!(hits.iter().any(|h| h.starts_with("[skill fees")), "skill must surface: {hits:?}");
+    }
+
+    #[test]
     fn telegram_chat_tail_old_and_delete_slice_correctly() {
         let store = crate::state::Store::open(":memory:").unwrap();
         for i in 1..=10 {

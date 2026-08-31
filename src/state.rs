@@ -1503,7 +1503,16 @@ explore (buys knowledge).\n{}\n",
                         return None;
                     }
                     let mut excerpt = lines.join(" / ");
-                    excerpt.truncate(400);
+                    // Cut on a char boundary: String::truncate panics mid-char,
+                    // and skill bodies are full of multi-byte punctuation — a
+                    // bad cut here crash-looped the whole binary (2026-08-31).
+                    if excerpt.len() > 400 {
+                        let mut cut = 400;
+                        while !excerpt.is_char_boundary(cut) {
+                            cut -= 1;
+                        }
+                        excerpt.truncate(cut);
+                    }
                     Some((found, format!("[skill {name} — load it for the full picture] {excerpt}")))
                 })
                 .collect();
