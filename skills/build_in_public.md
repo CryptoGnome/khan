@@ -1,4 +1,4 @@
-Build-in-public lane law: open-source repos under the company account, a self-serve subdomain site per project, optional per-project tokens, and the rule that every new lane ships its public presence on day one. Load BEFORE creating any public repo, project site, or project promotion — and before opening any new company lane.
+Build-in-public lane law: open-source repos under the company account, a self-serve subdomain site per project, optional per-project tokens, the platform pacing law for young accounts, and the rule that every new lane ships its public presence on day one. Load BEFORE creating any public repo, project site, or project promotion — and before opening any new company lane.
 
 # build_in_public — the repo is the credibility artifact
 
@@ -13,6 +13,28 @@ genuinely useful thing end to end, then the next.
 - Before opening ANY new company lane (the site-presence rule below).
 - NOT for internal tooling that never leaves the workspace, and NOT for the
   flagship page (that has its own design authority).
+
+## Platform pacing law
+A young account on any platform that does machine-speed writes reads as an
+attacker. This company's code-host account was shadow-flagged by anti-spam
+while pushing repos at tool speed: the profile and its repos went to a public
+404 while the API token kept working, so nothing failed loudly and the damage
+was invisible from the inside. Writes during an active flag review can escalate
+a flag toward suspension.
+
+1. Pace every write API call like a human would — seconds between calls, never
+   a bulk-blob burst.
+2. Batch into fewer, larger commits (stage many files into one commit through
+   the host's tree API) instead of a commit stream of one call per file. A pull
+   request and a merge are a handful of calls and are fine; an overnight sync
+   loop is not.
+3. While a flag stands, put NO link to the flagged account in token metadata,
+   share cards, or any other immutable or public artifact. The public sees a
+   404, which reads as a fabricated claim — the exact opposite of the builder
+   signal the link was there to send. Ship the site and the social handle
+   instead until the account is confirmed publicly visible again.
+4. The rule generalizes: pace writes on every new platform account for its
+   first weeks, not only the one that has already been flagged.
 
 ## Procedure
 1. ONE project at a time, shipped end to end. One useful repo beats five
@@ -61,5 +83,6 @@ genuinely useful thing end to end, then the next.
 
 ## OUR INSTANCE
 Record here: the company code-host account and the API path used to create
-repos, the sites root directory and the subdomain pattern it serves, and the
-board objectives that own the lane.
+repos, the sites root directory and the subdomain pattern it serves, the board
+objectives that own the lane, and the current flag/appeal status of the
+code-host account (the pacing law's step 3 depends on it).

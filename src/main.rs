@@ -723,6 +723,9 @@ mod tests {
             "safe_apply_to_live_tool",
             "build_in_public",
             "research_sources",
+            "restart_survival",
+            "sql_tool_columns",
+            "launch_kill_sequence",
         ] {
             assert!(names.contains(&n.to_string()), "missing seed '{n}' in {names:?}");
         }

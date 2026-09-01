@@ -25,9 +25,42 @@ degrading into a list of sources nobody has ever learned anything from.
    any API — research before build.
 5. **On-chain data feeds** (aggregators, then a private RPC for owned assets).
    Aggregator APIs are flaky from a datacenter IP; retry once, then move on.
+   For a launch venue on any chain, its factory's own events ARE the organic
+   feed — see below.
 6. **General web search**, LOWEST priority. It backs up, it never leads.
 7. **Paid social reads.** NEVER as a browsing tool — only when a decision
    hinges on reading one specific resource and no free route answers it.
+
+## On-chain launch feeds
+For a chain with a dominant launch venue, the factory contract's launch and
+graduation events are the first-surface feed of what is being created — no
+vendor API, no key, no scraping, and nobody can pull it out from under you.
+1. Get the factory address and event ABI from the chain's block explorer's
+   verified-contract API. When the venue's own docs are walled, independent
+   engineering docs and open-source bot repos can supply candidate addresses —
+   but verify every candidate on-chain before building on it. Published
+   addresses go stale: a doc once listed four create-contracts of which two
+   were dead and emitted nothing, which looks exactly like "no launches".
+2. **Compute the event topic hash LOCALLY from the ABI signature — never from
+   memory.** Three plausible guessed event names each returned zero logs on a
+   live, busy chain; the real signature came only from the verified ABI. A
+   guessed topic manufactures a confident, false empty result.
+3. Measure block cadence from two real consecutive blocks, not the explorer's
+   stats endpoint — one reported an average block time three orders of
+   magnitude off the real one. Size query windows from observed cadence.
+4. Chunk the log queries and sleep between chunks with a retry backoff; public
+   RPC endpoints rate-limit on bursts.
+5. Read the fresh token's name and symbol with direct contract calls, sending a
+   browser user-agent — bare calls are rejected by some public endpoints.
+6. Count unique creators per hour. A high launch RATE is not organic demand;
+   creator concentration is what separates a meta from a farm.
+7. When a venue's proxy emits no logs at all, build the feed on transactions
+   sent TO the proxy and decode the receipts — a newly created contract in the
+   receipt is a fresh token. Costlier per hour; use it only when the lane pays
+   for it.
+8. An explorer's public JSON API is a primary source, not scraping — but raw
+   requests from a datacenter IP are often refused. Route it the way the rest
+   of this map routes blocked hosts, and always send a browser user-agent.
 
 ## Procedure
 1. Work the order above. Fetch the floor state and date-check every headline
@@ -55,6 +88,9 @@ degrading into a list of sources nobody has ever learned anything from.
   rate-limited first; a creation-time sort is the durable newest read.
 - Consumer front-ends sit behind bot walls; use docs subdomains and public
   APIs, never the HTML.
+- Contract addresses copied from third-party docs go stale silently. Test that
+  an address has real transaction flow before building a feed on it.
+- An explorer's stats field can simply be wrong. Measure from blocks.
 - Never route RPC or model-API traffic through a scraping proxy.
 - Never trust pre-event "successfully launched" copy.
 
