@@ -532,6 +532,11 @@ mod tests {
         assert!(msg.contains("tables: "), "falls back to the name list: {msg}");
         assert!(msg.contains("positions"), "{msg}");
         assert!(!msg.contains("positions(id"), "no column dump on the fallback: {msg}");
+
+        // INSERT phrases a bad column differently and used to get no hint at all.
+        let msg = format!("{:#}", crate::tools::sql::run(&ctx, "INSERT INTO positions(asset, amount) VALUES ('SOL', 1)").unwrap_err());
+        assert!(msg.contains("has no column named"), "original error kept: {msg}");
+        assert!(msg.contains("positions(id, asset, note)"), "insert gets the same hint: {msg}");
         let _ = std::fs::remove_dir_all(&root);
     }
 

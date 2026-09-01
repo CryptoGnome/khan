@@ -12,7 +12,10 @@ pub fn run(ctx: &ToolCtx, query: &str) -> Result<String> {
     // title against positions' actual asset/note, 2026-08-31), and an error
     // that teaches beats a skill nobody re-reads.
     match exec(&conn, query.trim()) {
-        Err(e) if e.to_string().contains("no such") => {
+        // "no such column" is SELECT's wording; an INSERT against a bad column
+        // says "has no column named" and slipped past the hint (deliverables_log
+        // note, 2026-09-01). Same mistake, same teaching.
+        Err(e) if { let m = e.to_string(); m.contains("no such") || m.contains("has no column named") } => {
             Err(e.context(format!("actual schema:\n{}", schema_hint(&conn, query))))
         }
         other => other,
