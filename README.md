@@ -100,7 +100,8 @@ viewer gives you a live window into what the company is doing from anywhere.
      background: mention, reply and quote events push in and wake the CEO as
      routine alerts (billed per delivered event) instead of paid mention
      polling — replies to the company's own posts are the bulk of real
-     engagement and the reply wall permits answering them. The stream
+     engagement and the reply wall permits answering them; obvious dm-me /
+     pump-it bait is flagged on the alert so silence is the default. The stream
      is outbound-only — no webhook endpoint is exposed — and degrades to
      hourly reconnect attempts if the plan doesn't include the Activity API.
      The stream authenticates app-only: set `X_BEARER_TOKEN` (the app's

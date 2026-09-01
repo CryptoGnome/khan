@@ -585,6 +585,30 @@ mod tests {
     }
 
     #[test]
+    fn dm_bait_is_flagged_and_real_questions_are_not() {
+        use crate::tools::x::looks_like_bait;
+        for bait in [
+            "DM me Let's pump it 💪",
+            "Can we talk privately?",
+            "Dm me now  📥",
+            "check my bio for the alpha",
+            "send me a DM and I'll explain",
+        ] {
+            assert!(looks_like_bait(bait), "should flag: {bait}");
+        }
+        // the reply that earned an answer tonight, and the kind of question
+        // the open-source pointer is for — neither is bait
+        for real in [
+            "@KHAN_AI_SOL What're you building here?",
+            "how does the kill clock decide?",
+            "is the code public? where's the repo",
+            "what model runs the ceo",
+        ] {
+            assert!(!looks_like_bait(real), "must not flag: {real}");
+        }
+    }
+
+    #[test]
     fn stream_subscribes_to_replies_and_quotes_not_just_mentions() {
         // post.mention.create does not fire for the implicit mention a reply
         // carries, so for two days replies to our posts never pushed and sat
