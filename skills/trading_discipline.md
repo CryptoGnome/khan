@@ -56,6 +56,12 @@ working — a company that dies holding its floor protected nothing.
   (claim cycles, fees owed, armed launches with fresh premises, paid
   endpoints) until the treasury is back above the floor. Getting back
   above the floor IS the top-ranked objective while it is true.
+- **Model economy rides the same posture**: when funds run low, mechanical
+  and routine tasks (log reads, bookkeeping, monitors, formatting) move to
+  the cheapest capable seat (deepseekv4flash-class), and the default seat
+  (glm53flash-class) is reserved for planning, judgment, and thinking
+  work. Burning premium tokens on mechanical work while low is the same
+  mistake as discretionary spend below the floor.
 
 ## Profit ladders
 Targets are planned at entry and taken mechanically in tranches (e.g. 25% at
