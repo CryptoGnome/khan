@@ -49,6 +49,14 @@ pub struct Config {
     /// the CEO's playbook — a restart forgot it within the hour (2026-08-30:
     /// fresh boot, new hires drifted straight back to deepseekv4flash).
     pub model_policy: Option<String>,
+    /// Model slugs that may never be a SEAT, enforced by the binary rather than
+    /// by the policy text above. The policy said "deepseek is never a seat,
+    /// re-home at next dispatch" since 2026-08-30 and nothing enforced it: on
+    /// 2026-09-01 four agents were still seated on deepseek and superseded glm5
+    /// variants. This is a seat rule only — a denied model stays perfectly valid
+    /// as the automatic fallback the binary fails through when a seat errors.
+    #[serde(default)]
+    pub seat_denylist: Vec<String>,
     /// Low-fuel floor in provider micro-dollars (bu0y GET /account
     /// availableMicros). Below it the binary files an hourly "fuel-low" routine
     /// alert so the CEO tops up before calls start bouncing with 402. 0 disables.
@@ -208,6 +216,17 @@ impl Config {
     }
 
     /// Split "provider/model" into (provider, model id, api key).
+    /// Whether `model` is barred from being a seat. Matches the bare slug or
+    /// the full provider/model form, case-insensitively, and never by prefix:
+    /// denying "glm5" must not also deny its successor "glm53flash".
+    pub fn seat_denied(&self, model: &str) -> bool {
+        let full = model.to_ascii_lowercase();
+        let slug = full.rsplit('/').next().unwrap_or(&full).to_string();
+        self.seat_denylist
+            .iter()
+            .any(|d| { let d = d.trim().to_ascii_lowercase(); !d.is_empty() && (d == full || d == slug) })
+    }
+
     pub fn resolve(&self, model: &str) -> Result<(Provider, String, String)> {
         let (pname, mname) = model
             .split_once('/')

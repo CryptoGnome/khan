@@ -603,6 +603,15 @@ Drop superseded detail, resolved dead ends, and chatter.",
         let Some((mut role, mut prompt_name, mut model, hist_json)) = self.ctx.store.load_agent(name) else {
             return format!("ERROR: no such employee '{name}'. hire them first or check list_team.");
         };
+        // "Re-home at next dispatch" was policy text no one executed — agents
+        // hired before a seat was denied simply kept running on it. This is that
+        // clause, mechanical: the seat moves here, once, on the way into work.
+        if self.ctx.cfg.seat_denied(&model) {
+            let to = self.ctx.cfg.ceo_model.clone();
+            self.log_line(name, "re-homed", &format!("seat {model} is denied; moving to {to}"));
+            self.ctx.store.save_agent(name, &role, &prompt_name, &to, &hist_json);
+            model = to;
+        }
         // One body, one task: a second concurrent run would race on the saved
         // history. All paths (dispatch, delegate, delegate_parallel, review
         // routines) claim here; released at the end of the run.
@@ -877,6 +886,13 @@ Drop superseded detail, resolved dead ends, and chatter.",
                 let (n, role, model) = (s(a, "name"), s(a, "role"), s(a, "model"));
                 if self.ctx.cfg.resolve(model).is_err() {
                     return format!("ERROR: model '{model}' is not available. Pick from the catalog in your instructions.");
+                }
+                if self.ctx.cfg.seat_denied(model) {
+                    return format!(
+                        "ERROR: '{model}' is not a seat — it exists only as the fallback the binary fails through. \
+                         Hire onto {} or better.",
+                        self.ctx.cfg.ceo_model
+                    );
                 }
                 // Re-hiring an existing name is a re-home, not growth, so only
                 // genuinely new employees count against the ceiling.

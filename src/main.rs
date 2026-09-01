@@ -499,6 +499,69 @@ mod tests {
     }
 
     #[test]
+    fn schema_hint_answers_about_the_table_the_query_named() {
+        // The hint used to dump every table. workspace.db's 13 near-identical
+        // graduation_watch_* clones sort before `positions`, so the one line the
+        // agent needed was pushed past the point the reply got read — 132
+        // identical failures in two hours, every one of them this error.
+        let cfg: crate::config::Config = toml::from_str(
+            "ceo_model = \"p/m\"\n[[providers]]\nname = \"p\"\nbase_url = \"http://x\"\napi_key_env = \"X\"\npaid_models = [\"m\"]\n",
+        )
+        .unwrap();
+        let root = std::env::temp_dir().join("khan-sql-scope-test");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let ctx = crate::tools::ToolCtx {
+            cfg,
+            store: std::sync::Arc::new(crate::state::Store::open(":memory:").unwrap()),
+            workspace: root.clone(),
+            http: reqwest::Client::new(),
+            http_proxy: None,
+        };
+        crate::tools::sql::run(&ctx, "CREATE TABLE positions(id INTEGER, asset TEXT, note TEXT)").unwrap();
+        for t in ["graduation_watch_a", "graduation_watch_b", "graduation_watch_c"] {
+            crate::tools::sql::run(&ctx, &format!("CREATE TABLE {t}(ts TEXT, mint TEXT)")).unwrap();
+        }
+        let msg = format!("{:#}", crate::tools::sql::run(&ctx, "SELECT mint FROM positions").unwrap_err());
+        assert!(msg.contains("positions(id, asset, note)"), "names the asked-about table: {msg}");
+        assert!(!msg.contains("graduation_watch_a("), "does not dump unrelated tables: {msg}");
+
+        // A wrong TABLE name matches nothing, so the useful answer is the list
+        // of names that do exist rather than every column in the database.
+        let msg = format!("{:#}", crate::tools::sql::run(&ctx, "SELECT * FROM run_log").unwrap_err());
+        assert!(msg.contains("tables: "), "falls back to the name list: {msg}");
+        assert!(msg.contains("positions"), "{msg}");
+        assert!(!msg.contains("positions(id"), "no column dump on the fallback: {msg}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_denied_seat_is_refused_at_hire_and_never_matches_its_successor() {
+        // The model policy has said "deepseek is never a seat, re-home at next
+        // dispatch" since 2026-08-30 with nothing enforcing it; on 2026-09-01
+        // four agents were still sitting on deepseek and superseded glm5.
+        let cfg: crate::config::Config = toml::from_str(
+            "ceo_model = \"p/glm53flash\"\nseat_denylist = [\"deepseekv4flash\", \"glm5\"]\n\
+             [[providers]]\nname = \"p\"\nbase_url = \"http://x\"\napi_key_env = \"X\"\n\
+             paid_models = [\"glm53flash\", \"deepseekv4flash\", \"glm5\"]\n",
+        )
+        .unwrap();
+        assert!(cfg.seat_denied("p/deepseekv4flash"), "full form denied");
+        assert!(cfg.seat_denied("deepseekv4flash"), "bare slug denied");
+        assert!(cfg.seat_denied("P/GLM5"), "case-insensitive");
+        // The whole point of matching the slug exactly: glm53flash is the seat
+        // the company is supposed to be ON, and it starts with the denied "glm5".
+        assert!(!cfg.seat_denied("p/glm53flash"), "successor must not be caught by prefix");
+        assert!(!cfg.seat_denied("p/deepseekv4flash0731"), "a different slug is a different model");
+        // An empty denylist is the default and must deny nothing.
+        let open: crate::config::Config = toml::from_str(
+            "ceo_model = \"p/m\"\n[[providers]]\nname = \"p\"\nbase_url = \"http://x\"\napi_key_env = \"X\"\npaid_models = [\"m\"]\n",
+        )
+        .unwrap();
+        assert!(!open.seat_denied("p/deepseekv4flash"), "unset denylist denies nothing");
+    }
+
+    #[test]
     fn screenshot_output_path_is_workspace_relative_not_joined() {
         // The browser child runs with the workspace as its cwd, so a joined
         // path doubles the segment: every screenshot landed in

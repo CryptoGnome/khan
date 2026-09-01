@@ -81,6 +81,15 @@ model_policy = """
 - Founder model tips are candidates: probe, record the verdict in the model
   playbook, and let measured ratings move seats — including off this default.
 """
+# Seats the binary REFUSES, enforcing the policy above instead of describing it.
+# A denied model stays valid as the automatic fallback khan fails through when a
+# seat errors — this bars it from being an agent's home. Matched on the exact
+# slug, never by prefix, so denying glm5 leaves its successor glm53flash alone.
+# hire is refused outright; an agent already sitting on one is re-homed to
+# ceo_model at its next dispatch, which is what "re-home at next dispatch" meant
+# for two days while four agents quietly stayed put.
+seat_denylist = ["deepseekv4flash", "deepseekv4flash0731", "glm5"]
+
 # Founder direct line (Telegram): set TELEGRAM_BOT_TOKEN (from @BotFather) and
 # TELEGRAM_CHAT_ID (the founder's chat id) in the environment. Inbound messages
 # from that chat land exactly like `khan tell`; the CEO answers with the

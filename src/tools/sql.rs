@@ -13,7 +13,7 @@ pub fn run(ctx: &ToolCtx, query: &str) -> Result<String> {
     // that teaches beats a skill nobody re-reads.
     match exec(&conn, query.trim()) {
         Err(e) if e.to_string().contains("no such") => {
-            Err(e.context(format!("actual schema:\n{}", schema_hint(&conn))))
+            Err(e.context(format!("actual schema:\n{}", schema_hint(&conn, query))))
         }
         other => other,
     }
@@ -40,30 +40,49 @@ pub fn table_names(workspace: &std::path::Path) -> Option<String> {
     }
 }
 
-/// Compact one-line-per-table schema summary for error replies.
-fn schema_hint(conn: &Connection) -> String {
-    let mut out = Vec::new();
-    if let Ok(mut stmt) =
-        conn.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
-    {
-        if let Ok(names) = stmt.query_map([], |r| r.get::<_, String>(0)) {
-            for name in names.flatten() {
-                let cols: Vec<String> = conn
-                    .prepare(&format!("SELECT name FROM pragma_table_info('{name}')"))
-                    .ok()
-                    .and_then(|mut s| {
-                        s.query_map([], |r| r.get::<_, String>(0)).ok().map(|it| it.flatten().collect())
-                    })
-                    .unwrap_or_default();
-                out.push(format!("{name}({})", cols.join(", ")));
-            }
-        }
+/// Compact schema summary for error replies, scoped to the tables the failing
+/// query actually names.
+///
+/// Dumping every table defeated the point: workspace.db carries 13 near-identical
+/// graduation_watch_* clones that sort before `positions`, so an agent that
+/// guessed a column on positions got a wall of unrelated schemas, never reached
+/// the line it needed, and guessed again — 132 identical failures in two hours,
+/// all of them this error. When no named table matches, the reply falls back to
+/// the table NAMES alone, which is the actual answer to "no such table".
+fn schema_hint(conn: &Connection, query: &str) -> String {
+    let names = table_list(conn);
+    if names.is_empty() {
+        return "(no tables)".into();
     }
-    if out.is_empty() {
-        "(no tables)".into()
-    } else {
-        out.join("\n")
+    let words: std::collections::HashSet<String> = query
+        .to_lowercase()
+        .split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+        .filter(|w| !w.is_empty())
+        .map(|w| w.to_string())
+        .collect();
+    let named: Vec<&String> = names.iter().filter(|n| words.contains(&n.to_lowercase())).collect();
+    if named.is_empty() {
+        return format!("tables: {}", names.join(", "));
     }
+    named
+        .iter()
+        .map(|name| format!("{name}({})", columns_of(conn, name).join(", ")))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn table_list(conn: &Connection) -> Vec<String> {
+    conn.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
+        .ok()
+        .and_then(|mut s| s.query_map([], |r| r.get::<_, String>(0)).ok().map(|it| it.flatten().collect()))
+        .unwrap_or_default()
+}
+
+fn columns_of(conn: &Connection, table: &str) -> Vec<String> {
+    conn.prepare(&format!("SELECT name FROM pragma_table_info('{table}')"))
+        .ok()
+        .and_then(|mut s| s.query_map([], |r| r.get::<_, String>(0)).ok().map(|it| it.flatten().collect()))
+        .unwrap_or_default()
 }
 
 fn exec(conn: &Connection, q: &str) -> Result<String> {

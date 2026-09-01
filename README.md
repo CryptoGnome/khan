@@ -237,7 +237,11 @@ token count is printed. **There is no spend cap — watch it.**
 - **Employees** — hired freely by the CEO, each with a role prompt and its own
   model (the CEO is told which models are free vs paid; an optional
   `model_policy` in khan.toml injects the founder's standing seat policy into
-  every episode's brief, so it survives restarts instead of living in nudges). `delegate` runs one
+  every episode's brief, so it survives restarts instead of living in nudges,
+  and `seat_denylist` enforces the part of it that matters: a denied slug is
+  refused at `hire` and any agent already sitting on one is re-homed to the
+  floor seat at its next dispatch, while the model stays usable as the
+  automatic failure fallback). `delegate` runs one
   employee to completion; `delegate_parallel` runs several concurrently and
   returns all their reports. An employee that hits its iteration cap gets one
   final turn to file its report (finish is the only tool offered) before the
