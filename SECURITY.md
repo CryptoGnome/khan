@@ -16,7 +16,9 @@ Understand the boundaries before deploying:
 
 - An immutable security preamble is appended to every agent's system prompt
   from code (not from the editable prompts table), covering prompt-injection
-  resistance, secret handling, and the read-only rule for the public log page.
+  resistance, secret handling, the read-only rule for the public log page,
+  and the one-server rule: the company never acquires outside hosting or
+  migrates off the server the founder provided.
 - API keys are moved out of the process environment entirely at startup: khan
   reads them once into memory, then removes them, so they are absent from
   `/proc/<pid>/environ` as well as from every shell child agents spawn. Other
