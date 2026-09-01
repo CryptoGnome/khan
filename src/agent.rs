@@ -603,15 +603,6 @@ Drop superseded detail, resolved dead ends, and chatter.",
         let Some((mut role, mut prompt_name, mut model, hist_json)) = self.ctx.store.load_agent(name) else {
             return format!("ERROR: no such employee '{name}'. hire them first or check list_team.");
         };
-        // "Re-home at next dispatch" was policy text no one executed — agents
-        // hired before a seat was denied simply kept running on it. This is that
-        // clause, mechanical: the seat moves here, once, on the way into work.
-        if self.ctx.cfg.seat_denied(&model) {
-            let to = self.ctx.cfg.ceo_model.clone();
-            self.log_line(name, "re-homed", &format!("seat {model} is denied; moving to {to}"));
-            self.ctx.store.save_agent(name, &role, &prompt_name, &to, &hist_json);
-            model = to;
-        }
         // One body, one task: a second concurrent run would race on the saved
         // history. All paths (dispatch, delegate, delegate_parallel, review
         // routines) claim here; released at the end of the run.
@@ -620,6 +611,17 @@ Drop superseded detail, resolved dead ends, and chatter.",
                 "ERROR: {name} is already mid-task (a dispatch or another manager is running them). \
                  Delegate to an idle worker or hire a new specialist — the roster is the parallel capacity."
             );
+        }
+        // "Re-home at next dispatch" was policy text no one executed — agents
+        // hired before a seat was denied simply kept running on it. This is that
+        // clause, mechanical: the seat moves here, once, on the way into work —
+        // inside the one-body lock, so the write cannot race a run of this
+        // agent that is still finishing.
+        if self.ctx.cfg.seat_denied(&model) {
+            let to = self.ctx.cfg.ceo_model.clone();
+            self.log_line(name, "re-homed", &format!("seat {model} is denied; moving to {to}"));
+            self.ctx.store.save_agent(name, &role, &prompt_name, &to, &hist_json);
+            model = to;
         }
         // Refuse-don't-drop, same as the history below: a missing prompt row
         // used to hand the employee an EMPTY system prompt silently. Fall back

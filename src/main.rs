@@ -536,6 +536,24 @@ mod tests {
     }
 
     #[test]
+    fn config_refuses_to_deny_its_own_floor_seat() {
+        // ceo_model is both the re-home target and what hire is told to pick;
+        // denying it would make both loop. The load must fail, not limp.
+        let dir = std::env::temp_dir().join("khan-denied-floor-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("khan.toml");
+        std::fs::write(
+            &path,
+            "ceo_model = \"p/glm5\"\nseat_denylist = [\"glm5\"]\n[[providers]]\nname = \"p\"\nbase_url = \"http://x\"\napi_key_env = \"KHAN_TEST_NO_SUCH_KEY\"\npaid_models = [\"glm5\"]\n",
+        )
+        .unwrap();
+        let err = crate::config::Config::load(path.to_str().unwrap()).err().expect("load must fail");
+        assert!(format!("{err:#}").contains("seat_denylist"), "{err:#}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn a_denied_seat_is_refused_at_hire_and_never_matches_its_successor() {
         // The model policy has said "deepseek is never a seat, re-home at next
         // dispatch" since 2026-08-30 with nothing enforcing it; on 2026-09-01

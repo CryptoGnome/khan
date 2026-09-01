@@ -131,6 +131,11 @@ impl Config {
         if cfg.providers.is_empty() {
             bail!("khan.toml must define at least one [[providers]] entry");
         }
+        // ceo_model is where denied seats get re-homed and what hire is told
+        // to pick instead; denying it would make both paths loop on themselves.
+        if cfg.seat_denied(&cfg.ceo_model) {
+            bail!("ceo_model '{}' appears in seat_denylist; the floor seat cannot be denied", cfg.ceo_model);
+        }
         cfg.take_keys_from_env();
         cfg.resolve(&cfg.ceo_model)?; // validate early
         for m in &cfg.ceo_models {
@@ -215,7 +220,6 @@ impl Config {
         self.keys.get(&p.api_key_env).map(String::as_str)
     }
 
-    /// Split "provider/model" into (provider, model id, api key).
     /// Whether `model` is barred from being a seat. Matches the bare slug or
     /// the full provider/model form, case-insensitively, and never by prefix:
     /// denying "glm5" must not also deny its successor "glm53flash".
@@ -227,6 +231,7 @@ impl Config {
             .any(|d| { let d = d.trim().to_ascii_lowercase(); !d.is_empty() && (d == full || d == slug) })
     }
 
+    /// Split "provider/model" into (provider, model id, api key).
     pub fn resolve(&self, model: &str) -> Result<(Provider, String, String)> {
         let (pname, mname) = model
             .split_once('/')
