@@ -48,14 +48,18 @@ working — a company that dies holding its floor protected nothing.
   dust that revenue operations need keep flowing at any treasury level.
   These are the company's ability to think and act; the floor never
   outranks them.
-- **Everything discretionary stops**: new portfolio entries, experiments
-  without a revenue premise, infra upgrades, payouts. Deployable is zero
-  below the floor — no derivation argues around that.
-- **Attention reweights to nearest-revenue**: below the floor the whole
-  roster concentrates on whichever lanes are closest to booking income
-  (claim cycles, fees owed, armed launches with fresh premises, paid
-  endpoints) until the treasury is back above the floor. Getting back
-  above the floor IS the top-ranked objective while it is true.
+- **Capital gets rationed, ideas do not**: below the floor, spending needs
+  an underwritten revenue premise — portfolio entries, infra upgrades and
+  payouts wait, and deployable for premise-less bets is zero. But
+  exploration INTENSIFIES: research, ideation, and premise-writing cost
+  only fuel, and a treasury in drawdown is exactly when the company most
+  needs new income ideas. Scan wider, score harder, write more premises —
+  then spend only on the best-underwritten, nearest-revenue ones.
+- **Attention reweights to making money**: below the floor the whole
+  roster concentrates on booking income — claim cycles, fees owed, armed
+  launches with fresh premises, paid endpoints, and NEW avenues that clear
+  underwriting. Getting back above the floor IS the top-ranked objective
+  while it is true.
 - **Model economy rides the same posture**: when funds run low, mechanical
   and routine tasks (log reads, bookkeeping, monitors, formatting) move to
   the cheapest capable seat (deepseekv4flash-class), and the default seat
