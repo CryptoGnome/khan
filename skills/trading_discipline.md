@@ -40,6 +40,23 @@ in a note outlives the treasury math that justified it.
   sizes, run them. The portfolio brakes (loss-cluster pause, realized-loss
   breaker) sit on top of this, unchanged.
 
+## Below the floor — survival mode, not a freeze (founder rule 2026-09-01)
+The floor is a POSTURE TRIGGER, not a stop switch. A treasury below the
+floor means the company works HARDER at making money, never that it stops
+working — a company that dies holding its floor protected nothing.
+- **Existence spending is exempt from the floor**: model fuel and the gas
+  dust that revenue operations need keep flowing at any treasury level.
+  These are the company's ability to think and act; the floor never
+  outranks them.
+- **Everything discretionary stops**: new portfolio entries, experiments
+  without a revenue premise, infra upgrades, payouts. Deployable is zero
+  below the floor — no derivation argues around that.
+- **Attention reweights to nearest-revenue**: below the floor the whole
+  roster concentrates on whichever lanes are closest to booking income
+  (claim cycles, fees owed, armed launches with fresh premises, paid
+  endpoints) until the treasury is back above the floor. Getting back
+  above the floor IS the top-ranked objective while it is true.
+
 ## Profit ladders
 Targets are planned at entry and taken mechanically in tranches (e.g. 25% at
 +X%, 25% at +Y%, runner with a trailing rule) — sized so each tranche's swap
