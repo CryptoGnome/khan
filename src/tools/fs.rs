@@ -54,6 +54,11 @@ pub fn write_binary(ctx: &ToolCtx, path: &str, bytes: &[u8]) -> Result<String> {
     Ok(format!("wrote {} bytes to {path}", bytes.len()))
 }
 
+pub fn read_binary(ctx: &ToolCtx, path: &str) -> Result<Vec<u8>> {
+    let p = resolve(ctx, path)?;
+    std::fs::read(&p).with_context(|| format!("cannot read {path}"))
+}
+
 pub fn read_file(ctx: &ToolCtx, path: &str) -> Result<String> {
     let p = resolve(ctx, path)?;
     std::fs::read_to_string(&p).with_context(|| format!("cannot read {path}"))

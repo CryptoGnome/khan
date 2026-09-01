@@ -262,7 +262,7 @@ token count is printed. **There is no spend cap — watch it.**
   swap is logged.
 - **Work tools** (all agents): file read/write/list (confined to `workspace/`),
   shell (with local `git` for version control; the GitHub CLI is blocked so
-  agents can never reach your GitHub login), web fetch + DuckDuckGo search,
+  agents can never reach your GitHub login), web fetch + DuckDuckGo search (JS app shells render in headless Chromium automatically, with the page's declared dates and its CSS/JS bundle URLs listed), `web_screenshot` and `view_image` so a vision seat actually sees pages and art,
   SQL against a scratch `workspace.db` (the tool's description carries the
   live table list, and a wrong name gets the real schema back in the error),
   `generate_image` (real renders via

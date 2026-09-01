@@ -797,7 +797,14 @@ Drop superseded detail, resolved dead ends, and chatter.",
                         out
                     }
                 };
+                // A picture rides as the next user turn: tool messages cannot
+                // carry image parts, and the model has vision the binary never
+                // used until now.
+                let picture = tools::image_followup(&self.ctx, &call.function.name, &out);
                 history.push(Message::tool_result(&call.id, out));
+                if let Some(p) = picture {
+                    history.push(p);
+                }
             }
             if finished {
                 break;
@@ -2285,7 +2292,11 @@ Keep the board honest: add new bets, declare blocked_by, mark done what is done.
                     } else {
                         tools::execute(&self.ctx, "CEO", &tname, &a).await
                     };
+                    let picture = tools::image_followup(&self.ctx, &tname, &out);
                     history.push(Message::tool_result(&call.id, out));
+                    if let Some(p) = picture {
+                        history.push(p);
+                    }
                 }
                 if closed {
                     break 'turns;

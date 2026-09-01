@@ -66,8 +66,9 @@ image_model = "openrouter/meta/muse-image"
 # within the hour after the 2026-08-30 redeploy). Plain text, kept short.
 model_policy = """
 - EVERY hire (workers, planners, managers) is seated on bu0y/glm53flash or
-  better — no exceptions. It has FULL VISION (use it for page QA, art
-  review, screenshots), 1M context, and near-frontier agentic behavior at
+  better — no exceptions. It has FULL VISION — web_screenshot and view_image
+  put pages and art in front of it; use them for page QA and art review —
+  1M context, and near-frontier agentic behavior at
   flash price. Caveat: token-hungry (~2-3x frontier tokens per task) —
   verbosity is not stuckness.
 - bu0y/deepseekv4flash is NOT a seat. It exists only as the automatic

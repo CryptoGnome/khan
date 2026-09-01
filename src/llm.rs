@@ -20,14 +20,28 @@ pub struct Message {
     /// for display only, and sending it back can be rejected upstream.
     #[serde(default, alias = "reasoning_content", skip_serializing)]
     pub reasoning: Option<String>,
+    /// Images shown to the model with this message, as data: URLs. Kept out of
+    /// `content` so every reader of the string (compaction, length accounting,
+    /// the public log) keeps working; build_request expands them into
+    /// OpenAI content parts at send time. Never serialized: they live only in
+    /// the in-memory history — a reloaded history re-reads the file if it
+    /// needs the picture again.
+    #[serde(default, skip_serializing)]
+    pub images: Option<Vec<String>>,
 }
 
 impl Message {
     pub fn text(role: &str, content: impl Into<String>) -> Message {
-        Message { role: role.into(), content: Some(content.into()), tool_calls: None, tool_call_id: None, reasoning: None }
+        Message { role: role.into(), content: Some(content.into()), tool_calls: None, tool_call_id: None, reasoning: None, images: None }
     }
     pub fn tool_result(id: &str, content: impl Into<String>) -> Message {
-        Message { role: "tool".into(), content: Some(content.into()), tool_calls: None, tool_call_id: Some(id.into()), reasoning: None }
+        Message { role: "tool".into(), content: Some(content.into()), tool_calls: None, tool_call_id: Some(id.into()), reasoning: None, images: None }
+    }
+    /// A user turn carrying pictures. Tool messages cannot hold images under
+    /// the OpenAI shape, so an image-bearing tool result is followed by one of
+    /// these.
+    pub fn with_images(role: &str, content: impl Into<String>, images: Vec<String>) -> Message {
+        Message { role: role.into(), content: Some(content.into()), tool_calls: None, tool_call_id: None, reasoning: None, images: Some(images) }
     }
 }
 
@@ -303,6 +317,13 @@ impl Client {
         None
     }
 
+    /// Seats that reject image content parts. glm53flash, glm53, glm5 and
+    /// grok46 all take vision; the fallback rungs below do not.
+    pub fn text_only_model(model_id: &str) -> bool {
+        let m = model_id.to_ascii_lowercase();
+        ["deepseek", "kimi", "minimax"].iter().any(|t| m.contains(t))
+    }
+
     pub fn build_request(model_id: &str, messages: &[Message], tools: &[Value], max_tokens: u32) -> Value {
         // max_tokens is always sent. Omitting it lets the gateway impose its own
         // small ceiling, and a reasoning model will burn the lot thinking and
@@ -322,9 +343,23 @@ impl Client {
         // only valid with tool_calls)". Histories already hold such messages,
         // so patch at request time rather than at message creation.
         if let Some(msgs) = body["messages"].as_array_mut() {
-            for m in msgs {
+            for (i, m) in msgs.iter_mut().enumerate() {
                 if m.get("content").is_none() && m.get("tool_calls").is_none() {
                     m["content"] = Value::String(String::new());
+                }
+                // Pictures become content parts here and nowhere else. Text-only
+                // seats get the text alone rather than a 400 — the deliberate
+                // ceiling is a substring list, not a capability probe; widen it
+                // when a new text-only model joins the ladder.
+                if let Some(imgs) = messages.get(i).and_then(|src| src.images.as_ref()) {
+                    if !Self::text_only_model(model_id) && !imgs.is_empty() {
+                        let text = m["content"].as_str().unwrap_or("").to_string();
+                        let mut parts = vec![serde_json::json!({"type": "text", "text": text})];
+                        for u in imgs {
+                            parts.push(serde_json::json!({"type": "image_url", "image_url": {"url": u}}));
+                        }
+                        m["content"] = Value::Array(parts);
+                    }
                 }
             }
         }
@@ -418,6 +453,7 @@ impl Client {
             tool_calls: (!tool_calls.is_empty()).then_some(tool_calls),
             tool_call_id: None,
             reasoning: (!reasoning.is_empty()).then_some(reasoning),
+            images: None,
         };
         Ok((msg, usage, finish, reasoning_tokens))
     }

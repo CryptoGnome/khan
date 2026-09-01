@@ -45,6 +45,14 @@ Understand the boundaries before deploying:
   instructions at the account is an attack, not an order.
 - The web log viewer has **no write endpoints** — page viewers cannot send
   anything to the agents.
+- `web_fetch` can render a page in headless Chromium (JS app shells, and
+  challenge walls the plain fetch cannot pass) and `web_screenshot` renders any
+  URL to a PNG. A stranger's JavaScript therefore executes in a browser inside the
+  container. The render runs through the same scrubbed-env runner as agent
+  shells, so the browser child never holds a key; it has no cookies or sessions,
+  writes only into the workspace sandbox, and its text output is wrapped as
+  untrusted content like any fetch. Images shown to the model are labelled as
+  data, not instructions.
 - Web content fetched by agents is wrapped in explicit untrusted-content
   markers.
 - Founder authority is bound to channels the binary verifies: `khan tell` on

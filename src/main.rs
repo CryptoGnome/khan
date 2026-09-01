@@ -273,7 +273,7 @@ mod tests {
         // Strict providers reject the omitted field ("message.content must be a
         // string"), and such messages already sit in persisted histories — so
         // build_request must backfill "" at request time.
-        let empty = Message { role: "assistant".into(), content: None, tool_calls: None, tool_call_id: None, reasoning: None };
+        let empty = Message { role: "assistant".into(), content: None, tool_calls: None, tool_call_id: None, reasoning: None, images: None };
         let body = Client::build_request("gpt-x", &[Message::text("user", "hi"), empty], &[], 1024);
         assert_eq!(body["messages"][1]["content"], "");
     }
@@ -411,6 +411,91 @@ mod tests {
         assert!(brief.contains("cfo") && brief.contains("(manager)"), "{brief}");
         assert!(brief.contains("delegate_parallel"), "{brief}");
         assert!(brief.contains("hire"), "{brief}");
+    }
+
+    #[test]
+    fn js_shell_pages_are_detected_and_static_pages_are_not() {
+        // sharc.fun: 3,199 bytes of HTML, 38 chars of visible text, one Vite
+        // bundle — reported as a successful fetch, so the site got dropped
+        // from the style study for "rendering empty".
+        let shell = r#"<!doctype html><html><head><link rel="stylesheet" href="/assets/index-DOBJDI_t.css"></head>
+<body><div id="root"></div><script type="module" src="/assets/index-B16IOJ0c.js"></script></body></html>"#;
+        let text = html2text::from_read(shell.as_bytes(), 100);
+        assert!(crate::tools::web::looks_like_js_shell(shell, &text));
+        let assets = crate::tools::web::assets(shell, "https://sharc.fun/");
+        assert_eq!(assets, vec!["https://sharc.fun/assets/index-DOBJDI_t.css", "https://sharc.fun/assets/index-B16IOJ0c.js"]);
+
+        let article = format!("<html><body><article>{}</article><script src=\"/a.js\"></script></body></html>", "real words ".repeat(60));
+        let text = html2text::from_read(article.as_bytes(), 100);
+        assert!(!crate::tools::web::looks_like_js_shell(&article, &text), "a page with real text is not a shell");
+        let bare = "<html><body><p>tiny</p></body></html>";
+        assert!(!crate::tools::web::looks_like_js_shell(bare, "tiny"), "a tiny static page has no bundle to render");
+    }
+
+    #[test]
+    fn page_dates_come_from_meta_tags_and_json_ld() {
+        let html = r#"<head>
+<meta property="article:published_time" content="2026-08-30T14:02:00Z">
+<meta property="og:updated_time" content="2026-09-01T09:00:00Z">
+<script type="application/ld+json">{"@type":"NewsArticle","datePublished":"2026-08-30","author":"x"}</script>
+</head>"#;
+        let d = crate::tools::web::page_dates(html);
+        assert!(d.iter().any(|x| x == "article:published_time=2026-08-30T14:02:00Z"), "{d:?}");
+        assert!(d.iter().any(|x| x == "og:updated_time=2026-09-01T09:00:00Z"), "{d:?}");
+        assert!(d.iter().any(|x| x == "datepublished=2026-08-30"), "{d:?}");
+        assert!(crate::tools::web::page_dates("<html><body>no dates here</body></html>").is_empty());
+    }
+
+    #[test]
+    fn images_become_content_parts_only_for_vision_seats() {
+        use crate::llm::{Client, Message};
+        let msgs = vec![
+            Message::text("user", "hello"),
+            Message::with_images("user", "look", vec!["data:image/png;base64,AAAA".into()]),
+        ];
+        let body = Client::build_request("glm53flash", &msgs, &[], 100);
+        let m = &body["messages"];
+        assert_eq!(m[0]["content"], "hello", "plain messages stay strings");
+        let parts = m[1]["content"].as_array().expect("image message becomes parts");
+        assert_eq!(parts[0]["type"], "text");
+        assert_eq!(parts[1]["type"], "image_url");
+        assert_eq!(parts[1]["image_url"]["url"], "data:image/png;base64,AAAA");
+        // a text-only fallback seat gets the text alone rather than a 400
+        let body = Client::build_request("deepseekv4flash", &msgs, &[], 100);
+        assert_eq!(body["messages"][1]["content"], "look");
+        // and the field never rides on the wire as its own key
+        assert!(body["messages"][1].get("images").is_none());
+    }
+
+    #[test]
+    fn image_marker_results_produce_a_picture_turn() {
+        let cfg: crate::config::Config = toml::from_str(
+            "ceo_model = \"p/m\"\n[[providers]]\nname = \"p\"\nbase_url = \"http://x\"\napi_key_env = \"X\"\npaid_models = [\"m\"]\n",
+        )
+        .unwrap();
+        let root = std::env::temp_dir().join("khan-image-followup-test");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let ctx = crate::tools::ToolCtx {
+            cfg,
+            store: std::sync::Arc::new(crate::state::Store::open(":memory:").unwrap()),
+            workspace: root.clone(),
+            http: reqwest::Client::new(),
+            http_proxy: None,
+        };
+        // 1x1 PNG header is enough: the follow-up inlines bytes, it does not decode them.
+        std::fs::write(root.join("shot.png"), [0x89, b'P', b'N', b'G', 0, 1, 2, 3]).unwrap();
+        let out = crate::tools::view_image(&ctx, "shot.png").unwrap();
+        assert!(out.starts_with(crate::tools::IMAGE_MARKER), "{out}");
+        let msg = crate::tools::image_followup(&ctx, "view_image", &out).expect("picture turn");
+        assert_eq!(msg.role, "user");
+        let imgs = msg.images.unwrap();
+        assert!(imgs[0].starts_with("data:image/png;base64,"), "{}", imgs[0]);
+        // plain results never grow a picture turn, and a missing file is not an error
+        assert!(crate::tools::image_followup(&ctx, "shell", "ls output").is_none());
+        assert!(crate::tools::image_followup(&ctx, "view_image", "[[image:nope.png]] x").is_none());
+        assert!(crate::tools::view_image(&ctx, "notes.txt").is_err(), "non-image extensions refused");
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
