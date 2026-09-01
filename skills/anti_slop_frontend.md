@@ -35,6 +35,13 @@ clicks. Ship at that standard:
   the good ones feel unhinged rather than templated. Keep 3-4 named style
   directions derived from it as a standing reference in this skill,
   refresh them every few launches, and pick the one that fits the joke.
+  When a fetch returns an empty or shell-only page the site is
+  JS-rendered, not dead — and those are the modern animated ones the
+  study most needs. Fetch its stylesheet and script bundle URLs out of
+  the HTML and read those instead: keyframe names and timings, transition
+  and transform rules, font stacks, color variables, cursor and scroll
+  handlers, canvas/webgl calls and library names are all plain text in
+  there. Never drop a site from the sample for rendering empty.
 - **Motion is not optional.** The page moves when it loads and responds
   when touched: entrance sequencing, scroll-triggered reveals, real
   hover/press states, and at least one piece of motion that IS the joke
