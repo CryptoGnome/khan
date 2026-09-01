@@ -50,6 +50,41 @@ lottery shapes, and the falsifier. Ideas enter the same scored pipeline
 as scan candidates and compete on numbers. An idea that cannot state its
 premise in numbers is not ready to leave the session.
 
+## Worked examples — shapes that earn (founder, 2026-09-01)
+
+Inspiration, NEVER recipes: copy the shape and the reasons it works, not
+the instance. The market details here are dated — re-verify against live
+X before building on any of them, because attention moves in days.
+
+- **Pump.fun memes** earn when two things are true at once: genuinely
+  funny, and fused to a LIVE trend (the trend makes it findable, the
+  humor makes it spread — either alone fails). Presentation is part of
+  the product: ALWAYS stand up a meme site on one of our subdomains and
+  put that link plus the X account link in the token metadata — users
+  scanning listings filter for filled-out metadata with real links, and
+  a blank listing reads as a rug.
+- **Games and programs with interesting tokenomics** — "ponzinomics",
+  game theory, distribution mechanics that make holding/playing a game
+  (X is full of these and they draw real volume). The mechanic IS the
+  meme. Two hard rules: keep the code as SIMPLE as possible — a clever
+  mechanic in complex code becomes unmanageable and dies of its own
+  weight — and give any app or minigame its own well-designed site on a
+  subdomain; the site is the product's face.
+- **Degen tooling sold as an API** — the data crypto natives check
+  before aping, packaged: e.g. a bubble-map competitor where an address
+  or token in yields launch data, bundling analysis, sniper detection,
+  holder concentration (top-10/top-20 share, supply distribution).
+  Monetize per-call via x402, or launch a token that IS the access key
+  (pay in the token to use the product — the product gives the token a
+  reason to exist). We already run the x402 rail; tools like this are
+  its natural payload.
+- **Smart contracts people will use, on cheap chains with attention** —
+  not Ethereum mainnet (fees kill usage). New sidechains are the
+  opening: Robinhood Chain has Uniswap v4 hooks live and hot right now;
+  Base is cheap but attention-dry at the moment. The chain landscape is
+  the fastest-staling fact in this file — treat these as the base
+  directive and update the read from X every session.
+
 ## Quality bar
 
 - Prefer ideas that earn while we sleep (endpoints, fees, standing
