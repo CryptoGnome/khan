@@ -127,10 +127,22 @@ out = sys.argv[3] if len(sys.argv) > 3 else ""
 with sync_playwright() as p:
     b = p.chromium.launch(headless=True, args=["--no-sandbox"])
     pg = b.new_page(viewport={"width": 1280, "height": 900}, user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
-    pg.goto(url, wait_until="networkidle", timeout=35000)
+    # Load first, settle second. networkidle as the goto condition makes a page
+    # that never goes idle (SSE, websockets, polling widgets — our own log
+    # viewer is one) fail outright instead of rendering what it already drew.
+    pg.goto(url, wait_until="load", timeout=30000)
+    try:
+        pg.wait_for_load_state("networkidle", timeout=8000)
+    except Exception:
+        pass
     pg.wait_for_timeout(800)
     if mode == "shot":
-        pg.screenshot(path=out, full_page=True)
+        # A full-page shot of a very long page can exhaust the renderer; the
+        # viewport is worth more than nothing when it does.
+        try:
+            pg.screenshot(path=out, full_page=True)
+        except Exception:
+            pg.screenshot(path=out)
         print("SHOT_OK")
     else:
         print(pg.inner_text("body"))
@@ -151,14 +163,21 @@ async fn render(workspace: &std::path::Path, url: &str, mode: &str, out: &str) -
         mode,
         out.replace('\'', "")
     );
-    let o = super::shell::run_in_dir(workspace, &cmd, env).await?;
-    if o.timed_out {
-        anyhow::bail!("render timed out");
+    // One retry: a browser launch can lose a race for memory when several
+    // renders land together, and the second attempt costs less than the agent
+    // deciding the page is unreachable.
+    let mut last = String::new();
+    for attempt in 0..2 {
+        let o = super::shell::run_in_dir(workspace, &cmd, env.clone()).await?;
+        if o.success && !o.timed_out {
+            return Ok(o.text);
+        }
+        last = if o.timed_out { "timed out".into() } else { o.text.chars().take(300).collect() };
+        if attempt == 0 {
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        }
     }
-    if !o.success {
-        anyhow::bail!("render failed: {}", o.text.chars().take(300).collect::<String>());
-    }
-    Ok(o.text)
+    anyhow::bail!("render failed after 2 attempts: {last}")
 }
 
 pub(crate) fn footer(body: &str, url: &str, modified: &Option<String>) -> String {
@@ -283,10 +302,17 @@ pub async fn screenshot(ctx: &ToolCtx, url: &str, path: &str) -> Result<String> 
     // browser writes there; the empty file is overwritten by the render.
     super::fs::write_binary(ctx, path, &[])?;
     let abs = ctx.workspace.join(path);
-    render(&ctx.workspace, url, "shot", &abs.to_string_lossy()).await?;
+    let outcome = render(&ctx.workspace, url, "shot", &abs.to_string_lossy()).await;
     let bytes = std::fs::metadata(&abs).map(|m| m.len()).unwrap_or(0);
-    if bytes == 0 {
-        anyhow::bail!("screenshot produced no bytes");
+    if outcome.is_err() || bytes == 0 {
+        // Never leave the empty placeholder behind: a 0-byte PNG on disk reads
+        // as a screenshot that came out blank, which is a different and much
+        // more confusing problem than the render having failed.
+        let _ = std::fs::remove_file(&abs);
+        match outcome {
+            Err(e) => return Err(e),
+            Ok(_) => anyhow::bail!("render reported success but wrote no bytes"),
+        }
     }
     Ok(format!("{}{path}]] screenshot of {url} saved ({bytes} bytes)", super::IMAGE_MARKER))
 }
