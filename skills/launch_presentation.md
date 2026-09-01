@@ -22,6 +22,12 @@ per-venue skills; a venue skill may add detail but never subtract from it.
   Pons: no setters exist). The pre-fire checklist therefore includes a
   METADATA POPULATED gate: image, description, links reviewed against the
   identity rules for that lane before the transaction is signed.
+- **Where the venue metadata carries a website field, it is FILLED, and the
+  site is LIVE before the fire** (founder 2026-09-01, obj39 successor prep:
+  the package had logo/description/X link but left Socials.website empty).
+  Build the site at sites/<ticker> so <ticker>.khanbot.fun renders, verify
+  it, and pass the URL in the launch args — a write-once launch without the
+  site link repeats the TAX mistake with extra steps.
 
 ## The platform-norm trap (why PAPER shipped blank)
 
