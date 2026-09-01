@@ -216,6 +216,7 @@ Episodes lose their in-flight dispatches on every crash."
         tokens: Default::default(),
         pending: Default::default(),
         seat: Default::default(),
+        running: Default::default(),
     });
     // Scheduled checks run inside the binary: shell routines at zero model
     // cost, review routines as scheduled dispatches through the orchestrator.
@@ -392,6 +393,24 @@ mod tests {
         assert_eq!(store.x_mark_seen(&["t2", "t4"], "2026-09-01"), 1, "only the unseen one bills");
         assert_eq!(store.x_mark_seen(&["t1"], "2026-09-02"), 1, "the window resets at midnight UTC");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn crew_brief_shows_roster_state_and_pushes_fanout() {
+        // A manager opens every task seeing who it can delegate to and who is
+        // taken — the 2026-09-01 audit found nine managers issued one
+        // delegate_parallel between them because the roster was invisible.
+        let rows = vec![
+            ("eng-dev".into(), "bu0y/glm53flash".into(), "Developer for the build lane".into(), false, false),
+            ("builder".into(), "bu0y/glm53flash".into(), "Builder/engineer".into(), false, true),
+            ("cfo".into(), "bu0y/glm53flash".into(), "Chief Financial Officer".into(), true, false),
+        ];
+        let brief = crate::agent::crew_brief(&rows);
+        assert!(brief.contains("eng-dev") && brief.contains("(idle)"), "{brief}");
+        assert!(brief.contains("builder") && brief.contains("(BUSY)"), "{brief}");
+        assert!(brief.contains("cfo") && brief.contains("(manager)"), "{brief}");
+        assert!(brief.contains("delegate_parallel"), "{brief}");
+        assert!(brief.contains("hire"), "{brief}");
     }
 
     #[test]

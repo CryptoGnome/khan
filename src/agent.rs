@@ -227,6 +227,36 @@ pub(crate) const OBSERVATION_TOOLS: &[&str] = &[
 /// started it, and every report has somewhere to go.
 const MANAGER_TOOL_NAMES: &[&str] = &["hire", "delegate", "delegate_parallel", "list_team", "rate_work"];
 
+/// Hands-on ration for MANAGERS: soft challenge only, no hard stop — a manager
+/// legitimately executes, but grinding through volume serially is the disease
+/// the crew exists to cure. Founder audit 2026-09-01: in the first day of the
+/// org redesign, nine managers issued ONE delegate_parallel between them and
+/// the company idled at 1-3 active agents against a 40-seat ceiling — the CEO's
+/// ration had simply moved the doom loop one level down. Past this count each
+/// budgeted call carries a crew-check reminder; the report is still theirs.
+pub(crate) const MANAGER_EXEC_SOFT: u32 = 10;
+
+/// The crew brief injected at the start of every manager task: the live roster
+/// with busy/idle state, so delegation needs no list_team call and "I forgot I
+/// had a crew" stops being possible. Rows are (name, model, role, is_manager,
+/// busy). Pure so the shape is testable.
+pub(crate) fn crew_brief(rows: &[(String, String, String, bool, bool)]) -> String {
+    let mut lines = String::new();
+    for (name, model, role, is_mgr, busy) in rows {
+        let state = if *is_mgr { "manager" } else if *busy { "BUSY" } else { "idle" };
+        let short: String = role.chars().take(70).collect();
+        lines.push_str(&format!("- {name} [{model}] ({state}): {short}\n"));
+    }
+    format!(
+        "[Your crew — the live roster you can delegate to right now]\n{lines}\
+You are a MANAGER with delegate_parallel: fan every independent piece of this task out to workers \
+running CONCURRENTLY, and hire new specialists freely when the roster lacks one — the seat ceiling \
+is far. Your own hands are for judgment, review, and integration; grinding through volume work \
+serially in this transcript is the bottleneck the crew exists to remove. A worker marked BUSY is \
+mid-task elsewhere — delegate to an idle one or hire."
+    )
+}
+
 /// Ceiling on active employees. High enough to never bind a real org, low
 /// enough that a hiring loop cannot quietly drain the fuel budget.
 const MAX_EMPLOYEES: i64 = 40;
@@ -312,6 +342,12 @@ pub struct Orchestrator {
     pub tokens: Tokens,
     pub pending: tokio::sync::Mutex<Vec<BackgroundTask>>,
     pub seat: SeatState,
+    /// Every agent currently inside run_employee, by name — dispatch, delegate,
+    /// delegate_parallel, and review routines all claim here. `pending` only
+    /// covers dispatches, so two managers delegating to the same worker used to
+    /// race on its saved history; with heavy fan-out that collision stops being
+    /// theoretical, so the claim is enforced where all paths meet.
+    pub running: std::sync::Mutex<std::collections::HashSet<String>>,
 }
 
 /// The CEO's seat is picked by the binary, not the model: the highest-quality
@@ -551,6 +587,15 @@ Drop superseded detail, resolved dead ends, and chatter.",
         let Some((mut role, mut prompt_name, mut model, hist_json)) = self.ctx.store.load_agent(name) else {
             return format!("ERROR: no such employee '{name}'. hire them first or check list_team.");
         };
+        // One body, one task: a second concurrent run would race on the saved
+        // history. All paths (dispatch, delegate, delegate_parallel, review
+        // routines) claim here; released at the end of the run.
+        if !self.running.lock().unwrap().insert(name.to_string()) {
+            return format!(
+                "ERROR: {name} is already mid-task (a dispatch or another manager is running them). \
+                 Delegate to an idle worker or hire a new specialist — the roster is the parallel capacity."
+            );
+        }
         // Refuse-don't-drop, same as the history below: a missing prompt row
         // used to hand the employee an EMPTY system prompt silently. Fall back
         // to the base their kind seeds from, and say so where reflection reads.
@@ -594,9 +639,29 @@ Drop superseded detail, resolved dead ends, and chatter.",
                 chrono::Utc::now().format("%Y-%m-%d %H:%M")
             ),
         ));
+        // A manager opens every task seeing its crew — delegation that depends
+        // on remembering to call list_team does not happen (measured: one
+        // delegate_parallel across nine managers in the redesign's first day).
+        if self.ctx.store.is_manager(name) {
+            let running = self.running.lock().unwrap().clone();
+            let rows: Vec<(String, String, String, bool, bool)> = self
+                .ctx
+                .store
+                .list_agents()
+                .into_iter()
+                .filter(|(n, _, _)| n != name)
+                .map(|(n, r, m)| {
+                    let is_mgr = self.ctx.store.is_manager(&n);
+                    let busy = running.contains(&n);
+                    (n, m, r, is_mgr, busy)
+                })
+                .collect();
+            history.push(Message::text("user", crew_brief(&rows)));
+        }
 
         let mut report = String::from("(employee stopped without a report)");
         let mut fired = false;
+        let mut mgr_exec: u32 = 0;
 
         for _ in 0..self.ctx.cfg.employee_max_iters {
             if self.stop.load(Ordering::Relaxed) {
@@ -685,13 +750,36 @@ Drop superseded detail, resolved dead ends, and chatter.",
                 }
                 self.log_line(name, &call.function.name, &call.function.arguments);
                 let out = if manages && MANAGER_TOOL_NAMES.contains(&call.function.name.as_str()) {
+                    // Delegation resets the crew-check: a manager alternating
+                    // between directing and spot-checking never sees it.
+                    if matches!(call.function.name.as_str(), "delegate" | "delegate_parallel") {
+                        mgr_exec = 0;
+                    }
                     // Boxed on both sides of the manager/crew cycle so the mutually
                     // recursive futures have a nameable, Send type.
                     let fut: futures::future::BoxFuture<'_, String> =
                         Box::pin(self.ceo_tool(name, &call.function.name, &a));
                     tools::truncate(fut.await)
                 } else {
-                    tools::execute(&self.ctx, name, &call.function.name, &a).await
+                    let out = tools::execute(&self.ctx, name, &call.function.name, &a).await;
+                    // The manager crew-check: soft-only sibling of the CEO exec
+                    // ration — one grinding serially through volume hears about
+                    // the crew on every budgeted call past the line.
+                    if manages && ceo_exec_budgeted(&call.function.name) {
+                        mgr_exec += 1;
+                        if mgr_exec > MANAGER_EXEC_SOFT {
+                            format!(
+                                "{out}\n\n[crew check: hands-on call #{mgr_exec} this task. You are a manager with \
+                                 delegate_parallel and hire — volume work belongs to workers running in PARALLEL \
+                                 while you direct. Fan the independent remainder out now, or note in your report \
+                                 why this needed your hands.]"
+                            )
+                        } else {
+                            out
+                        }
+                    } else {
+                        out
+                    }
                 };
                 history.push(Message::tool_result(&call.id, out));
             }
@@ -751,6 +839,7 @@ Drop superseded detail, resolved dead ends, and chatter.",
             let h = serde_json::to_string(&history).unwrap_or_else(|_| "[]".into());
             self.ctx.store.save_agent(name, &role, &prompt_name, &model, &h);
         }
+        self.running.lock().unwrap().remove(name);
         self.log_line(name, "report", &report);
         report
         })

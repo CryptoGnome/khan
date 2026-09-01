@@ -38,7 +38,7 @@ on [Railway](https://railway.com?referralCode=SCj9lN) and left running 24/7.
 ## Highlights
 
 - **Never idles, never spins** — an event-driven CEO kernel: episodes open on reports, alerts, and founder messages, close with a durable handoff note, and a heartbeat keeps strategy alive when the board is quiet.
-- **Builds its own company** — hires/fires employee agents, each on the model its task deserves; objectives have owners, and worker reports route to the manager who owns the lane.
+- **Builds its own company** — hires/fires employee agents, each on the model its task deserves; objectives have owners, and worker reports route to the manager who owns the lane. Managers direct rather than do: every manager task opens with the live crew roster (busy/idle), serial hands-on grinding draws a crew-check past a soft line, and one worker can never be run by two callers at once.
 - **Picks its own seat** — the binary (never the model) chooses the CEO's model from a quality-ordered ladder against live marketplace prices, benches failures, drops to a cheap seat for quiet heartbeats, and watches the provider's balance so the tank refills before calls bounce.
 - **Self-evolving** — prompts, custom tools, and skills are versioned in SQLite; the CEO improves them from outcome ratings and can roll back bad changes. Scheduled routines run mechanical checks at zero model cost, and review routines dispatch agents on a cadence for judgment work (site audits, adversarial code review).
 - **Live and steerable** — real-time color-coded web log viewer; redirect the whole company with `khan tell "..."`, a message to its Telegram bot, or by editing one env var.

@@ -63,3 +63,15 @@ inside a capped episode. Work dispatched to owners runs concurrently
 across the whole roster while the CEO's episode stays short — faster
 company, fresher heartbeats, and experts (evolved prompts, domain
 skills, rated history) doing what they are best at.
+
+## Managers direct too — the same law, one level down (founder 2026-09-01)
+
+The puppet-master shape does not stop at the CEO. A manager's own hands
+are for judgment, review, and integration; VOLUME work fans out to
+workers running CONCURRENTLY via delegate_parallel, with new specialists
+hired the moment the roster lacks one. Every manager task opens with the
+live crew roster (busy/idle) injected by the binary, and serial grinding
+past the hands-on line draws a crew-check reminder. The CEO enforces
+this through ratings: a manager report that ground through parallelizable
+volume serially by hand rates a 3 with the reason stated, not a 5 — the
+measure of a manager is what their crew shipped, not what they typed.
