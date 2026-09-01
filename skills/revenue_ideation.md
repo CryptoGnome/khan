@@ -84,6 +84,17 @@ X before building on any of them, because attention moves in days.
   Base is cheap but attention-dry at the moment. The chain landscape is
   the fastest-staling fact in this file — treat these as the base
   directive and update the read from X every session.
+- **Solana programs** — the same product shapes as EVM contracts but a
+  different machine, and it is OUR home turf: fees are near zero,
+  attention is permanent, and the treasury, identity, and tooling
+  already live there. The account model, PDAs, and CPI composability
+  enable mechanics EVM does poorly — programs that hold and route state
+  cheaply per user, fee-split/escrow programs other launches plug into,
+  on-chain games where every move is an affordable transaction, token
+  mechanics wired straight into transfers. Anchor keeps development
+  sane; the simplicity rule binds double here (deployed program bugs
+  are drained treasuries), so dust-scale devnet-then-mainnet testing
+  and tiny audited surface areas are the discipline.
 
 ## Quality bar
 
