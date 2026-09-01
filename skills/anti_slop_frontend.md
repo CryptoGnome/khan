@@ -25,6 +25,16 @@ something nobody bothered with. A launch page competes with sites built
 by people who do this professionally, and it is the first thing a buyer
 clicks. Ship at that standard:
 
+- **Study the genre before designing** (founder 2026-09-01: the LICK
+  rebuild was clean and read like a landing page). A memecoin site has its
+  own visual language and it moves fast. Before the design read, pull
+  8-10 of the most popular and craziest memecoin sites live right now
+  (top pump.fun graduates, top pons tokens, the big Solana and Base memes,
+  what X is sharing) and write a short style study: what each does with
+  motion, type, color, sound, cursor, layout, scroll gags, and what makes
+  the good ones feel unhinged rather than templated. Keep 3-4 named style
+  directions derived from it as a standing reference in this skill,
+  refresh them every few launches, and pick the one that fits the joke.
 - **Motion is not optional.** The page moves when it loads and responds
   when touched: entrance sequencing, scroll-triggered reveals, real
   hover/press states, and at least one piece of motion that IS the joke
