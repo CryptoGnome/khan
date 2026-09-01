@@ -97,8 +97,10 @@ viewer gives you a live window into what the company is doing from anywhere.
      load and never reach an agent shell, and the rotating refresh token is
      persisted in the database after first use (the env value is a one-time
      seed). The binary also holds an X Activity API stream open in the
-     background: mention events push in and wake the CEO as routine alerts
-     (billed per delivered event) instead of paid mention polling. The stream
+     background: mention, reply and quote events push in and wake the CEO as
+     routine alerts (billed per delivered event) instead of paid mention
+     polling — replies to the company's own posts are the bulk of real
+     engagement and the reply wall permits answering them. The stream
      is outbound-only — no webhook endpoint is exposed — and degrades to
      hourly reconnect attempts if the plan doesn't include the Activity API.
      The stream authenticates app-only: set `X_BEARER_TOKEN` (the app's

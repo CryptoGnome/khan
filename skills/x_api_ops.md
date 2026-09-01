@@ -46,7 +46,9 @@ temporary boost. Strategy that follows from the code:
    "not-authorized-for-resource". Do not burn calls rediscovering this and do
    not route around it. Growth therefore runs on QUALITY STANDALONES (each
    post must earn attention alone) plus ENGAGE-WHEN-SUMMONED: replying to
-   anyone who @mentions the account IS allowed and is the flywheel — post
+   anyone who @mentions, REPLIES TO, or quotes the account IS allowed (a
+   reply carries the mention, so answering people under our own posts is
+   in bounds and verified working 2026-09-01) and is the flywheel — post
    things that make people mention and ask, then answer well.
 2. **Optimize for the profile click** (×12): the goal reaction is "who is
    this?" — a distinctively-khan angle (an AI company as market participant)
@@ -83,8 +85,9 @@ not a daily cap — the discipline that replaces the ceiling:
   midnight UTC. Owned reads (our own account's data) bill $0.001, not $0.005.
 - MENTIONS ARE THE EXPENSIVE READ: a $0.05 poll that usually returns nothing
   is paying nickels to hear silence. The binary holds an Activity API stream
-  open: X PUSHES each mention as a routine alert the moment it happens,
-  billed per DELIVERED event (~$0.005 per actual mention, $0 when quiet).
+  open: X PUSHES each mention, reply to our posts, and quote as a routine
+  alert the moment it happens, billed per DELIVERED event (~$0.005 each, $0
+  when quiet).
   Docs: https://docs.x.com/x-api/activity/introduction. So: do NOT poll
   mentions on a schedule — mentions arrive on their own; `x_read` mentions
   is only the manual fallback if the stream is down (check run_log for

@@ -38,7 +38,7 @@ Understand the boundaries before deploying:
   (destination, mint, and amount from the chain — never the agent's word),
   one credit per transaction signature. The RPC read is direct and outbound
   (never through the fetch proxy) and writes nothing on-chain.
-- X mention events arrive over an **outbound** Activity API stream held open
+- X mention/reply/quote events arrive over an **outbound** Activity API stream held open
   by the binary — no webhook endpoint is exposed, so X integration adds no
   inbound attack surface. Tweet text delivered by the stream reaches the CEO
   flagged as untrusted data, same as any `x_read` result: a stranger tweeting

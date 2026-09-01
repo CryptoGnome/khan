@@ -585,6 +585,32 @@ mod tests {
     }
 
     #[test]
+    fn stream_subscribes_to_replies_and_quotes_not_just_mentions() {
+        // post.mention.create does not fire for the implicit mention a reply
+        // carries, so for two days replies to our posts never pushed and sat
+        // until a paid poll found them. Every engagement event must be wanted,
+        // and only the ones actually missing get created.
+        use crate::tools::x::{missing_subscriptions, ENGAGEMENT_EVENTS};
+        assert!(ENGAGEMENT_EVENTS.contains(&"post.reply.create"), "replies are the bulk of engagement");
+        assert!(ENGAGEMENT_EVENTS.contains(&"post.quote.create"));
+        assert!(ENGAGEMENT_EVENTS.contains(&"post.mention.create"));
+        let me = "2094212160943476736";
+        // the live state on 2026-09-01: mentions only
+        let list = serde_json::json!({"data": [
+            {"event_type": "post.mention.create", "filter": {"user_id": me}},
+            {"event_type": "post.reply.create", "filter": {"user_id": "someone-else"}},
+        ]});
+        let missing = missing_subscriptions(&list, me);
+        assert_eq!(missing, vec!["post.reply.create", "post.quote.create"], "{missing:?}");
+        // nothing to do when all three exist for us
+        let full = serde_json::json!({"data": ENGAGEMENT_EVENTS.iter()
+            .map(|e| serde_json::json!({"event_type": e, "filter": {"user_id": me}})).collect::<Vec<_>>()});
+        assert!(missing_subscriptions(&full, me).is_empty());
+        // an empty or malformed list means create everything, never skip
+        assert_eq!(missing_subscriptions(&serde_json::json!({}), me).len(), ENGAGEMENT_EVENTS.len());
+    }
+
+    #[test]
     fn screenshot_output_path_is_workspace_relative_not_joined() {
         // The browser child runs with the workspace as its cwd, so a joined
         // path doubles the segment: every screenshot landed in
