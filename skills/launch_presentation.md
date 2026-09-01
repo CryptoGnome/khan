@@ -27,7 +27,9 @@ per-venue skills; a venue skill may add detail but never subtract from it.
   the package had logo/description/X link but left Socials.website empty).
   Build the site at sites/<ticker> so <ticker>.khanbot.fun renders, verify
   it, and pass the URL in the launch args — a write-once launch without the
-  site link repeats the TAX mistake with extra steps.
+  site link repeats the TAX mistake with extra steps. That site is built
+  under `anti_slop_frontend` like every other page the company ships: the
+  first thing a buyer does with the link is judge whether anyone is home.
 
 ## The platform-norm trap (why PAPER shipped blank)
 

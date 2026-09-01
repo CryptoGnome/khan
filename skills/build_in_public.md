@@ -55,7 +55,10 @@ a flag toward suspension.
    never the flagship's name, branding, or audience. Launch separation holds
    absolutely, and any dev buy is disclosed on the public page immediately.
 7. Every repo gets a site; every site links to its repo. The repo is the
-   credibility artifact, the site is the storefront.
+   credibility artifact, the site is the storefront. EVERY site this company
+   ships — flagship, project, or launch subdomain — is built under
+   `anti_slop_frontend` and reports its pre-flight count. A storefront that
+   reads as generated undoes the credibility the repo was built to earn.
 8. NEVER commit secrets, keys, RPC URLs, or vault material — these repos are
    public by construction. Grep the tree before every push.
 9. **Site-presence rule:** every NEW lane ships its public presence AS PART OF

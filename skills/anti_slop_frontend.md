@@ -1,4 +1,4 @@
-Countable guardrails that keep khanbot.fun pages, share cards, and public copy from looking AI-templated — banned fonts/palettes/layouts, hero and CTA limits, the em-dash ban, and a pre-flight checklist a reviewer can literally count. Load before building or redesigning any public page section, landing view, share card, or marketing copy; also load for outsider-eyes site reviews. Not for the terminal-style live log itself (data-dense UI plays by its own rules).
+Countable guardrails that keep EVERY page this company ships — khanbot.fun, project and token launch subdomains under sites/, landing pages, share cards, public copy — from looking AI-templated: banned fonts/palettes/layouts, hero and CTA limits, the em-dash ban, and a pre-flight checklist a reviewer can literally count. Load before building or redesigning ANY public page, including a memecoin or project site at sites/<name>; also load for outsider-eyes site reviews. Not for the terminal-style live log itself (data-dense UI plays by its own rules).
 
 # Anti-slop frontend — pages that don't look generated
 
@@ -9,9 +9,21 @@ verify pass/fail without taste debates.
 ## When to use
 - Building or changing any public-facing page section: homepage/landing
   views, tabs, share cards, coin pages, dev.to posts with layout.
+- Building a token or project site at sites/<name> (launch subdomains are
+  pages too, and they are the first thing a buyer clicks).
 - Running the site-outsider-review routine: this is the checklist.
 - NOT for the live-log terminal view itself — density and monospace are its
   identity; judge it on legibility, not on these rules.
+
+## Meme sites: loud is a direction, generated is still a failure
+A joke coin's page SHOULD be loud, dumb, and single-minded — that is its
+Design Read, and the restraint rules bend to it: a garish accent, an
+oversized headline, and one absurd image can all be correct here. What
+never bends is the tells list. Generic font stacks, the centered hero over
+a stock gradient, three equal feature cards, invented numbers, and visible
+em-dashes read as AI-generated on a meme site exactly as they do on a
+landing page, and a buyer reads generated as abandoned. Commit to the joke
+hard enough that no template could have produced it.
 
 ## Quick reference — the banlist (the AI tells)
 - Fonts: not Inter/Roboto/system-default. Emphasize with weight/italic of
