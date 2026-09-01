@@ -254,7 +254,10 @@ token count is printed. **There is no spend cap — watch it.**
   changes are judged on outcomes, not vibes.
 - **Live steering** — `khan tell "..."` from a second terminal (or a Telegram
   message from the allowlisted founder chat) queues a founder message; the
-  running CEO wakes on it immediately. No restart needed.
+  running CEO wakes on it immediately. No restart needed. A `khan tell` is
+  also a standing directive: it stays in the CEO's brief every episode until
+  the CEO acknowledges it done with `ack_founder`, so an instruction that
+  misses one episode's step cap is not lost.
 - **Routines have owners** — a routine can name the employee who owns its
   domain, and its alerts then dispatch straight to that owner (report
   routing brings back the outcome); only ownerless alerts wake the CEO,

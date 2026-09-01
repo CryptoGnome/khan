@@ -585,6 +585,35 @@ mod tests {
     }
 
     #[test]
+    fn founder_directives_stand_in_the_brief_until_acked() {
+        // The 23:44Z x_api_ops fold request was read, stated as "must land in
+        // the skill", then lost at the episode cut-off. A khan tell now stays
+        // in the brief until the CEO acks it; a Telegram turn does not.
+        let store = crate::state::Store::open(":memory:").unwrap();
+        store.queue_message("fold the reply rules into x_api_ops");
+        store.queue_message("[via Telegram] hey, how's it going");
+        assert!(store.open_directives().is_empty(), "undelivered messages are not yet open");
+        let drained = store.drain_messages();
+        assert_eq!(drained.len(), 2);
+        let id = drained[0].0;
+        let open = store.open_directives();
+        assert_eq!(open.len(), 1, "telegram chat is not a standing directive: {open:?}");
+        assert_eq!(open[0].0, id);
+        let text = crate::agent::open_directives_text(&open);
+        assert!(text.contains("OPEN FOUNDER DIRECTIVES"), "{text}");
+        assert!(text.contains(&format!("#{id} [")), "{text}");
+        assert!(text.contains("fold the reply rules"), "{text}");
+        // draining again does not re-deliver, and the directive still stands
+        assert!(store.drain_messages().is_empty());
+        assert_eq!(store.open_directives().len(), 1);
+        assert!(!store.ack_message(999), "unknown id is not an ack");
+        assert!(store.ack_message(id));
+        assert!(!store.ack_message(id), "an ack is once");
+        assert!(store.open_directives().is_empty());
+        assert!(crate::agent::open_directives_text(&[]).is_empty(), "no block when nothing is open");
+    }
+
+    #[test]
     fn dm_bait_is_flagged_and_real_questions_are_not() {
         use crate::tools::x::looks_like_bait;
         for bait in [

@@ -281,6 +281,17 @@ impl Store {
         // alert, so it self-triaged books drift by hand (2026-08-31) instead
         // of a finance owner handling it in parallel.
         let _ = conn.execute("ALTER TABLE routines ADD COLUMN owner TEXT NOT NULL DEFAULT ''", []);
+        // A founder message used to be consumed as a one-time event: if the
+        // CEO did not finish acting on it inside that episode, the intent
+        // was gone. Delivered-but-unacknowledged messages now stand in the
+        // brief until the CEO acks them.
+        // The column lands once; everything delivered before it existed was
+        // handled or lost under the old rules, and resurrecting every khan
+        // tell ever sent would bury the brief. Only messages delivered from
+        // here on stand until acked.
+        if conn.execute("ALTER TABLE messages ADD COLUMN acked INTEGER NOT NULL DEFAULT 0", []).is_ok() {
+            let _ = conn.execute("UPDATE messages SET acked=1 WHERE delivered=1", []);
+        }
         Ok(Store { conn: Mutex::new(conn), log_tx: broadcast::channel(512).0 })
     }
 
@@ -1173,8 +1184,9 @@ explore (buys knowledge).\n{}\n",
             || count("SELECT COUNT(*) FROM routine_alerts WHERE delivered=0") > 0
     }
 
-    /// Undelivered founder messages, oldest first; marks them delivered.
-    pub fn drain_messages(&self) -> Vec<String> {
+    /// Undelivered founder messages with their ids, oldest first; marks them
+    /// delivered. Delivery is not acknowledgement — see open_directives.
+    pub fn drain_messages(&self) -> Vec<(i64, String)> {
         let c = self.conn.lock().unwrap();
         let mut stmt = match c.prepare("SELECT id, msg FROM messages WHERE delivered=0 ORDER BY id") {
             Ok(s) => s,
@@ -1188,7 +1200,32 @@ explore (buys knowledge).\n{}\n",
         for (id, _) in &rows {
             let _ = c.execute("UPDATE messages SET delivered=1 WHERE id=?1", params![id]);
         }
-        rows.into_iter().map(|(_, m)| m).collect()
+        rows
+    }
+
+    /// `khan tell` messages delivered to the CEO and not yet acknowledged,
+    /// oldest first: (id, created_at, msg). Telegram turns are conversation,
+    /// not standing directives, and are excluded — they carry their own
+    /// context through the telegram brief.
+    pub fn open_directives(&self) -> Vec<(i64, String, String)> {
+        let c = self.conn.lock().unwrap();
+        let mut stmt = match c.prepare(
+            "SELECT id, created_at, msg FROM messages WHERE delivered=1 AND acked=0 AND msg NOT LIKE '[via Telegram]%' ORDER BY id",
+        ) {
+            Ok(s) => s,
+            Err(_) => return vec![],
+        };
+        stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .map(|it| it.filter_map(|x| x.ok()).collect())
+            .unwrap_or_default()
+    }
+
+    /// Mark a founder directive done. False when no such open directive.
+    pub fn ack_message(&self, id: i64) -> bool {
+        let c = self.conn.lock().unwrap();
+        c.execute("UPDATE messages SET acked=1 WHERE id=?1 AND delivered=1 AND acked=0", params![id])
+            .map(|n| n > 0)
+            .unwrap_or(false)
     }
 
     // --- delegation ratings (ground truth for prompt evolution) ---

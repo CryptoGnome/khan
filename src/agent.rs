@@ -86,7 +86,36 @@ fn ceo_schemas() -> Vec<Value> {
         tool("finish_episode", "Close this working episode. Your transcript is DISPOSABLE — only what you write here, on the board, and in memories survives to the next episode. The note is your handoff to your next self: what changed, what is in flight and with whom, and what the next episode must do or know. Call this when the events you woke for are handled and everything else is delegated or on the board.", json!({
             "note": {"type": "string", "description": "What changed, what is in flight, what the next episode must know. Max ~1500 chars."}}),
             json!(["note"])),
+        tool("ack_founder", "Mark a founder directive DONE. Every `khan tell` message stays in your brief under OPEN FOUNDER DIRECTIVES, episode after episode, until you call this with its id — reading it is not doing it. Ack only when the thing asked for has actually happened (the skill version exists, the dispatch fired, the decision is on the board); an unfinished directive that falls out of the brief is how founder instructions used to get lost at the episode cut-off.", json!({
+            "id": {"type": "integer", "description": "The directive's id as shown in the brief (#id)"},
+            "note": {"type": "string", "description": "One line: what was done to satisfy it"}}),
+            json!(["id"])),
     ]
+}
+
+/// The standing block of founder directives for the brief — empty when none
+/// are open. A `khan tell` used to be a one-time event: the CEO read the
+/// 23:44Z x_api_ops fold request, said "must land in the skill", hit the
+/// episode cut-off looking for a file, and the next heartbeat had no memory
+/// of it. Ceiling: the ten newest are shown in full, older ones counted.
+pub(crate) fn open_directives_text(open: &[(i64, String, String)]) -> String {
+    if open.is_empty() {
+        return String::new();
+    }
+    const SHOW: usize = 10;
+    let mut out = String::from(
+        "\n\nOPEN FOUNDER DIRECTIVES (delivered, NOT yet acknowledged — each stays here every episode until you ack_founder(id) once it is actually done; reading is not doing):",
+    );
+    let skip = open.len().saturating_sub(SHOW);
+    if skip > 0 {
+        out.push_str(&format!("\n({skip} older still open — ack or act on those too)"));
+    }
+    for (id, ts, msg) in &open[skip..] {
+        let text: String = msg.chars().take(600).collect();
+        let more = if msg.chars().count() > 600 { "…" } else { "" };
+        out.push_str(&format!("\n#{id} [{}]: {text}{more}", ts.get(..16).unwrap_or(ts)));
+    }
+    out
 }
 
 /// Marks the running brief that replaces compacted history, so a later compaction
@@ -206,7 +235,7 @@ const CEO_TOOL_NAMES: &[&str] = &[
     "hire", "delegate", "delegate_parallel", "dispatch", "team_status", "rate_work", "fire", "list_team",
     "add_routine", "add_review_routine", "remove_routine", "list_routines", "own_routine",
     "update_prompt", "rollback_prompt", "retire_skill", "save_playbook", "finish", "objectives",
-    "finish_episode", "message_founder",
+    "finish_episode", "message_founder", "ack_founder",
 ];
 
 /// Tools that read state without changing it. A CEO turn whose calls all come
@@ -1202,6 +1231,16 @@ Drop superseded detail, resolved dead ends, and chatter.",
                     other => format!("ERROR: unknown action '{other}' (add/update/done/drop)"),
                 }
             }
+            "ack_founder" => {
+                let id = a["id"].as_i64().unwrap_or(0);
+                if self.ctx.store.ack_message(id) {
+                    let note = s(a, "note");
+                    self.log_line("CEO", "founder-ack", &format!("directive #{id} done{}", if note.is_empty() { String::new() } else { format!(": {note}") }));
+                    format!("directive #{id} acknowledged — it leaves the brief")
+                } else {
+                    format!("ERROR: no open founder directive #{id} (already acknowledged, or not delivered yet)")
+                }
+            }
             "message_founder" => {
                 let Some((token, chat)) = self.ctx.cfg.telegram() else {
                     return "ERROR: the Telegram line is not configured".into();
@@ -1722,12 +1761,13 @@ detail, and anything already acted on and closed.",
                 .as_deref()
                 .map(|p| format!("\n\nMODEL POLICY from your founder (standing — applies to every seat and hire):\n{p}"))
                 .unwrap_or_default();
+            let directives = open_directives_text(&self.ctx.store.open_directives());
             history.push(Message::text(
                 "user",
                 format!(
                     "[Company brief — composed fresh each episode; durable truth lives on the objective board, in memories and in skills]\n\
 It is now {now} UTC. Anything dated before this already happened. A dated announcement is history, not a catalyst — and a date WITHOUT a year never resolves to the current calendar: it resolves to the document's own publication date (commit date, Last-Modified, weekday arithmetic). Check that before treating any date as upcoming.\n\n\
-BASE DIRECTIVE from your founder:\n{directive}\n\nTEAM:\n{roster}{policy}\n\nRECENT ACTIVITY (public log tail):\n{recent}",
+BASE DIRECTIVE from your founder:\n{directive}\n\nTEAM:\n{roster}{policy}{directives}\n\nRECENT ACTIVITY (public log tail):\n{recent}",
                     now = chrono::Utc::now().format("%Y-%m-%d %H:%M")
                 ),
             ));
@@ -1883,7 +1923,7 @@ keep the board honest, then close with finish_episode(note)."
             // in the scratch until the episode closes: a restart mid-episode
             // replays them instead of eating them.
             let mut tg_context_injected = false;
-            for m in self.ctx.store.drain_messages() {
+            for (msg_id, m) in self.ctx.store.drain_messages() {
                 work_arrived = true;
                 event_kind = "founder".into();
                 // A Telegram message arrives with the conversation so far: the
@@ -1917,7 +1957,12 @@ keep the board honest, then close with finish_episode(note)."
                 }
                 let scratch = self.ctx.store.kv_get("episode_scratch").unwrap_or_default();
                 self.ctx.store.kv_set("episode_scratch", &format!("{scratch}\n---\n{m}"));
-                history.push(Message::text("user", format!("[Message from your founder — act on this now]\n{m}")));
+                let standing = if m.starts_with("[via Telegram]") {
+                    String::new()
+                } else {
+                    format!(" — directive #{msg_id}: it stays in your brief every episode until ack_founder({msg_id}) once it is actually done")
+                };
+                history.push(Message::text("user", format!("[Message from your founder — act on this now{standing}]\n{m}")));
             }
 
             // A quiet heartbeat stops being quiet the moment real work drains
