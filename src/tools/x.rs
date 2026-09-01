@@ -325,7 +325,7 @@ async fn run_stream_once(ctx: &ToolCtx, http: &reqwest::Client) -> Result<()> {
     // Advisory, not a gate: the console can manage the subscription even
     // when this call is refused — a failed check must never keep the stream
     // closed.
-    if let Err(e) = ensure_subscription(ctx, http, &token, &user_id).await {
+    if let Err(e) = ensure_subscription(ctx, http, &token, &user_token, &user_id).await {
         ctx.store.log("x-activity", "stream", &format!(
             "subscription check failed ({}) — connecting stream anyway; manage the subscription in the developer console",
             e.to_string().chars().take(200).collect::<String>()
@@ -393,10 +393,23 @@ pub(crate) fn missing_subscriptions<'a>(list: &Value, user_id: &str) -> Vec<&'a 
 
 /// Create whichever engagement subscriptions our account is missing. Checked
 /// once per (re)connect, not per event.
-async fn ensure_subscription(ctx: &ToolCtx, http: &reqwest::Client, token: &str, user_id: &str) -> Result<()> {
+///
+/// Two tokens on purpose: the list (and the stream) take the app-only token,
+/// but creating a subscription on someone's replies is a USER-context call —
+/// the first post.reply.create attempt with the app token came back 400
+/// "OauthAccessTokenRequired" (2026-09-01 23:35Z). Each type is attempted on
+/// its own and a failure is logged, not returned: one refused type must not
+/// keep the others from being created.
+async fn ensure_subscription(
+    ctx: &ToolCtx,
+    http: &reqwest::Client,
+    app_token: &str,
+    user_token: &str,
+    user_id: &str,
+) -> Result<()> {
     let resp = http
         .get("https://api.x.com/2/activity/subscriptions")
-        .bearer_auth(token)
+        .bearer_auth(app_token)
         .send()
         .await
         .context("subscription list failed")?;
@@ -407,23 +420,23 @@ async fn ensure_subscription(ctx: &ToolCtx, http: &reqwest::Client, token: &str,
     }
     let v: Value = serde_json::from_str(&body).unwrap_or_default();
     for event_type in missing_subscriptions(&v, user_id) {
-        let resp = http
-            .post("https://api.x.com/2/activity/subscriptions")
-            .bearer_auth(token)
-            .json(&json!({
-                "event_type": event_type,
-                "filter": {"user_id": user_id},
-                "tag": format!("khan-{}", event_type.split('.').nth(1).unwrap_or("event"))
-            }))
-            .send()
-            .await
-            .context("subscription create failed")?;
-        let status = resp.status();
-        let body = resp.text().await.unwrap_or_default();
-        if !status.is_success() {
-            bail!("subscription create for {event_type} returned {status}: {}", body.chars().take(300).collect::<String>());
+        let body = json!({
+            "event_type": event_type,
+            "filter": {"user_id": user_id},
+            "tag": format!("khan-{}", event_type.split('.').nth(1).unwrap_or("event"))
+        });
+        let outcome = match http.post("https://api.x.com/2/activity/subscriptions").bearer_auth(user_token).json(&body).send().await {
+            Err(e) => Err(format!("request failed: {e}")),
+            Ok(resp) => {
+                let status = resp.status();
+                let text = resp.text().await.unwrap_or_default();
+                if status.is_success() { Ok(()) } else { Err(format!("returned {status}: {}", text.chars().take(300).collect::<String>())) }
+            }
+        };
+        match outcome {
+            Ok(()) => ctx.store.log("x-activity", "stream", &format!("created {event_type} subscription")),
+            Err(why) => ctx.store.log("x-activity", "stream", &format!("subscription create for {event_type} {why}")),
         }
-        ctx.store.log("x-activity", "stream", &format!("created {event_type} subscription"));
     }
     Ok(())
 }
