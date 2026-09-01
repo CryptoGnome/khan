@@ -91,10 +91,16 @@ X before building on any of them, because attention moves in days.
   enable mechanics EVM does poorly — programs that hold and route state
   cheaply per user, fee-split/escrow programs other launches plug into,
   on-chain games where every move is an affordable transaction, token
-  mechanics wired straight into transfers. Anchor keeps development
-  sane; the simplicity rule binds double here (deployed program bugs
-  are drained treasuries), so dust-scale devnet-then-mainnet testing
-  and tiny audited surface areas are the discipline.
+  mechanics wired straight into transfers. But programs are paid for BY
+  THE BYTE: deploy rent scales with binary size, so every instruction
+  and dependency in the program is SOL locked up at launch — write the
+  MOST MINIMAL program that does the job (strip unused Anchor features,
+  avoid fat dependencies, keep instructions few), sized small for rent
+  without ever trading away security: minimal and secure, never minimal
+  instead of secure. The simplicity rule binds double anyway (deployed
+  program bugs are drained treasuries), and NOTHING deploys to mainnet
+  without a full devnet/testnet pass first — a testnet system for every
+  program, every time, then dust-scale on mainnet before real size.
 
 ## Quality bar
 
