@@ -149,20 +149,29 @@ with sync_playwright() as p:
     b.close()
 "#;
 
+/// The shell line that drives one render. `out` is interpreted by the browser
+/// child, whose cwd is the workspace — so it must be WORKSPACE-RELATIVE, never
+/// workspace-joined. Joining produced `workspace/workspace/...`: every
+/// screenshot landed one directory deep, the byte check read the placeholder
+/// at the real path, and the tool reported "produced no bytes" on every URL
+/// while the PNG sat on disk a level down. Arguments ride single-quoted; a
+/// quote inside a URL is percent-encoded so it cannot break out of the word.
+pub(crate) fn render_cmd(url: &str, mode: &str, out: &str) -> String {
+    format!(
+        "python3 -c \"import os;exec(os.environ['KHAN_RENDER_PY'])\" '{}' {} '{}'",
+        url.replace('\'', "%27"),
+        mode,
+        out.replace('\'', "")
+    )
+}
+
 async fn render(workspace: &std::path::Path, url: &str, mode: &str, out: &str) -> Result<String> {
     if !(url.starts_with("http://") || url.starts_with("https://")) {
         anyhow::bail!("render needs an http(s) url");
     }
     let mut env = std::collections::HashMap::new();
     env.insert("KHAN_RENDER_PY".to_string(), RENDER_PY.to_string());
-    // Arguments ride single-quoted; a quote inside a URL is percent-encoded so
-    // it cannot break out of the shell word.
-    let cmd = format!(
-        "python3 -c \"import os;exec(os.environ['KHAN_RENDER_PY'])\" '{}' {} '{}'",
-        url.replace('\'', "%27"),
-        mode,
-        out.replace('\'', "")
-    );
+    let cmd = render_cmd(url, mode, out);
     // One retry: a browser launch can lose a race for memory when several
     // renders land together, and the second attempt costs less than the agent
     // deciding the page is unreachable.
@@ -302,7 +311,8 @@ pub async fn screenshot(ctx: &ToolCtx, url: &str, path: &str) -> Result<String> 
     // browser writes there; the empty file is overwritten by the render.
     super::fs::write_binary(ctx, path, &[])?;
     let abs = ctx.workspace.join(path);
-    let outcome = render(&ctx.workspace, url, "shot", &abs.to_string_lossy()).await;
+    // `path`, not `abs`: the child renders with the workspace as its cwd.
+    let outcome = render(&ctx.workspace, url, "shot", path).await;
     let bytes = std::fs::metadata(&abs).map(|m| m.len()).unwrap_or(0);
     if outcome.is_err() || bytes == 0 {
         // Never leave the empty placeholder behind: a 0-byte PNG on disk reads

@@ -499,6 +499,22 @@ mod tests {
     }
 
     #[test]
+    fn screenshot_output_path_is_workspace_relative_not_joined() {
+        // The browser child runs with the workspace as its cwd, so a joined
+        // path doubles the segment: every screenshot landed in
+        // workspace/workspace/... while the byte check read the placeholder at
+        // the real path and reported "produced no bytes" for every URL.
+        let cmd = crate::tools::web::render_cmd("https://fart.dev", "shot", "pumpfun/tmp/a.png");
+        assert!(cmd.ends_with("'pumpfun/tmp/a.png'"), "{cmd}");
+        assert!(!cmd.contains("workspace/"), "output path must not carry a workspace segment: {cmd}");
+        assert!(cmd.contains("'https://fart.dev' shot "), "{cmd}");
+        // a quote in the url cannot break out of its shell word
+        let cmd = crate::tools::web::render_cmd("https://x.test/'; rm -rf /;'", "text", "");
+        assert!(!cmd.contains("rm -rf /;'"), "{cmd}");
+        assert!(cmd.contains("%27"), "{cmd}");
+    }
+
+    #[test]
     fn idle_capacity_line_names_the_waste() {
         // "Everything is owned" closed episodes while 51% of 2026-09-01 ran at
         // zero-or-one active agents against ten open objectives — the line
