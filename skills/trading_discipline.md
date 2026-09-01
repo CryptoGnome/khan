@@ -48,6 +48,22 @@ working — a company that dies holding its floor protected nothing.
   dust that revenue operations need keep flowing at any treasury level.
   These are the company's ability to think and act; the floor never
   outranks them.
+- **Size against the OPERATIONAL floor, never the posture line** (founder
+  2026-09-01, after the freeze). These are two different numbers and
+  conflating them stops the company dead. The operational floor is gas
+  obligations only: enough SOL to exit every open position and run a claim
+  cycle, ~0.15 SOL at current fees. It is the ONLY term `deployable`
+  subtracts:
+  `deployable = MAX(0, treasury − operational_floor − open_committed)`.
+  The posture line (the founder's 5.0 SOL) triggers this section and never
+  enters the sizing formula. Do not pad the floor with a claim cycle's
+  buyback leg (that is funded by the claim itself) or a reserved dev buy
+  (an ambition, not an obligation). Sizing against the posture line is how
+  4.717 SOL of live treasury computed to ZERO deployable and froze every
+  lane, while fuel kept draining that same treasury — the money was not
+  preserved, it was just spent on overhead instead of on attempts to earn.
+  A company only stops when it can no longer pay the gas to sell what it
+  holds. Until then it is still playing.
 - **Capital gets rationed, ideas do not**: below the floor, spending needs
   an underwritten revenue premise — portfolio entries, infra upgrades and
   payouts wait, and deployable for premise-less bets is zero. But
