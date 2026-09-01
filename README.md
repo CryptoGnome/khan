@@ -107,8 +107,11 @@ viewer gives you a live window into what the company is doing from anywhere.
      Unset = the tools and the stream don't exist.
      X spend is governed by an in-binary **budget ledger** (seeded at $5):
      every post, read, and delivered stream event debits it, paid calls
-     refuse at $0, and the balance rides every tool result. Agents check it
-     with `x_read` mode `budget` (free) — never via the X API or console.
+     refuse at $0, and the balance rides every tool result. The ledger
+     mirrors X's real billing rules: per-resource charges deduplicated per
+     UTC day (same-day re-reads are free), empty results free, owned reads
+     at the reduced rate. Agents check the balance with `x_read` mode
+     `budget` (free) — never via the X API or console.
    - `CC_FUND_SOL_ADDRESS` *(optional)* — the Solana address that recharges
      the X pay-per-use wallet: agents top up by sending USDC (SPL, mainnet)
      to it, then call `x_topup(tx_signature)`; the binary verifies the

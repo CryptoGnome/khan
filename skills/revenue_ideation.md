@@ -40,7 +40,13 @@ what's printing fees, what agent teams are launching), read the quote
 threads where revenue screenshots circulate, and follow the money
 language ("fees", "revenue", "paying users"), not the hype language.
 Reads are cheap; ride the X budget ledger like every other call and keep
-sessions to a few well-chosen searches, not a firehose.
+sessions to a few well-chosen searches, not a firehose. Order of
+operations: FREE sources first (web_search, RSS, HN, on-chain data) for
+anything that is not X-native, then X for what only X has — and batch the
+X reads within one UTC day, because X deduplicates per-resource daily:
+re-reads the same day are free, so a session that re-touches the morning's
+posts costs nothing extra, while spreading the same reads across midnight
+UTC pays twice.
 
 ## Output contract — every idea leaves as a PREMISE
 

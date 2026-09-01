@@ -214,6 +214,8 @@ impl Store {
              INSERT INTO x_ledger(ts, kind, amount_usd, detail)
                 SELECT datetime('now'), 'topup', 5.0, 'founder seed'
                 WHERE NOT EXISTS (SELECT 1 FROM x_ledger);
+             CREATE TABLE IF NOT EXISTS x_seen (
+                rid TEXT NOT NULL, day TEXT NOT NULL, PRIMARY KEY (rid, day));
              CREATE TABLE IF NOT EXISTS routine_alerts (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL,
                 name TEXT NOT NULL, detail TEXT NOT NULL, delivered INTEGER NOT NULL DEFAULT 0);
@@ -997,6 +999,31 @@ explore (buys knowledge).\n{}\n",
             );
         }
         bal
+    }
+
+    /// Record which X resources were returned today and report how many are
+    /// NEW. X bills per distinct resource per UTC day (24h deduplication,
+    /// docs.x.com pricing, verified 2026-09-01): a post fetched twice in one
+    /// day is charged once, so the ledger must only debit first sightings or
+    /// it drifts pessimistic and strands real prepaid credits at a fake $0.
+    /// `day` is the caller's UTC date; rows from other days are purged here,
+    /// keeping the table one day wide.
+    pub fn x_mark_seen(&self, ids: &[&str], day: &str) -> usize {
+        let c = self.conn.lock().unwrap();
+        let _ = c.execute("DELETE FROM x_seen WHERE day <> ?1", params![day]);
+        let mut new = 0;
+        for rid in ids {
+            if c.execute(
+                "INSERT OR IGNORE INTO x_seen(rid, day) VALUES(?1, ?2)",
+                params![rid, day],
+            )
+            .unwrap_or(0)
+                > 0
+            {
+                new += 1;
+            }
+        }
+        new
     }
 
     /// Credit a verified top-up and return the new balance. Re-arms the

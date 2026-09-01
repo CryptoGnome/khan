@@ -379,6 +379,22 @@ mod tests {
     }
 
     #[test]
+    fn x_ledger_mirrors_the_real_billing_rules() {
+        // X bills per distinct resource per UTC day (dedup verified against
+        // docs.x.com 2026-09-01): first sighting counts, a re-read the same
+        // day is free, a new day charges again. Without this the ledger
+        // drifts pessimistic and strands prepaid credits at a fake $0.
+        let dir = std::env::temp_dir().join(format!("khan-xseen-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let store = crate::state::Store::open(dir.join("khan.db").to_str().unwrap()).unwrap();
+        assert_eq!(store.x_mark_seen(&["t1", "t2", "t3"], "2026-09-01"), 3);
+        assert_eq!(store.x_mark_seen(&["t1", "t2"], "2026-09-01"), 0, "same-day re-read is free");
+        assert_eq!(store.x_mark_seen(&["t2", "t4"], "2026-09-01"), 1, "only the unseen one bills");
+        assert_eq!(store.x_mark_seen(&["t1"], "2026-09-02"), 1, "the window resets at midnight UTC");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn fuel_anchor_outranks_stale_payload_errors() {
         // With a gauge reading: the authoritative dollar figure leads, and the
         // stale-error warning is present (the 08-31 false emergency: a 41h-old

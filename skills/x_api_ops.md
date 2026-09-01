@@ -75,6 +75,12 @@ not a daily cap — the discipline that replaces the ceiling:
   credits the verified amount. Topping up spends treasury: weigh it like any
   other spend and note it in the episode report.
 - Reply/post (no URL) $0.015 · mentions check (10) ~$0.05 · search (10) ~$0.05.
+- FREE BY THE BILLING RULES (verified vs docs.x.com 2026-09-01, mirrored by
+  the ledger): empty results, failed requests, and RE-READS — X deduplicates
+  per UTC day, so a post already fetched today costs nothing to fetch again.
+  Work WITH this: batch related searches into the same UTC day, re-check a
+  watched thread freely within the day, and remember the meter resets at
+  midnight UTC. Owned reads (our own account's data) bill $0.001, not $0.005.
 - MENTIONS ARE THE EXPENSIVE READ: a $0.05 poll that usually returns nothing
   is paying nickels to hear silence. The binary holds an Activity API stream
   open: X PUSHES each mention as a routine alert the moment it happens,
