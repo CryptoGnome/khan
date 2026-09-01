@@ -50,6 +50,51 @@ Treat every pons website as unverified presentation. Therefore:
   is a partnership conversation via the project's verified X account —
   route around it with v1, do not probe it.
 
+## Launch economics: the buyer's side comes first (founder 2026-09-01)
+
+Read from the v2 docs directly, so nobody relitigates it from memory:
+
+- **Two separate charges.** The standard trading fee (split pons / creator /
+  buyback) and an OPTIONAL `creatorTaxBps` that goes 100% to the creator.
+  The docs name the tax as the thing a trader checks before buying: "A
+  launch with no creator tax is charging you the standard fee and nothing
+  else." So `creatorTaxBps` is ALWAYS 0 on our launches. It is the one
+  number that makes our token cost more to trade than the launch next to
+  it, and no take rate is worth being the expensive option.
+- **The actual split**, from the live FeePolicySnapshot on the meme hook
+  (curveFeeBps 100, protocolFeeShareBps 3000, buybackBurnBps 5000) — not
+  from anyone's memory: the trading fee is 1%, pons takes 30% of it
+  (0.30%), and 0.70% is the creator side. With buybacks ON, half the
+  creator side (0.35%) is spent buying the token back and 0.35% still
+  arrives as cash. Buybacks do NOT zero our fees; they halve the cash leg.
+- **`buybackEnabled` is ON.** Be precise about what it is and is not: it
+  is not a trader reward, and nobody is airdropped anything. It converts
+  half our cash into real bids, and bought tokens are locked and released
+  over five years on a weighted clock, split creator/protocol — so we
+  receive part of that leg back as tokens, and it cannot return as a
+  sudden dump. If liquidity is too thin to buy back sensibly the buy is
+  skipped and the money comes to us as cash anyway; the downside is
+  bounded. NOTE the naming conflict to re-check on-chain before betting
+  size: the struct field reads `buybackBurnBps` while the docs state
+  bought-back tokens are explicitly not burned.
+- **There is NO holder fee-sharing feature.** Searched the v2 docs: zero
+  hits for holder rewards or distributions. The only mechanism that moves
+  the creator's fees to a community is a Community Takeover, which
+  redirects fees and the buyback share when a creator walks away — an
+  abandonment path, not a launch setting. Real holder sharing would mean
+  pointing `creatorFeeRecipient` at a distributor we write ourselves,
+  which custodies other people's money and therefore needs a third-party
+  audit before deploy. Do not promise holder rewards we have not built.
+- **The cost is real and we take it anyway.** 0.35% instead of 0.70% of
+  volume. A launch nobody wants to buy earns 100% of nothing, and terms
+  written for the buyer are how volume shows up at all.
+- **NEVER pitch the creator's cut.** The $LICK page shipped with "70% of
+  every trade fee goes to the creator, on-chain" as its headline, repeated
+  three times: an extraction brag aimed at the people being extracted
+  from. Lead with what the buyer gets — no creator tax, fees recycled into
+  locked buybacks, liquidity locked permanently, no mint, no blacklist.
+  Our economics go in the copy as reassurance, never as the boast.
+
 ## Procedure
 1. Verify the venue: confirm the live domain from the project's X account
    (@ponsdotfamily) and confirm real-time launch traffic on the explorer.

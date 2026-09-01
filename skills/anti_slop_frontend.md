@@ -15,6 +15,33 @@ verify pass/fail without taste debates.
 - NOT for the live-log terminal view itself — density and monospace are its
   identity; judge it on legibility, not on these rules.
 
+## The craft floor: restraint is not permission to ship plain
+
+Every rule above is a ban. None of them is satisfied by shipping less.
+$LICK went out as 4.6KB with zero @keyframes, zero SVG, one image and
+three paragraphs — it broke no rule and it read as a placeholder, which
+is its own kind of tell: a page nobody bothered with says the token is
+something nobody bothered with. A launch page competes with sites built
+by people who do this professionally, and it is the first thing a buyer
+clicks. Ship at that standard:
+
+- **Motion is not optional.** The page moves when it loads and responds
+  when touched: entrance sequencing, scroll-triggered reveals, real
+  hover/press states, and at least one piece of motion that IS the joke
+  rather than decorating it. Zero @keyframes on a launch page is a fail.
+- **Build the art, do not just place it.** Generated art is the raw
+  material, not the design: layer it, mask it, animate it, let it react
+  to the cursor or the scroll. One centered image above text is a slide,
+  not a site.
+- **Depth and detail earn the click**: considered type scale, texture or
+  pattern doing real work, a custom cursor/marquee/sticker treatment if
+  it fits the joke, a share card that matches the page.
+- **Craft is not effect-count.** Six competing animations is slop from
+  the other direction. Every piece of motion has a reason, respects
+  `prefers-reduced-motion`, and holds 60fps on a phone.
+- Ship it complete: responsive at 360px, fast (no multi-MB payloads),
+  and every claim on it true.
+
 ## Meme sites: loud is a direction, generated is still a failure
 A joke coin's page SHOULD be loud, dumb, and single-minded — that is its
 Design Read, and the restraint rules bend to it: a garish accent, an
