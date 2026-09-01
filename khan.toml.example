@@ -73,7 +73,10 @@ model_policy = """
 - bu0y/deepseekv4flash is NOT a seat. It exists only as the automatic
   fallback the binary fails through when a primary model errors. Never hire
   onto it, and re-home any agent still sitting on it at its next dispatch.
-- Escalate hard novel problems and money-gating plans to glm5, then grok46.
+- Escalate hard novel problems and money-gating plans to glm53, then grok46.
+  (glm53 supersedes glm5: newer, 1.3M context, tools verified; probed
+  2026-09-01 — correct calls, but routing is noisy: 7.7s warm, 54.7s cold,
+  one 502. Fine for rare escalations; never a high-cadence seat.)
 - Founder model tips are candidates: probe, record the verdict in the model
   playbook, and let measured ratings move seats — including off this default.
 """
@@ -149,7 +152,10 @@ paid_models = [
                                 #   over; the pinned -0731 cannot.
   "deepseekv32",                # 1.5x / 1.1x  — stronger reasoning, 4.4s, 0 failures
   "minimaxm25",                 # 1.6x / 2.9x  — 3.6s
-  "glm5",                       # 3.6x / 5.8x  — 4.8s
+  "glm53",                      # ~2x glm5 in — the escalation seat (supersedes glm5);
+                                #   1.3M ctx, tools verified. Probed 2026-09-01: correct
+                                #   calls, 7.7s warm / 54.7s cold / one 502 — late in the
+                                #   ladder is where that variance belongs.
   "kimik2thinking",             # 3.6x / 7.6x  — reasoning model for hard calls, 5.2s
   "deepseekv4flash0731",        # 1.0x — cheapest, but single-marketplace: it is the
                                 #   one that stalled the company, so it sits late.
