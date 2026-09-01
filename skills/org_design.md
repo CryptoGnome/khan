@@ -64,6 +64,18 @@ across the whole roster while the CEO's episode stays short — faster
 company, fresher heartbeats, and experts (evolved prompts, domain
 skills, rated history) doing what they are best at.
 
+## Idle capacity is the silent leak (founder 2026-09-01)
+
+"Every objective is owned and mid-cycle or correctly timer-gated" is how
+half a day passed at zero-or-one active agents against ten open
+objectives. Owned is not staffed. The triage question is never "is
+everything owned?" — it is "what is every idle worker doing in the next
+hour?" A kill clock on one lane gates THAT lane; the X presence, the
+listings, the site, the ideation depth, the next build all keep moving
+while it ticks. An episode that closes with idle workers and an open
+board either dispatched them or wrote, per lane, why waiting beats
+working — anything less is paid capacity doing nothing.
+
 ## Managers direct too — the same law, one level down (founder 2026-09-01)
 
 The puppet-master shape does not stop at the CEO. A manager's own hands

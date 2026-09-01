@@ -491,6 +491,16 @@ impl Store {
         let _ = c.execute("UPDATE objectives SET updated_at=?2 WHERE id=?1", params![id, now]);
     }
 
+    /// How many objectives are live right now — feeds the idle-capacity line
+    /// the CEO sees each iteration, so "everything is owned" can't close an
+    /// episode while the roster sits idle under an open board.
+    pub fn active_objective_count(&self) -> usize {
+        let c = self.conn.lock().unwrap();
+        c.query_row("SELECT COUNT(*) FROM objectives WHERE status='active'", [], |r| r.get::<_, i64>(0))
+            .map(|n| n as usize)
+            .unwrap_or(0)
+    }
+
     /// The board as shown to the CEO every iteration: active objectives by rank,
     /// with in-flight counts (passed in from the orchestrator) and how long since
     /// anything advanced each one. Facts only — the judgment is the model's job.

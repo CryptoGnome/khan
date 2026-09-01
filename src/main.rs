@@ -414,6 +414,19 @@ mod tests {
     }
 
     #[test]
+    fn idle_capacity_line_names_the_waste() {
+        // "Everything is owned" closed episodes while 51% of 2026-09-01 ran at
+        // zero-or-one active agents against ten open objectives — the line
+        // turns that into a number the CEO must answer before finish_episode.
+        let line = crate::agent::idle_capacity_line(10, 1, 14);
+        assert!(line.contains("10 objectives active"), "{line}");
+        assert!(line.contains("1 of 14"), "{line}");
+        assert!(line.contains("13 idle"), "{line}");
+        assert!(line.contains("finish_episode"), "{line}");
+        assert!(line.contains("why waiting beats working"), "{line}");
+    }
+
+    #[test]
     fn fuel_anchor_outranks_stale_payload_errors() {
         // With a gauge reading: the authoritative dollar figure leads, and the
         // stale-error warning is present (the 08-31 false emergency: a 41h-old

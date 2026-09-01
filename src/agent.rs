@@ -257,6 +257,22 @@ mid-task elsewhere — delegate to an idle one or hire."
     )
 }
 
+/// The idle-capacity line appended to the CEO's board view every iteration.
+/// Computed, not asserted: heartbeat triage kept concluding "every objective
+/// is owned" and closing, while the roster measured 51% of 2026-09-01 at
+/// zero-or-one active agents against ten open objectives. Owned is not
+/// staffed — this line makes the waste a number the model must answer to.
+pub(crate) fn idle_capacity_line(open_objectives: usize, busy: usize, roster: usize) -> String {
+    let idle = roster.saturating_sub(busy);
+    format!(
+        "[Idle capacity — computed each iteration] {open_objectives} objectives active, {busy} of {roster} \
+workers busy, {idle} idle. An owned lane with no task in flight is idle, not handled. Before \
+finish_episode, every idle worker either gets a dispatch that advances an open objective, or your \
+closing note states, per lane, why waiting beats working right now. A clock on one lane never idles \
+the company — the other lanes keep moving."
+    )
+}
+
 /// Ceiling on active employees. High enough to never bind a real org, low
 /// enough that a hiring loop cannot quietly drain the fuel budget.
 const MAX_EMPLOYEES: i64 = 40;
@@ -2115,6 +2131,16 @@ Keep the board honest: add new bets, declare blocked_by, mark done what is done.
                     )
                 };
                 req.push(Message::text("user", body));
+                // Roster utilization rides with the board, computed the same
+                // way the crew brief is for managers: visibility that does not
+                // depend on the model remembering to ask.
+                {
+                    let running = self.running.lock().unwrap().clone();
+                    let roster = self.ctx.store.list_agents();
+                    let busy = roster.iter().filter(|(n, _, _)| running.contains(n)).count();
+                    let open = self.ctx.store.active_objective_count();
+                    req.push(Message::text("user", idle_capacity_line(open, busy, roster.len())));
+                }
             }
 
             let (msg, u) = match self.chat_fb("CEO", &ceo_model, &req, &schemas).await {
