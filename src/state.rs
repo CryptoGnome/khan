@@ -713,13 +713,12 @@ explore (buys knowledge).\n{}\n",
         let _ = c.execute("INSERT INTO kv(k,v) VALUES(?1,?2) ON CONFLICT(k) DO UPDATE SET v=?2", params![k, v]);
     }
 
-    /// Ticker events: the site's stats daemon writes an ~80KB snapshot every
+    /// Ticker events (stats, team): the site's stats daemon writes an ~80KB snapshot every
     /// 12 seconds and a team widget row beside it, using run_log as the bus
     /// to the viewer's event stream. That is 575MB a day into a 4.6GB volume;
     /// /data hit 100% on 2026-09-01 22:53Z and every routine died with ENOSPC.
     /// Only the latest few rows are ever read (page health looks at ten), so
     /// anything older than the window is dead weight.
-    const TICKER_EVENTS: &'static [&'static str] = &["stats", "team"];
     const TICKER_KEEP_SECS: i64 = 6 * 3600;
 
     /// Drop ticker rows older than the window. Called from log() on the path
