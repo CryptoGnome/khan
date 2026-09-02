@@ -1999,8 +1999,12 @@ keep the board honest, then close with finish_episode(note)."
             // mechanical (queues, not judgment); the moment anything lands —
             // report, alert, founder message — the loop below escalates back to
             // the ladder seat.
+            // An open founder directive is work: the first two-step heartbeat
+            // after the cap shipped spent both steps on directive #151 and hit
+            // the cut-off mid-task.
             let quiet_heartbeat = heartbeat
                 && !self.ctx.store.has_pending_input()
+                && self.ctx.store.open_directives().is_empty()
                 && !self.pending.lock().await.iter().any(|t| t.handle.is_finished());
             let mut ceo_model = match (&self.ctx.cfg.heartbeat_model, quiet_heartbeat) {
                 (Some(m), true) => {
