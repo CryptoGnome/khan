@@ -715,6 +715,26 @@ mod tests {
     }
 
     #[test]
+    fn an_outbound_pitch_is_refused_by_the_shell_that_would_send_it() {
+        use crate::tools::shell::pitches_by_mail;
+        // the send that outran directive #155 by three minutes
+        assert_eq!(
+            pitches_by_mail("curl -X POST https://api.agentmail.to/v0/inboxes/khanhq/messages/send -d @hn_body.json # ask about Show HN"),
+            Some("show hn")
+        );
+        assert!(pitches_by_mail("python3 send.py --smtp --to editor@site.com --subject 'podcast invite'").is_some());
+        // transactional mail is untouched
+        assert_eq!(pitches_by_mail("curl -X POST https://api.agentmail.to/v0/inboxes/khanhq/messages/send -d '{\"subject\":\"listing submission for KHAN\"}'"), None);
+        // so is a send that names the objective and the money it unblocks
+        assert_eq!(
+            pitches_by_mail("curl https://api.agentmail.to/messages/send -d 'objective 9: $240 listing fee refund, partnership desk'"),
+            None
+        );
+        // and prose about podcasts that sends nothing
+        assert_eq!(pitches_by_mail("echo 'we should do a podcast someday' >> notes.md"), None);
+    }
+
+    #[test]
     fn a_seat_moves_to_the_peer_the_company_actually_pays_less_for() {
         use crate::llm::Usage;
         let cfg: crate::config::Config = toml::from_str(include_str!("../khan.toml.example")).unwrap();

@@ -99,6 +99,9 @@ pub async fn run_with_env(
     if touches_gh(command) {
         return Ok(GH_BLOCKED.into());
     }
+    if let Some(word) = pitches_by_mail(command) {
+        return Ok(format!("{PITCH_BLOCKED} (matched \"{word}\")"));
+    }
     let dir = match cwd {
         Some(c) if !c.is_empty() => ctx.workspace.join(c),
         _ => ctx.workspace.clone(),
@@ -107,6 +110,38 @@ pub async fn run_with_env(
 }
 
 pub const GH_BLOCKED: &str = "ERROR: gh is not available (it would use the founder's personal GitHub login). Plain git works for local version control in the workspace.";
+
+pub const PITCH_BLOCKED: &str = "REFUSED: this is an outbound email pitching for attention, which the founder banned on 2026-09-02 (directive #155, skill email_policy). The company inbox is transactional only: listing submissions and their replies, account verification, deposit and payment problems, anything a counterparty needs to complete a transaction. Podcasts, interviews, features, partnerships, AMAs, newsletter mentions, press and Show-HN asks are not sends — attention comes from being a good account and shipping things worth talking about. If this send genuinely unblocks money, say which objective and which amount in the command itself and it will pass.";
+
+/// The pitch words in an outbound mail command, if it is one.
+///
+/// Two conditions, both required: the command sends mail, and it carries a
+/// word from the banned list. An instruction alone did not hold — a directive
+/// landed at 18:07Z on 2026-09-02 and an agent already mid-task mailed
+/// hn@ycombinator.com at 18:10 asking about Show HN posts, because the ban
+/// reached the CEO and not the dispatch already running.
+///
+/// Deliberate ceiling: a word list, not an understanding of the mail. It
+/// catches the categories the founder named and nothing subtler; a send that
+/// names an objective and an amount is treated as transactional and passes.
+pub fn pitches_by_mail(command: &str) -> Option<&'static str> {
+    let c = command.to_lowercase();
+    let sends_mail = ["agentmail", "/messages/send", "smtp", "sendmail", "ses.send", "send_raw_email"]
+        .iter()
+        .any(|m| c.contains(m));
+    if !sends_mail {
+        return None;
+    }
+    // An explicit objective and amount is the founder's own carve-out: a send
+    // that names the money it unblocks is transactional by definition.
+    let names_objective = c.contains("objective") || c.contains("obj#") || c.contains("obj ");
+    if names_objective && c.contains('$') {
+        return None;
+    }
+    ["podcast", "interview", "show hn", "ama", "newsletter", "partnership", "collab", "feature us", "press", "guest post", "sponsor"]
+        .into_iter()
+        .find(|w| c.contains(w))
+}
 
 /// True if a command line invokes gh/hub anywhere in it. Plain git is fine
 /// (local version control), but the GitHub CLIs would reach the founder's

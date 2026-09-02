@@ -23,6 +23,14 @@ Understand the boundaries before deploying:
   reads them once into memory, then removes them, so they are absent from
   `/proc/<pid>/environ` as well as from every shell child agents spawn. Other
   secret-shaped environment variables are removed at the same time.
+- Outbound email that pitches for attention is refused in the agent shell:
+  a command that both sends mail and mentions a podcast, interview, Show HN,
+  AMA, newsletter, partnership, press or sponsorship is blocked, unless it
+  names an objective and an amount. The founder banned this class on
+  2026-09-02, and an instruction alone did not hold — an agent already
+  mid-task sent one three minutes after the directive landed. Word-list
+  enforcement, deliberately: it catches the named categories, not subtler
+  framing.
 - The GitHub CLI (`gh`) is blocked in the agent shell so agents can never use
   a personal GitHub login; only local `git` is available. The guard sits on
   the shared execution path (custom-tool launches included), and custom-tool
