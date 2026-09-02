@@ -257,7 +257,8 @@ token count is printed. **There is no spend cap — watch it.**
   rates each report (`rate_work`, 1-5);
   per-agent/per-prompt-version stats feed the reflection step so prompt
   changes are judged on outcomes, not vibes.
-- **Quiet heartbeats are cheap** — a heartbeat with nothing queued gets
+- **Quiet heartbeats are cheap** — a heartbeat with nothing queued and a
+  team already at work gets
   `quiet_heartbeat_max_steps` (2) instead of the full episode cap and no
   reflection payload, and one that puts no one to work doubles the wait to
   the next (`heartbeat_backoff_max_secs`); any event resets it. Measured

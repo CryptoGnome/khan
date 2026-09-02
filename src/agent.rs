@@ -2053,10 +2053,18 @@ keep the board honest, then close with finish_episode(note)."
             // An open founder directive is work: the first two-step heartbeat
             // after the cap shipped spent both steps on directive #151 and hit
             // the cut-off mid-task.
+            // And an idle team is not quiet either: the heartbeat is then the
+            // only thing that can start work. After the 02:56Z restart on
+            // 2026-09-02 killed five in-flight dispatches, three capped
+            // heartbeats in a row read the board, ran out of steps, dispatched
+            // nothing, and backed off to twenty minutes with 34 idle workers.
             let quiet_heartbeat = heartbeat
                 && !self.ctx.store.has_pending_input()
                 && self.ctx.store.open_directives().is_empty()
-                && !self.pending.lock().await.iter().any(|t| t.handle.is_finished());
+                && {
+                    let p = self.pending.lock().await;
+                    !p.is_empty() && !p.iter().any(|t| t.handle.is_finished())
+                };
             let mut ceo_model = match (&self.ctx.cfg.heartbeat_model, quiet_heartbeat) {
                 (Some(m), true) => {
                     let mut cur = self.seat.current.lock().unwrap();
