@@ -634,6 +634,10 @@ mod tests {
             assert!(why.contains("objective="), "{t}: {why}");
         }
         assert_eq!(crate::agent::named_objective("obj 35 / obj 39 follow-through"), Some(35));
+        assert_eq!(crate::agent::named_objective("objective=46 — audit; escalated from obj 9"), Some(46));
+        assert_eq!(crate::agent::named_objective("obj#5 trend-scout, door 1 of 3"), Some(5));
+        // a manager's delegate carries no objective field: the one the task names is its tag
+        assert!(admit_dispatch(&store, "scout", crate::agent::named_objective("obj#5 trend-scout, door 1 of 3"), "obj#5 trend-scout, door 1 of 3").is_none());
         assert_eq!(crate::agent::named_objective("read-only contract recon, no objective yet"), None);
         assert!(admit_dispatch(&store, "ops", Some(0), "Kill the objectionable log noise").is_none());
         // the board carries the mix and flags the all-checks objective

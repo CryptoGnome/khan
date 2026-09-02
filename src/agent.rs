@@ -423,7 +423,7 @@ pub(crate) fn named_objective(task: &str) -> Option<i64> {
     while let Some(i) = rest.find("obj") {
         let after = &rest[i + 3..];
         let after = after.strip_prefix("ective").unwrap_or(after);
-        let after = after.trim_start_matches(|c: char| c == ' ' || c == '#');
+        let after = after.trim_start_matches(|c: char| matches!(c, ' ' | '#' | '=' | ':'));
         let digits: String = after.chars().take_while(|c| c.is_ascii_digit()).collect();
         if let Ok(n) = digits.parse::<i64>() {
             if n > 0 {
@@ -1100,7 +1100,11 @@ Drop superseded detail, resolved dead ends, and chatter.",
             }
             "delegate" => {
                 let (agent, task) = (s(a, "agent").to_string(), s(a, "task").to_string());
-                if let Some(why) = admit_dispatch(&self.ctx.store, &agent, None, &task) {
+                // A manager's delegate has no objective field: the task it fans
+                // out names the objective it was dispatched for, and that is
+                // its tag. Twelve refusals in four minutes on 2026-09-02 when
+                // this path passed None into the upkeep guard.
+                if let Some(why) = admit_dispatch(&self.ctx.store, &agent, named_objective(&task), &task) {
                     self.log_line(caller, "dispatch-refused", &why);
                     return why;
                 }
