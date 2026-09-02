@@ -115,6 +115,35 @@ fn s<'a>(args: &'a Value, k: &str) -> &'a str {
 /// string so tool results never change shape.
 pub const IMAGE_MARKER: &str = "[[image:";
 
+/// Refuse a command or tool call that sends to the provider's deposit address
+/// while the tank is above the kernel's own refill target. The kernel alerts
+/// at the floor and sizes a refill to floor + three days of burn; anything
+/// above that has nothing to top up. On 2026-09-01 the CFO's "fuel window"
+/// doctrine sent $70 in three top-ups with the tank never below $100 and six
+/// days of runway — a rule in a skill, rationalized past. The address comes
+/// from the provider's deposit endpoint (cached at poll time), matched as any
+/// base58 run of 32-44 chars that appears in both the deposit body and the
+/// text, so the endpoint's shape never matters. Not a gate on any other send.
+pub fn fuel_send_blocked(store: &crate::state::Store, text: &str) -> Option<String> {
+    let body = store.kv_get("fuel_deposit_body")?;
+    let avail = store.kv_get("fuel_available_micros")?.parse::<u64>().ok()?;
+    let target = store.kv_get("fuel_refill_target_micros")?.parse::<u64>().ok()?;
+    if avail <= target {
+        return None;
+    }
+    let is_b58 = |c: char| c.is_ascii_alphanumeric() && !matches!(c, '0' | 'O' | 'I' | 'l');
+    let hit = text
+        .split(|c: char| !is_b58(c))
+        .filter(|w| (32..=44).contains(&w.len()))
+        .find(|w| body.contains(w))?;
+    Some(format!(
+        "REFUSED: this sends to the provider's fuel deposit address ({}…) while the tank holds ${:.2}, above the kernel's refill target of ${:.2}. A top-up is due only when the kernel's fuel-low alert fires; it sizes the send. Nothing to top up now.",
+        &hit[..6],
+        avail as f64 / 1e6,
+        target as f64 / 1e6
+    ))
+}
+
 /// Cap on an image handed to the model — a full-page screenshot of a long
 /// site can run to several MB and a model request has its own limits.
 const IMAGE_MAX_BYTES: u64 = 4 * 1024 * 1024;

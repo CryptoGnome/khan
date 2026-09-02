@@ -93,6 +93,11 @@ pub fn create(ctx: &ToolCtx, args: &Value) -> Result<String> {
 /// Execute a registered custom tool by name. Returns None if no such tool exists.
 pub async fn run(ctx: &ToolCtx, name: &str, args: &Value) -> Option<Result<String>> {
     let (_, _, lang, script) = ctx.store.get_tool(name)?;
+    // A custom send tool carries the destination in its arguments, not the
+    // command line the shell gate sees.
+    if let Some(why) = super::fuel_send_blocked(&ctx.store, &args.to_string()) {
+        return Some(Ok(why));
+    }
     Some(run_inner(ctx, name, &lang, &script, args).await)
 }
 

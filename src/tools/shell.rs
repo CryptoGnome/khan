@@ -127,5 +127,8 @@ pub fn touches_gh(command: &str) -> bool {
 }
 
 pub async fn run(ctx: &ToolCtx, command: &str, cwd: Option<&str>) -> Result<String> {
+    if let Some(why) = super::fuel_send_blocked(&ctx.store, command) {
+        return Ok(why);
+    }
     run_with_env(ctx, command, cwd, std::collections::HashMap::new()).await
 }

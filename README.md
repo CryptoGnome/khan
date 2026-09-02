@@ -233,7 +233,11 @@ token count is printed. **There is no spend cap — watch it.**
   the moment real work drains in. The binary also polls the provider's
   balance; below a floor it alerts the CEO with a sized top-up target and
   benches it to the cheap floor seat until the tank is refilled — the strong
-  model is earned back by topping up, not by arguing with the alert. If calls
+  model is earned back by topping up, not by arguing with the alert. The
+  same arithmetic works the other way: while the tank is above the refill
+  target (floor + three days of measured burn), the shell and custom-tool
+  paths refuse any send to the provider's deposit address, so no
+  self-invented runway doctrine can top up a tank that has days left. If calls
   bounce anyway (402), the seat goes into fuel
   emergency: the cheap floor model first, a free model if even that bounces —
   the company limps but never stalls, and runs its own top-up to recover.

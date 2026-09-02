@@ -118,6 +118,24 @@ pub(crate) fn open_directives_text(open: &[(i64, String, String)]) -> String {
     out
 }
 
+/// The kernel's fuel reading for the brief — empty until the first poll. The
+/// CEO and CFO built their own "fuel window" doctrine on top of the kernel's
+/// alert and topped up three times on 2026-09-01 with the tank above $100
+/// and six days of runway; this states the rule the send tools enforce.
+pub(crate) fn fuel_brief_line(store: &crate::state::Store) -> String {
+    let Some(avail) = store.kv_get("fuel_available_micros").and_then(|v| v.parse::<u64>().ok()) else {
+        return String::new();
+    };
+    let target = store.kv_get("fuel_refill_target_micros").and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
+    let burn = store.kv_get("fuel_burn_micros_per_hour").and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
+    let days = if burn > 0 { format!("{:.1} days at the measured burn", avail as f64 / (burn as f64 * 24.0)) } else { "burn not yet measured".into() };
+    format!(
+        "\n\nFUEL (kernel reading): ${:.2} in the tank — {days}. The kernel alerts you when a top-up is due and sizes it to reach ${:.2}; while the tank is above that target a send to the provider's deposit address is REFUSED by the send tools. Do not plan, stage, or schedule top-ups yourself — no runway windows, no deadlines, no treasury-gated triggers.",
+        avail as f64 / 1e6,
+        target as f64 / 1e6
+    )
+}
+
 /// Marks the running brief that replaces compacted history, so a later compaction
 /// can carry it forward instead of summarizing a summary.
 const BRIEF_TAG: &str = "[Earlier history, summarized]";
@@ -1389,6 +1407,27 @@ detail, and anything already acted on and closed.",
             *g = Some((available, now, ema));
             ema
         };
+        // The kernel's own refill arithmetic, published for the tools and the
+        // brief: a top-up is only ever sized to reach this target, so a tank
+        // above it has nothing to top up. Stored in kv because the send tools
+        // hold a ToolCtx, not the seat gauge.
+        let target = {
+            let burn_day = burn_per_hour * 24.0;
+            ((threshold as f64 + burn_day * 3.0).max(threshold as f64 * 2.5)) as u64
+        };
+        self.ctx.store.kv_set("fuel_available_micros", &available.to_string());
+        self.ctx.store.kv_set("fuel_refill_target_micros", &target.to_string());
+        self.ctx.store.kv_set("fuel_burn_micros_per_hour", &(burn_per_hour as u64).to_string());
+        if self.ctx.store.kv_get("fuel_deposit_body").is_none() {
+            let dep = format!("{}/deposits/solana", provider.base_url.trim_end_matches('/'));
+            if let Ok(r) = self.ctx.http.get(&dep).bearer_auth(key).send().await {
+                if r.status().is_success() {
+                    if let Ok(body) = r.text().await {
+                        self.ctx.store.kv_set("fuel_deposit_body", &body);
+                    }
+                }
+            }
+        }
         let mut f = self.seat.fuel.lock().unwrap();
         f.0 = Some(std::time::Instant::now());
         if available >= threshold {
@@ -1762,12 +1801,13 @@ detail, and anything already acted on and closed.",
                 .map(|p| format!("\n\nMODEL POLICY from your founder (standing — applies to every seat and hire):\n{p}"))
                 .unwrap_or_default();
             let directives = open_directives_text(&self.ctx.store.open_directives());
+            let fuel = fuel_brief_line(&self.ctx.store);
             history.push(Message::text(
                 "user",
                 format!(
                     "[Company brief — composed fresh each episode; durable truth lives on the objective board, in memories and in skills]\n\
 It is now {now} UTC. Anything dated before this already happened. A dated announcement is history, not a catalyst — and a date WITHOUT a year never resolves to the current calendar: it resolves to the document's own publication date (commit date, Last-Modified, weekday arithmetic). Check that before treating any date as upcoming.\n\n\
-BASE DIRECTIVE from your founder:\n{directive}\n\nTEAM:\n{roster}{policy}{directives}\n\nRECENT ACTIVITY (public log tail):\n{recent}",
+BASE DIRECTIVE from your founder:\n{directive}\n\nTEAM:\n{roster}{policy}{directives}{fuel}\n\nRECENT ACTIVITY (public log tail):\n{recent}",
                     now = chrono::Utc::now().format("%Y-%m-%d %H:%M")
                 ),
             ));

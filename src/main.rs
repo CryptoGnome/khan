@@ -585,6 +585,35 @@ mod tests {
     }
 
     #[test]
+    fn fuel_sends_are_refused_above_the_refill_target_and_only_to_the_deposit() {
+        use crate::tools::fuel_send_blocked;
+        let store = crate::state::Store::open(":memory:").unwrap();
+        let dep = "GfW6tV82eS6iY1LAC885Pmr9Hfchdj3m9hmohieXsCBR";
+        let send = format!("{{\"to\":\"{dep}\",\"amount\":14}}");
+        // no poll yet: nothing is known, nothing is blocked
+        assert!(fuel_send_blocked(&store, &send).is_none());
+        store.kv_set("fuel_deposit_body", &format!("{{\"address\":\"{dep}\",\"chain\":\"solana\"}}"));
+        store.kv_set("fuel_refill_target_micros", "60000000"); // $60
+        // $117 in the tank: the 2026-09-01 case — refused, and the reason names the numbers
+        store.kv_set("fuel_available_micros", "117000000");
+        let why = fuel_send_blocked(&store, &send).expect("must refuse");
+        assert!(why.contains("$117.00") && why.contains("$60.00"), "{why}");
+        // the same address on a raw shell line is caught too
+        assert!(fuel_send_blocked(&store, &format!("spl-token transfer USDC 14 {dep}")).is_some());
+        // a send anywhere else is none of this gate's business
+        assert!(fuel_send_blocked(&store, "{\"to\":\"9gsVSHrcrqtqiaKn4oT4t4vKqVmVboBpVnm5VrYsk3aV\",\"amount\":14}").is_none());
+        // at or below the target the kernel's alert has fired: the send is allowed
+        store.kv_set("fuel_available_micros", "60000000");
+        assert!(fuel_send_blocked(&store, &send).is_none());
+        store.kv_set("fuel_available_micros", "8000000");
+        assert!(fuel_send_blocked(&store, &send).is_none());
+        // the brief states the rule once a reading exists, and is silent before
+        assert!(crate::agent::fuel_brief_line(&crate::state::Store::open(":memory:").unwrap()).is_empty());
+        let line = crate::agent::fuel_brief_line(&store);
+        assert!(line.contains("$8.00") && line.contains("REFUSED"), "{line}");
+    }
+
+    #[test]
     fn ticker_rows_age_out_and_real_events_do_not() {
         // The stats daemon writes ~80KB into run_log every 12s; /data hit 100%
         // on 2026-09-01 22:53Z. Only the latest rows are read, so the window
