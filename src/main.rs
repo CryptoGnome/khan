@@ -1217,6 +1217,10 @@ mod tests {
             "restart_survival",
             "sql_tool_columns",
             "launch_kill_sequence",
+            "js_site_style_recon",
+            "workspace_db_schema",
+            "x_beat_prep",
+            "token_listing_submissions",
         ] {
             assert!(names.contains(&n.to_string()), "missing seed '{n}' in {names:?}");
         }

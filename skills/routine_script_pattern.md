@@ -30,6 +30,12 @@ if state == 'Z': zombies += 1
 else: n += 1
 ```
 
+## Registration invariant: a shell monitor carries NO agent and NO task
+A routines row with a non-empty `agent` is an AGENT task to the scheduler: every interval it stamps `last_status='dispatched'`, repopulates `task` from the task text, and logs a dispatch event that spawns work. A shell monitor registered with an agent still set therefore re-stamps itself forever, and clearing `task` alone does not stop it — the next interval writes it back. One monitor was "fixed" three times this way before anyone read the `agent` column.
+- **Shell monitor** (command populated): `agent=''` AND `task=''`. An owner is fine — owner is not a dispatch trigger. A healthy one stays at `last_status='ok'`.
+- **Model routine** (command EMPTY): these legitimately carry agent and task; the scheduler dispatching them is the point. Never clear those.
+- Finding a shell monitor stamped `dispatched` means a writer exists: clear BOTH columns and escalate, rather than clearing the symptom each time it reappears.
+
 ## Gotchas
 - Secrets by reference: `os.environ['...']`, never echo the value.
 - Retry-once on transient RPC errors; return nulls, never fabricate.

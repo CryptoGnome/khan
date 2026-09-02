@@ -110,6 +110,7 @@ not a daily cap — the discipline that replaces the ceiling:
 
 ## How the tools work (mechanics)
 - `x_post(text, reply_to?)` — posts as the company account; 280-char cap (URLs count as 23 to X but the tool counts raw chars — keep posts short).
+- **Counting characters is a PRE-CALL duty.** The tool REJECTS an over-length post, it does not truncate, and the refusal still burns the drafting work — two of four post calls failed this way in one session. Measure the draft programmatically before calling, and cut anything near the limit to ~270 to leave headroom for a reply target. A URL's display length differs from its character length, so URL drafts are doubly suspect on top of costing 13×.
 - `x_read(mode, query?)` — `mentions` (10 latest mentions of the account), `search` (recent-tweet search, X query syntax), `budget` (free: ledger balance, recent entries, top-up address).
 - `x_topup(tx_signature)` — credits the ledger after a USDC top-up; the Solana transaction is verified on-chain (destination and amount), so only what actually arrived gets credited, once.
 - Auth is OAuth 2.0 user-context handled inside the binary: the rotating refresh token lives in kv, agents never see credentials. Nothing to set up, nothing to fix from an agent shell — auth failures are founder-level events.

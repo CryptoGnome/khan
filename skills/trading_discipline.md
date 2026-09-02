@@ -1,4 +1,4 @@
-The trading/investing lane's law: plan-before-entry (thesis, ladders, kill), thesis revision on facts only, flagship never traded, allocation sized by judgment. Load BEFORE any discretionary position — entry, exit, re-plan, or portfolio review.
+The trading/investing lane's law: plan-before-entry (thesis, ladders, kill), kill-at-read, thesis revision on facts only, flagship never traded, allocation sized by judgment. Load BEFORE any discretionary position — entry, exit, re-plan, or portfolio review.
 # trading_discipline — the plan trades, the moment doesn't
 
 Discretionary investing (positions in assets the company did not create) is a
@@ -14,6 +14,16 @@ has its own skills; this one governs the portfolio.
 3. **Ladders and kills execute when hit — they are never renegotiated in the
    moment.** Flexibility lives at the planning layer, never the execution
    layer. A hit level fires the same episode it is observed.
+4. **A kill executes at the READ that produced it, not at the next scheduled
+   checkpoint.** Checkpoints are the MINIMUM cadence for reading a position;
+   they are never a reason to hold one that already meets its kill criteria.
+   Paid for by a position whose falsifier was confirmed across two evaluator
+   reads while execution waited for its scheduled checkpoint — the sell fired
+   at a materially worse price than the first KILL read. Waiting for the next
+   scheduled read IS renegotiating the kill in the moment. An evaluator or
+   routine produces the verdict and the lane owner executes it, but the
+   verdict binds the moment it is read, and a KILL left unexecuted past that
+   read is itself a process violation.
 
 ## Sizing — the allocation is judgment, not a formula
 The treasury is FIRST a development fund: fuel, launches, contracts, and new
@@ -103,7 +113,7 @@ position row. Two tests every revision must pass:
 ## Review cadence
 Each reflection: every open position gets checked against its own plan (level
 hit? thesis fact intact?). A position whose thesis can no longer be stated in
-one falsifiable paragraph is a position to exit.
+one falsifiable paragraph is a position to exit — at that read, not the next.
 
 ## Mechanics (compose with existing skills)
 - Mint allowlist discipline: on-chain verification before any new asset joins
