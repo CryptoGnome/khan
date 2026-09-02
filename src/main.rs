@@ -690,6 +690,30 @@ mod tests {
     }
 
     #[test]
+    fn a_named_smaller_ceiling_is_a_retry_not_a_dead_request() {
+        use crate::llm::retry_max_tokens;
+        // the 400 that is really "ask for less" — the number rides the body
+        let four_hundred = r#"{"error":{"message":"max_tokens exceeds what this model can produce inside the fill ceiling","type":"invalid_request_error","retry_max_tokens":8192}}"#;
+        assert_eq!(retry_max_tokens(four_hundred), Some(8192));
+        // the 503 below_floor has carried it all along
+        assert_eq!(
+            retry_max_tokens(r#"{"error":{"message":"below floor","type":"api_error","retry_max_tokens":4096}}"#),
+            Some(4096)
+        );
+        // a plain refusal names no ceiling and must stay a failure
+        for body in [
+            r#"{"error":{"message":"bad body","type":"invalid_request_error"}}"#,
+            r#"{"error":{"message":"nope","retry_max_tokens":0}}"#,
+            "not json at all",
+            "",
+        ] {
+            assert_eq!(retry_max_tokens(body), None, "{body}");
+        }
+        // never above the binary's own ceiling, whatever the gateway says
+        assert_eq!(retry_max_tokens(r#"{"error":{"retry_max_tokens":999999999}}"#), Some(65_536));
+    }
+
+    #[test]
     fn a_tweet_gets_one_reply_and_the_memory_outlives_the_day() {
         let store = crate::state::Store::open(":memory:").unwrap();
         assert_eq!(store.x_reply_to("2094781874174357640"), None);

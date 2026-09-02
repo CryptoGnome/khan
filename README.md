@@ -307,7 +307,14 @@ token count is printed. **There is no spend cap — watch it.**
   adversarial audit of the scripts.
 - **Model failover** — if an agent's model keeps failing (free-tier 429s/outages),
   the call is answered by the next available free model automatically and the
-  swap is logged.
+  swap is logged. A refusal that names a ceiling that would fit
+  (`error.retry_max_tokens`, on a 400 as well as a 503) is re-sent once at
+  exactly that number rather than abandoned, and a stream that breaks after
+  delivering output keeps what arrived — those tokens are billed, so a retry
+  would buy the same answer twice — while dropping any tool call whose
+  arguments were cut off mid-JSON. A break before any output is free and is
+  retried. The client's own deadline sits above the gateway's 480s fill
+  ceiling, since hanging up first pays for output nobody reads.
 - **Work tools** (all agents): file read/write/list (confined to `workspace/`),
   shell (with local `git` for version control; the GitHub CLI is blocked so
   agents can never reach your GitHub login), web fetch + DuckDuckGo search (JS app shells render in headless Chromium automatically, with the page's declared dates and its CSS/JS bundle URLs listed), `web_screenshot` and `view_image` so a vision seat actually sees pages and art,

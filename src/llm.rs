@@ -1,5 +1,5 @@
 use crate::config::Config;
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -106,6 +106,23 @@ pub(crate) fn upstream_timeout(body: &str) -> bool {
     body.contains("upstream status 524") || body.contains("upstream status 504")
 }
 
+/// `error.retry_max_tokens` from a refusal: the largest output ceiling the
+/// gateway says would actually fill.
+///
+/// It rides a 503 when no offer clears the floor, and now also a 400 when the
+/// ask is larger than the model can produce inside the fill ceiling at its
+/// recent speed. That 400 is a retry, not a bad request — abandoning it drops
+/// the call for a number the gateway already handed us.
+pub(crate) fn retry_max_tokens(body: &str) -> Option<u32> {
+    serde_json::from_str::<Value>(body)
+        .ok()?
+        .get("error")?
+        .get("retry_max_tokens")?
+        .as_u64()
+        .filter(|n| *n > 0)
+        .map(|n| n.min(MAX_OUTPUT as u64) as u32)
+}
+
 /// The truncation behind an error, when that is what it was.
 pub fn truncation(e: &anyhow::Error) -> Option<Truncated> {
     e.downcast_ref::<Truncated>().copied()
@@ -164,7 +181,10 @@ impl Client {
     pub fn new() -> Client {
         Client {
             http: reqwest::Client::builder()
-                .timeout(Duration::from_secs(300))
+                // Above the gateway's absolute fill ceiling, which moved from
+                // 300s to 480s. A client that hangs up first is billed for
+                // everything already delivered and gets none of it.
+                .timeout(Duration::from_secs(540))
                 .build()
                 .expect("http client"),
             cooldown: Mutex::new(HashMap::new()),
@@ -380,7 +400,12 @@ impl Client {
     /// Returns the message, the usage the final chunk carried, the finish_reason,
     /// and the reasoning-token count — the caller needs the last two together to
     /// tell a real answer from a model that spent its whole budget thinking.
-    async fn read_stream(resp: reqwest::Response) -> Result<(Message, Usage, String, u64)> {
+    /// Reads an SSE fill. The last element is why the stream ended early, when
+    /// it did: a transport fault, or the gateway's own closing error frame.
+    /// A break is no longer a clean failure — the frame carries what the
+    /// delivered tokens were billed, so output that reached us is paid for and
+    /// the caller must keep it rather than buy the answer twice.
+    async fn read_stream(resp: reqwest::Response) -> Result<(Message, Usage, String, u64, Option<String>)> {
         use futures::StreamExt;
         let mut stream = resp.bytes_stream();
         let (mut buf, mut content, mut reasoning, mut finish) =
@@ -391,8 +416,16 @@ impl Client {
         // then the arguments come a fragment at a time and must be concatenated in
         // arrival order. Anything else produces truncated JSON arguments.
         let mut calls: Vec<(String, String, String)> = Vec::new();
+        let mut broke: Option<String> = None;
         while let Some(chunk) = stream.next().await {
-            buf.push_str(&String::from_utf8_lossy(&chunk.context("stream broke mid-response")?));
+            let chunk = match chunk {
+                Ok(c) => c,
+                Err(e) => {
+                    broke = Some(format!("stream broke mid-response: {e}"));
+                    break;
+                }
+            };
+            buf.push_str(&String::from_utf8_lossy(&chunk));
             // Only whole lines are safe to parse; a chunk can split one in half.
             while let Some(pos) = buf.find('\n') {
                 let line: String = buf.drain(..=pos).collect();
@@ -402,6 +435,19 @@ impl Client {
                     continue;
                 }
                 let Ok(v) = serde_json::from_str::<Value>(data) else { continue };
+                // The provider stopping mid-answer arrives in-band as an error
+                // frame, and its bu0y block says what the delivered tokens cost.
+                if let Some(err) = v["error"]["message"].as_str() {
+                    broke = Some(format!(
+                        "{err} (billed {} micro$ for {} completion tokens)",
+                        v["bu0y"]["billed_micros"].as_u64().unwrap_or(0),
+                        v["bu0y"]["completion_tokens"].as_u64().unwrap_or(0)
+                    ));
+                    if let Some(n) = v["bu0y"]["completion_tokens"].as_u64() {
+                        usage.completion_tokens = usage.completion_tokens.max(n);
+                    }
+                    continue;
+                }
                 if !v["usage"].is_null() {
                     usage.prompt_tokens = v["usage"]["prompt_tokens"].as_u64().unwrap_or(usage.prompt_tokens);
                     usage.completion_tokens =
@@ -444,6 +490,12 @@ impl Client {
         let tool_calls: Vec<ToolCall> = calls
             .into_iter()
             .filter(|(_, name, _)| !name.is_empty())
+            // A call whose argument fragments stopped arriving is truncated JSON.
+            // Keeping the partial ANSWER is right — it was paid for; running a
+            // half-written tool call is not.
+            .filter(|(_, _, args)| {
+                broke.is_none() || args.trim().is_empty() || serde_json::from_str::<Value>(args).is_ok()
+            })
             .enumerate()
             .map(|(i, (id, name, arguments))| ToolCall {
                 // Some gateways omit the id on the delta; the loop below needs a
@@ -461,7 +513,7 @@ impl Client {
             reasoning: (!reasoning.is_empty()).then_some(reasoning),
             images: None,
         };
-        Ok((msg, usage, finish, reasoning_tokens))
+        Ok((msg, usage, finish, reasoning_tokens, broke))
     }
 
     /// Chat completion against any OpenAI-compatible endpoint. `model` is "provider/model".
@@ -483,7 +535,10 @@ impl Client {
         }
         let url = format!("{}/chat/completions", prov.base_url.trim_end_matches('/'));
         let max_out = self.output_limit(model, cfg);
-        let body = Self::build_request(&model_id, messages, tools, max_out);
+        let mut body = Self::build_request(&model_id, messages, tools, max_out);
+        // The gateway names a ceiling that fits; take it once and never climb back.
+        let mut shrunk = false;
+        let mut sent_max = max_out;
 
         let mut last_err = String::new();
         // A 503 during a bad window means "retry shortly", and the gateway names how
@@ -491,7 +546,7 @@ impl Client {
         let mut backoff: Option<Duration> = None;
         for attempt in 0..4u32 {
             if attempt > 0 {
-                // Announce every retry. Each attempt can block for the full 300s
+                // Announce every retry. Each attempt can block for the full 540s
                 // timeout, so without this the loop sits silent for up to ~20
                 // minutes and a slow provider is indistinguishable from a hang.
                 eprintln!("llm: {model} attempt {}/4 failed, retrying — {last_err}", attempt);
@@ -537,6 +592,17 @@ impl Client {
                         text.chars().take(200).collect::<String>()
                     );
                 }
+                // Carried by a 400 (ask too big to produce inside the fill
+                // ceiling at this model's recent speed) and by a 503 below the
+                // margin floor. Either way the gateway has done the arithmetic
+                // and named the ceiling that fills — re-send at exactly it.
+                if let Some(fit) = retry_max_tokens(&text).filter(|_| !shrunk) {
+                    shrunk = true;
+                    body = Self::build_request(&model_id, messages, tools, fit);
+                    sent_max = fit;
+                    last_err = format!("{status} asked for a smaller ceiling; retrying at max_tokens {fit}");
+                    continue;
+                }
                 if status.is_server_error() {
                     // An upstream 504/524 means the origin was still generating when
                     // the edge gave up. The request was accepted and may be billed, so
@@ -560,16 +626,25 @@ impl Client {
                 }
                 bail!("{model} returned {status}: {}", text.chars().take(500).collect::<String>());
             }
-            let (msg, usage, finish, reasoning_tokens) = match Self::read_stream(resp).await {
+            let (msg, usage, finish, reasoning_tokens, broke) = match Self::read_stream(resp).await {
                 Ok(r) => r,
                 Err(e) => {
-                    // A broken connection is a transport fault, not the gateway
-                    // telling us the generation is already paid for, so this one is
-                    // worth another attempt.
                     last_err = format!("stream: {e:#}");
                     continue;
                 }
             };
+            if let Some(why) = broke {
+                // A stream that broke before delivering anything costs nothing,
+                // so retrying it is free. One that delivered output was billed
+                // for it: retrying buys the same answer twice and throws the
+                // first away. Keep what arrived.
+                let delivered = msg.content.is_some() || msg.tool_calls.is_some();
+                if !delivered {
+                    last_err = format!("stream: {why}");
+                    continue;
+                }
+                eprintln!("llm: {model} stream ended early, keeping the billed partial answer — {why}");
+            }
             // A reasoning model can spend its whole output budget thinking and stop
             // before it answers: HTTP 200, empty content, finish_reason "length".
             // Providers say so plainly; not reading it is what made these look like
@@ -577,7 +652,7 @@ impl Client {
             let nothing = msg.content.as_deref().is_none_or(|c| c.trim().is_empty())
                 && msg.tool_calls.as_ref().is_none_or(|t| t.is_empty());
             if nothing && finish == "length" {
-                return Err(anyhow::Error::new(Truncated { max_tokens: max_out, reasoning_tokens })
+                return Err(anyhow::Error::new(Truncated { max_tokens: sent_max, reasoning_tokens })
                     .context(model.to_string()));
             }
             return Ok((msg, usage));
