@@ -138,9 +138,25 @@ pub fn pitches_by_mail(command: &str) -> Option<&'static str> {
     if names_objective && c.contains('$') {
         return None;
     }
+    // Whole words only. As substrings these are everywhere: "ama" sits inside
+    // aiagentsdirectory and amazonses, and on 2026-09-02 it refused a
+    // legitimate transactional reply about a listing submission. A word here
+    // is bounded by anything that is not a letter or digit.
     ["podcast", "interview", "show hn", "ama", "newsletter", "partnership", "collab", "feature us", "press", "guest post", "sponsor"]
         .into_iter()
-        .find(|w| c.contains(w))
+        .find(|w| contains_word(&c, w))
+}
+
+/// True when `needle` appears in `haystack` bounded by non-alphanumerics on
+/// both sides, so "ama" does not match inside "amazonses".
+fn contains_word(haystack: &str, needle: &str) -> bool {
+    let bytes = haystack.as_bytes();
+    haystack.match_indices(needle).any(|(i, _)| {
+        let before = i == 0 || !bytes[i - 1].is_ascii_alphanumeric();
+        let end = i + needle.len();
+        let after = end >= bytes.len() || !bytes[end].is_ascii_alphanumeric();
+        before && after
+    })
 }
 
 /// True if a command line invokes gh/hub anywhere in it. Plain git is fine

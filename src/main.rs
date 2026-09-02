@@ -817,6 +817,13 @@ mod tests {
             pitches_by_mail("curl https://api.agentmail.to/messages/send -d 'objective 9: $240 listing fee refund, partnership desk'"),
             None
         );
+        // the false positive that refused a transactional listing reply: "ama"
+        // inside aiagentsdirectory.com and amazonses.com
+        assert_eq!(
+            pitches_by_mail("curl https://api.agentmail.to/messages/send -d 'reply to info@aiagentsdirectory.com, msg id @email.amazonses.com'"),
+            None
+        );
+        assert!(pitches_by_mail("curl https://api.agentmail.to/messages/send -d 'would you host an AMA with us'").is_some());
         // and prose about podcasts that sends nothing
         assert_eq!(pitches_by_mail("echo 'we should do a podcast someday' >> notes.md"), None);
     }
