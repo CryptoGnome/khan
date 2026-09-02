@@ -463,6 +463,28 @@ impl Store {
         rows
     }
 
+    /// Active objectives ordered by how soon they come up for review, for the
+    /// refusal that tells the CEO what it would have to close first.
+    pub fn active_objectives_by_review_date(&self) -> Vec<(i64, String, String)> {
+        let c = self.conn.lock().unwrap();
+        let Ok(mut stmt) = c.prepare(
+            "SELECT id, title, COALESCE(review_date,'') FROM objectives WHERE status='active' \
+             ORDER BY COALESCE(NULLIF(review_date,''), '9999-12-31'), id",
+        ) else {
+            return Vec::new();
+        };
+        stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .map(|it| it.filter_map(|x| x.ok()).collect())
+            .unwrap_or_default()
+    }
+
+    /// An objective's review date, or "" when it has none.
+    pub fn objective_review_date(&self, id: i64) -> String {
+        let c = self.conn.lock().unwrap();
+        c.query_row("SELECT COALESCE(review_date,'') FROM objectives WHERE id=?1", params![id], |r| r.get(0))
+            .unwrap_or_default()
+    }
+
     /// The classes of an objective's most recent dispatches, newest first.
     pub fn recent_dispatch_classes(&self, objective: i64, n: usize) -> Vec<String> {
         let c = self.conn.lock().unwrap();

@@ -777,6 +777,16 @@ mod tests {
         let cfg: crate::config::Config = toml::from_str(include_str!("../khan.toml.example")).unwrap();
         assert_eq!(cfg.max_active_objectives, 6);
         assert_eq!(cfg.max_consecutive_checks, 2);
+        assert_eq!(cfg.max_review_horizon_days, 7);
+        // the wider compaction retry stays well under the model's own ceiling
+        assert!(crate::agent::SUMMARY_RETRY_MAX_TOKENS > crate::agent::SUMMARY_MAX_TOKENS);
+        assert!(crate::agent::SUMMARY_RETRY_MAX_TOKENS < 65_536 / 2);
+        // the nearest-review ordering is what the cap refusal names
+        let b = store.add_objective("pons lane", 2);
+        assert!(store.set_objective_review(b, "2026-09-03", ""));
+        let order = store.active_objectives_by_review_date();
+        assert_eq!(order.first().map(|r| r.0), Some(b), "the soonest review comes first");
+        assert_eq!(store.objective_review_date(b), "2026-09-03");
 
         // two checks in a row are allowed, the third is refused at the shipped limit
         let o = store.add_objective("pons", 1);

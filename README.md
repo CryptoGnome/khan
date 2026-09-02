@@ -304,8 +304,11 @@ token count is printed. **There is no spend cap — watch it.**
   date, and a lane past it reads REVIEW DUE where allocation happens. Ones past
   their date (or that never got one) also stand in the CEO brief as a decision
   owed this episode: close, drop, or
-  recommit with a new date. A new objective is refused while `max_active_objectives`
-  are open and any is overdue, and an objective that has taken
+  recommit with a new date. A new objective is refused once `max_active_objectives`
+  are open, whatever their dates say — the refusal names the lanes nearest
+  review so the choice is which one to close. A review date may not be set
+  further than `max_review_horizon_days` ahead, and a lane that comes due and
+  is pushed anyway must say what changed, and an objective that has taken
   `max_consecutive_checks` check-class dispatches in a row must build or close
   before it can check again — re-auditing is what a lane does instead of finishing.
 - **Ideas answer for their own dates** — every `revenue_ideas` row carries a
@@ -354,8 +357,9 @@ token count is printed. **There is no spend cap — watch it.**
   degraded route can hand back one too small to answer inside: when a call
   truncates on a ceiling the gateway chose, the fallback ladder tries another
   model (which is quoted its own) and the route takes a stall strike, while a
-  budget the binary chose and the model blew still fails outright. Summarising
-  calls ask for a summary-sized ceiling rather than the model's whole 64k,
+  budget the binary chose and the model blew still fails outright. A summary that spends its whole
+  budget reasoning gets one wider attempt before the history is left to grow.
+  Summarising calls ask for a summary-sized ceiling rather than the model's whole 64k,
   since the gateway reserves against whatever is asked. The client's own deadline sits above the gateway's 480s fill
   ceiling, since hanging up first pays for output nobody reads. Every bu0y
   request carries a decode-speed floor (`min_tokens_per_sec` in the provider

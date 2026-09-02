@@ -192,6 +192,10 @@ pub(crate) fn overdue_objectives_line(store: &crate::state::Store) -> String {
 /// messages). Generous for a brief, and small enough that the gateway reserves
 /// against a real number instead of the model's whole 64k ceiling.
 pub(crate) const SUMMARY_MAX_TOKENS: u32 = 8192;
+/// The one wider attempt a compaction gets when the first spent its whole
+/// budget on reasoning. Still far below the model's 64k ceiling, so the
+/// gateway keeps reserving against a real number.
+pub(crate) const SUMMARY_RETRY_MAX_TOKENS: u32 = 24576;
 /// Window for a model's realized price. Short enough to follow a repricing
 /// within the hour, long enough to hold the five fills the price needs.
 const PEER_PRICE_HOURS: i64 = 3;
@@ -958,7 +962,46 @@ Drop superseded detail, resolved dead ends, and chatter.",
                     &format!("history summarized: {before} -> {after} chars"),
                 );
             }
-            Err(e) => self.log_line(name, "compact-failed", &format!("{e:#}")),
+            Err(e) => {
+                // A summary that spent its whole budget reasoning is not a
+                // failed request, it is too small a budget for a token-hungry
+                // model: glm53flash burned 8191 of 8192 on reasoning and
+                // reached no answer. Compaction is what keeps every later call
+                // cheap, so it gets one wider attempt before the history is
+                // left uncompacted to grow.
+                if truncation(&e).is_some() {
+                    self.log_line(
+                        name,
+                        "compact-retry",
+                        &format!("summary spent its {SUMMARY_MAX_TOKENS}-token budget reasoning; retrying at {SUMMARY_RETRY_MAX_TOKENS}"),
+                    );
+                    match self
+                        .chat_fb_capped(name, &self.ctx.cfg.utility_model(), &req, &[], Some(SUMMARY_RETRY_MAX_TOKENS))
+                        .await
+                    {
+                        Ok((msg, u)) => {
+                            self.add_usage(u);
+                            let summary = msg.content.unwrap_or_default();
+                            if !summary.trim().is_empty() {
+                                let before = Self::history_chars(history);
+                                let system = history[0].clone();
+                                let tail = history.split_off(split);
+                                *history = vec![system, Message::text("user", format!("{BRIEF_TAG}
+{summary}"))];
+                                history.extend(tail);
+                                let after = Self::history_chars(history);
+                                self.log_line(name, "compacted", &format!("history summarized: {before} -> {after} chars"));
+                                return;
+                            }
+                        }
+                        Err(e2) => {
+                            self.log_line(name, "compact-failed", &format!("wider retry failed too: {e2:#}"));
+                            return;
+                        }
+                    }
+                }
+                self.log_line(name, "compact-failed", &format!("{e:#}"));
+            }
         }
     }
 
@@ -1549,31 +1592,36 @@ Drop superseded detail, resolved dead ends, and chatter.",
                         if title.is_empty() {
                             return "ERROR: add needs a title".into();
                         }
-                        // A new lane while old ones are past their own dates is
-                        // how eight objectives stayed open for four days and
-                        // none closed. Close or recommit first; the board is a
-                        // budget of attention, not a list.
+                        // The board is a budget of attention, and a budget
+                        // that only binds when something is overdue does not
+                        // bind: on 2026-09-02 the CEO dated every lane a week
+                        // out, nothing was overdue, and it opened two more —
+                        // ten active against a cap of six. The count is the cap.
                         let cap = self.ctx.cfg.max_active_objectives;
-                        if cap > 0 && self.ctx.store.active_objective_count() >= cap {
+                        let open = self.ctx.store.active_objective_count();
+                        if cap > 0 && open >= cap {
                             let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
                             let overdue = self.ctx.store.overdue_objectives(&today);
-                            if !overdue.is_empty() {
-                                let names = overdue
-                                    .iter()
-                                    .take(6)
-                                    .map(|(id, t, d, _)| {
-                                        format!("#{id} {t} ({})", if d.is_empty() { "no review date" } else { d })
-                                    })
-                                    .collect::<Vec<_>>()
-                                    .join(", ");
-                                return format!(
-                                    "REFUSED: {} objectives are already active (cap {cap}) and {} of them are past their own review date: {names}. \
-                                     Close one with objectives(done) or objectives(drop), or recommit it with objectives(update, id, review_date, kill_criterion), \
-                                     then add this. Opening a lane while old ones answer to nobody is how every lane ends up half-driven.",
-                                    self.ctx.store.active_objective_count(),
-                                    overdue.len()
-                                );
-                            }
+                            let soonest = self
+                                .ctx
+                                .store
+                                .active_objectives_by_review_date()
+                                .into_iter()
+                                .take(4)
+                                .map(|(id, t, d)| format!("#{id} {t} (review {})", if d.is_empty() { "unset" } else { &d }))
+                                .collect::<Vec<_>>()
+                                .join(", ");
+                            return format!(
+                                "REFUSED: {open} objectives are already active and the cap is {cap}. This is a budget, not a queue — \
+                                 the company has the hands for {cap} driven lanes, and an eleventh only means every one gets less. \
+                                 Close or drop one first (the nearest reviews: {soonest}){}. If this bet is genuinely better than \
+                                 all {cap} of those, say which one it replaces and close that one now.",
+                                if overdue.is_empty() {
+                                    String::new()
+                                } else {
+                                    format!(", and {} of them are already past their own review date", overdue.len())
+                                }
+                            );
                         }
                         let rank = a["rank"].as_i64().unwrap_or(100);
                         let id = self.ctx.store.add_objective(title, rank);
@@ -1628,7 +1676,13 @@ Drop superseded detail, resolved dead ends, and chatter.",
                             }
                             ok |= self.ctx.store.set_objective_kind(id, k);
                         }
-                        ok |= self.ctx.store.set_objective_review(id, s(a, "review_date"), s(a, "kill_criterion"));
+                        let new_date = s(a, "review_date");
+                        if !new_date.is_empty() {
+                            if let Some(why) = self.recommit_fault(id, new_date, s(a, "note")) {
+                                return why;
+                            }
+                        }
+                        ok |= self.ctx.store.set_objective_review(id, new_date, s(a, "kill_criterion"));
                         if ok { format!("objective #{id} updated") } else { format!("ERROR: no objective #{id} (or nothing to change)") }
                     }
                     "done" | "drop" => {
@@ -1973,6 +2027,39 @@ detail, and anything already acted on and closed.",
             *cur = chosen.clone();
         }
         chosen
+    }
+
+    /// Why a review date may not move where it is being moved to, if so.
+    ///
+    /// A date that slides on the day it comes due is not a decision, and the
+    /// first hour of the mechanism showed the reflex: objective 34 was dated
+    /// 2026-09-02 and pushed to 09-09 without anything having changed. A push
+    /// is allowed, but a bounded one, and a second consecutive push has to say
+    /// what changed.
+    fn recommit_fault(&self, id: i64, new_date: &str, note: &str) -> Option<String> {
+        let today = chrono::Utc::now().date_naive();
+        let want = chrono::NaiveDate::parse_from_str(new_date, "%Y-%m-%d").ok()?;
+        let days = (want - today).num_days();
+        let max = self.ctx.cfg.max_review_horizon_days;
+        if max > 0 && days > max {
+            return Some(format!(
+                "REFUSED: a review date {days} days out is not a commitment, it is a shelf. Set #{id} at most {max} days ahead \
+                 ({}), or if the bet genuinely needs longer than that to show anything, it is the wrong bet for a company this \
+                 size — close it and say so.",
+                (today + chrono::Duration::days(max)).format("%Y-%m-%d")
+            ));
+        }
+        // A slide is only a slide when the old date had actually arrived.
+        let old = self.ctx.store.objective_review_date(id);
+        let due = chrono::NaiveDate::parse_from_str(&old, "%Y-%m-%d").is_ok_and(|d| d <= today);
+        if due && want > today && note.trim().len() < 20 {
+            return Some(format!(
+                "REFUSED: #{id} came due on {old} and this pushes it to {new_date} without saying what changed. \
+                 A date that moves on the day it lands means nothing. Pass a note (one line, what you learned since {old} \
+                 that makes another window worth spending), or close the objective."
+            ));
+        }
+        None
     }
 
     /// The peer an agent's dispatch should run on instead of its home seat:
