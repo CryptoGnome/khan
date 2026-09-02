@@ -258,6 +258,12 @@ mod tests {
         assert_eq!(body["stream_options"]["include_usage"], true);
         assert_eq!(body["messages"][1]["role"], "user");
         assert_eq!(body["messages"][1]["content"], "hi");
+        // only the newest picture is expanded into content parts; the earlier
+        // one was seen on its own turn and would only grow the body toward 413
+        let shot = |n: &str| Message { images: Some(vec![format!("data:image/png;base64,{n}")]), ..Message::text("user", n) };
+        let pic = Client::build_request("glm53flash", &[shot("first"), Message::text("assistant", "ok"), shot("second")], &[], 1024);
+        assert_eq!(pic["messages"][0]["content"], "first");
+        assert_eq!(pic["messages"][2]["content"][1]["type"], "image_url");
         // messages must not serialize null tool fields
         assert!(body["messages"][0].get("tool_calls").is_none());
         // tool schema shape

@@ -342,6 +342,12 @@ impl Client {
         // reject the whole request: "message.content must be a string (null is
         // only valid with tool_calls)". Histories already hold such messages,
         // so patch at request time rather than at message creation.
+        // Only the newest picture rides the request. Every earlier one was
+        // already seen on the turn it arrived, and a history that keeps them
+        // all grows past the provider's body limit within a few screenshots:
+        // kit-web's second render on 2026-09-02 turned every later call on
+        // that run into a 413 and a fall-through to the text-only rung.
+        let last_with_images = messages.iter().rposition(|m| m.images.as_ref().is_some_and(|v| !v.is_empty()));
         if let Some(msgs) = body["messages"].as_array_mut() {
             for (i, m) in msgs.iter_mut().enumerate() {
                 if m.get("content").is_none() && m.get("tool_calls").is_none() {
@@ -352,7 +358,7 @@ impl Client {
                 // ceiling is a substring list, not a capability probe; widen it
                 // when a new text-only model joins the ladder.
                 if let Some(imgs) = messages.get(i).and_then(|src| src.images.as_ref()) {
-                    if !Self::text_only_model(model_id) && !imgs.is_empty() {
+                    if !Self::text_only_model(model_id) && !imgs.is_empty() && last_with_images == Some(i) {
                         let text = m["content"].as_str().unwrap_or("").to_string();
                         let mut parts = vec![serde_json::json!({"type": "text", "text": text})];
                         for u in imgs {
