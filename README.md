@@ -232,7 +232,12 @@ token count is printed. **There is no spend cap — watch it.**
   never excuses unlimited spend.
 - **CEO seat ladder** — the binary, never the model, picks the CEO's seat:
   the first model in a quality-ordered list that isn't benched by a recent
-  failure and whose live marketplace price fits configured ceilings. Quiet
+  failure and whose live marketplace price fits configured ceilings. Three
+  stalls in ten minutes (a fill cut mid-answer, or one that burned two minutes
+  to fail) bench a model for fifteen — including the ladder's own first rung,
+  which no other rule could reach — and the ladder drops to the next seat;
+  with every rung benched the floor seat still answers, so the company never
+  stops thinking. Any agent's stalled call counts as evidence. Quiet
   heartbeats (nothing queued) run on a cheap `heartbeat_model`, escalating
   the moment real work drains in. The binary also polls the provider's
   balance; below a floor it alerts the CEO with a sized top-up target and

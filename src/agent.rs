@@ -160,6 +160,28 @@ pub(crate) fn overdue_ideas_line(workspace: &std::path::Path) -> String {
     )
 }
 
+/// How long a stall stays on a model's record, and how many inside that window
+/// bench it. Three in ten minutes is a route that is cutting answers off, not a
+/// bad afternoon: on 2026-09-02 the failures came every three minutes.
+pub(crate) const STALL_WINDOW: std::time::Duration = std::time::Duration::from_secs(600);
+pub(crate) const STALL_STRIKES: usize = 3;
+
+/// True when a failed call means the ROUTE stalled rather than the model
+/// running out of its own budget. Either the gateway relayed an upstream
+/// timeout, or the call burned two minutes before failing — at that point what
+/// it says matters less than the two minutes the company spent waiting.
+pub(crate) fn is_stall(err: &str, elapsed_secs: u64) -> bool {
+    crate::llm::upstream_timeout(err) || elapsed_secs >= 120
+}
+
+/// Drop stalls that have aged out, record this one, and return how many now
+/// stand against the model.
+pub(crate) fn stall_strike(times: &mut Vec<std::time::Instant>, now: std::time::Instant) -> usize {
+    times.retain(|t| now.duration_since(*t) < STALL_WINDOW);
+    times.push(now);
+    times.len()
+}
+
 /// base * 2^level, capped. Pure so the ladder is testable.
 pub(crate) fn backoff_interval(base: u64, max: u64, level: u32) -> u64 {
     let mut v = base;
@@ -629,6 +651,13 @@ pub struct SeatState {
     prices: std::sync::Mutex<(std::collections::HashMap<String, (u64, u64)>, Option<std::time::Instant>)>,
     /// Models benched after a failed call, until the instant stored here.
     cooldown: std::sync::Mutex<std::collections::HashMap<String, std::time::Instant>>,
+    /// When each model last stalled — a fill cut mid-answer, or one that took
+    /// longer than a stall is worth waiting for. Benching used to need a model
+    /// to fail through the whole fallback ladder AND not be the floor seat, so
+    /// the one model that is both first rung and floor could never be benched:
+    /// on 2026-09-02 glm53flash timed out at ~128s twenty-one times in a day
+    /// and kept the CEO's seat through every one of them.
+    stalls: std::sync::Mutex<std::collections::HashMap<String, Vec<std::time::Instant>>>,
     /// The seat chosen for the episode in flight (for close-time bookkeeping).
     current: std::sync::Mutex<String>,
     /// (last fuel poll, last low-fuel alert) — the poll rides the same cadence
@@ -676,7 +705,14 @@ impl Orchestrator {
             }
             Err(e) => {
                 self.ctx.store.record_model_call(model, started.elapsed().as_millis() as u64, false, &format!("{e:#}"));
-                self.log_line(agent, "llm-error", &format!("{model} failed: {e:#}"));
+                let why = format!("{e:#}");
+                self.log_line(agent, "llm-error", &format!("{model} failed: {why}"));
+                // A stall is a fill cut mid-answer (the gateway relays the
+                // upstream timeout) or one that burned two minutes to fail.
+                // Truncation is the model spending its budget, not the route.
+                if truncation(&e).is_none() && is_stall(&why, started.elapsed().as_secs()) {
+                    self.record_stall(model, agent);
+                }
                 // Running out of output budget is the one failure another model
                 // cannot rescue: the request is unchanged, so every fallback spends
                 // its budget the same way. Walking the ladder here only burns
@@ -1806,6 +1842,40 @@ detail, and anything already acted on and closed.",
     fn current_ceo_model(&self) -> String {
         let cur = self.seat.current.lock().unwrap();
         if cur.is_empty() { self.ctx.cfg.ceo_model.clone() } else { cur.clone() }
+    }
+
+    /// Record a stalled call and bench the model once they cluster.
+    ///
+    /// Benching the first rung is safe because the picker falls back to
+    /// `cfg.ceo_model` when every rung is benched — the company can always
+    /// still think, it just stops waiting on a route that is cutting answers
+    /// off. Recorded for any agent's call: a bad route is bad for everyone,
+    /// and the CEO alone would take an hour to gather the evidence.
+    fn record_stall(&self, model: &str, agent: &str) {
+        let now = std::time::Instant::now();
+        let hits = {
+            let mut s = self.seat.stalls.lock().unwrap();
+            let e = s.entry(model.to_string()).or_default();
+            stall_strike(e, now)
+        };
+        if hits < STALL_STRIKES {
+            return;
+        }
+        // Only bench while something else can take the seat; benching the last
+        // model standing would buy nothing and cost the log line.
+        let has_alternative = self.ctx.cfg.ceo_models.iter().any(|m| {
+            m != model && !self.seat.cooldown.lock().unwrap().get(m).is_some_and(|u| *u > now)
+        });
+        if !has_alternative {
+            return;
+        }
+        self.seat.stalls.lock().unwrap().remove(model);
+        self.bench_seat(model);
+        self.log_line(
+            agent,
+            "seat-benched",
+            &format!("{model} stalled {hits} times in 10m — benched 15m, the ladder drops a rung"),
+        );
     }
 
     /// Bench a model after a failed call: the ladder skips it for 15 minutes.

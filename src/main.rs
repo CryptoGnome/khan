@@ -690,6 +690,29 @@ mod tests {
     }
 
     #[test]
+    fn a_seat_that_keeps_stalling_is_benched_even_when_it_is_the_first_rung() {
+        use crate::agent::{is_stall, stall_strike, STALL_STRIKES, STALL_WINDOW};
+        // the ~128s cuts of 2026-09-02: the gateway relays the upstream status
+        let cut = r#"upstream timed out mid-generation: {"error":{"message":"a source refused this request (timeout, upstream status 524)"}}"#;
+        assert!(is_stall(cut, 128));
+        // a slow failure counts whatever it says — the wait is the damage
+        assert!(is_stall("502 Bad Gateway: a source refused this request", 135));
+        // a fast failure is a fault to diagnose, not a stalled route
+        assert!(!is_stall("429 rate limited", 2));
+        assert!(!is_stall("400 bad body", 1));
+
+        let now = std::time::Instant::now();
+        let mut times: Vec<std::time::Instant> = Vec::new();
+        assert_eq!(stall_strike(&mut times, now), 1);
+        assert_eq!(stall_strike(&mut times, now), 2);
+        assert_eq!(stall_strike(&mut times, now), STALL_STRIKES, "the third inside the window benches it");
+        // strikes age out: two old ones plus a fresh one is not a bench
+        let stale = now - STALL_WINDOW - std::time::Duration::from_secs(1);
+        let mut aged = vec![stale, stale];
+        assert_eq!(stall_strike(&mut aged, now), 1);
+    }
+
+    #[test]
     fn a_named_smaller_ceiling_is_a_retry_not_a_dead_request() {
         use crate::llm::retry_max_tokens;
         // the 400 that is really "ask for less" — the number rides the body
