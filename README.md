@@ -313,8 +313,9 @@ token count is printed. **There is no spend cap — watch it.**
 - **Model failover** — if an agent's model keeps failing (free-tier 429s/outages),
   the call is answered by the next available free model automatically and the
   swap is logged. A refusal that names a ceiling that would fit
-  (`error.retry_max_tokens`, on a 400 as well as a 503) is re-sent once at
-  exactly that number rather than abandoned, and a stream that breaks after
+  (`error.retry_max_tokens`, on a 400 as well as a 503) is re-sent at
+  exactly that number rather than abandoned, and followed down while the
+  gateway keeps naming a smaller one, and a stream that breaks after
   delivering output keeps what arrived — those tokens are billed, so a retry
   would buy the same answer twice — while dropping any tool call whose
   arguments were cut off mid-JSON. A break before any output is free and is
@@ -325,7 +326,12 @@ token count is printed. **There is no spend cap — watch it.**
   budget the binary chose and the model blew still fails outright. Summarising
   calls ask for a summary-sized ceiling rather than the model's whole 64k,
   since the gateway reserves against whatever is asked. The client's own deadline sits above the gateway's 480s fill
-  ceiling, since hanging up first pays for output nobody reads.
+  ceiling, since hanging up first pays for output nobody reads. Every bu0y
+  request carries a decode-speed floor (`min_tokens_per_sec` in the provider
+  block) so the cheapest route is skipped when it is one that cannot finish;
+  when no route clears it the gateway's `unmet_speed` refusal goes straight
+  to the fallback ladder, and a fill on an unmeasured route is logged as
+  `speed_floor=unverified`.
 - **Work tools** (all agents): file read/write/list (confined to `workspace/`),
   shell (with local `git` for version control; the GitHub CLI is blocked so
   agents can never reach your GitHub login), web fetch + DuckDuckGo search (JS app shells render in headless Chromium automatically, with the page's declared dates and its CSS/JS bundle URLs listed), `web_screenshot` and `view_image` so a vision seat actually sees pages and art,

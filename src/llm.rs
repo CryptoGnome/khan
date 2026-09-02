@@ -466,6 +466,14 @@ impl Client {
                     }
                     continue;
                 }
+                // The gateway says whether the route that filled was one it
+                // knew met our speed floor. `unverified` means it fell back to
+                // an unmeasured route; more than the odd one is worth reporting.
+                if let Some(sf) = v["bu0y"]["speed_floor"].as_str() {
+                    if sf != "verified" {
+                        eprintln!("[llm] speed_floor={sf}");
+                    }
+                }
                 if !v["usage"].is_null() {
                     usage.prompt_tokens = v["usage"]["prompt_tokens"].as_u64().unwrap_or(usage.prompt_tokens);
                     usage.completion_tokens =
@@ -561,13 +569,18 @@ impl Client {
         }
         let url = format!("{}/chat/completions", prov.base_url.trim_end_matches('/'));
         let max_out = cap.unwrap_or(u32::MAX).min(self.output_limit(model, cfg));
-        let mut body = Self::build_request(&model_id, messages, tools, max_out);
-        // The speed floor rides every request to a provider that has one. It is
-        // the answer to 2026-09-02: a route decoding at 4.5 tokens/s was the
-        // cheapest and so was picked every time, cutting fills at ~128s all day.
-        if let Some(tps) = prov.min_tokens_per_sec {
-            body["min_tokens_per_sec"] = Value::from(tps);
-        }
+        // The speed floor rides every request to a provider that has one — the
+        // shrunken retries below included, which is why it lives in the builder.
+        // It is the answer to 2026-09-02: a route decoding at 4.5 tokens/s was
+        // the cheapest and so was picked every time, cutting fills at ~128s all day.
+        let build = |cap: u32| {
+            let mut b = Self::build_request(&model_id, messages, tools, cap);
+            if let Some(tps) = prov.min_tokens_per_sec {
+                b["min_tokens_per_sec"] = Value::from(tps);
+            }
+            b
+        };
+        let mut body = build(max_out);
         // The gateway names a ceiling that fits; take it once and never climb back.
         let mut shrunk = false;
         let mut sent_max = max_out;
@@ -627,10 +640,14 @@ impl Client {
                 // Carried by a 400 (ask too big to produce inside the fill
                 // ceiling at this model's recent speed) and by a 503 below the
                 // margin floor. Either way the gateway has done the arithmetic
-                // and named the ceiling that fills — re-send at exactly it.
-                if let Some(fit) = retry_max_tokens(&text).filter(|_| !shrunk) {
+                // and named the ceiling that fills — re-send at exactly it. The
+                // number is recomputed from the speed samples arriving between
+                // calls, so a re-send can be refused again with a smaller one
+                // (6400 → 5120 → 4608 within 11s on 2026-09-02); follow it down
+                // while it keeps shrinking, and let the attempt budget bound it.
+                if let Some(fit) = retry_max_tokens(&text).filter(|f| *f < sent_max) {
                     shrunk = true;
-                    body = Self::build_request(&model_id, messages, tools, fit);
+                    body = build(fit);
                     sent_max = fit;
                     last_err = format!("{status} asked for a smaller ceiling; retrying at max_tokens {fit}");
                     continue;
