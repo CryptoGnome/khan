@@ -230,6 +230,14 @@ token count is printed. **There is no spend cap — watch it.**
   with each lane's measured share of the company's recent attention — so a
   social presence is never killed for earning nothing, and "it's marketing"
   never excuses unlimited spend.
+- **Peer seats priced by what was paid** — every fill records the charge the
+  gateway settled it at, and interchangeable models (`model_peers`) are
+  compared on that realized price, not the catalog average: bu0y fills at the
+  cheapest source, so the average can read a model at 1.5x its peer while the
+  best ask sits at a twentieth. On the way into a dispatch an agent runs on
+  the peer that has been more than `peer_switch_pct` cheaper over the last
+  three hours, one dispatch in ten samples the other so a repricing gets
+  noticed, and each move is logged once as `peer-seat`.
 - **CEO seat ladder** — the binary, never the model, picks the CEO's seat:
   the first model in a quality-ordered list that isn't benched by a recent
   failure and whose live marketplace price fits configured ceilings. Three

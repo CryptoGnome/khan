@@ -258,6 +258,13 @@ impl Store {
         // only measured signal per model is latency and failure rate, which favours
         // cheap fast models by construction and can never justify a better one.
         let _ = conn.execute("ALTER TABLE ratings ADD COLUMN model TEXT NOT NULL DEFAULT ''", []);
+        // Migration: what a call cost. The catalog's average price is what the
+        // ladder read for a week while the models page showed luna's best ask
+        // at a twentieth of glm53flash's (2026-09-02); the fill's own settled
+        // charge is the price we pay, and only a record of it can move seats.
+        for col in ["prompt_tokens", "completion_tokens", "micros"] {
+            let _ = conn.execute(&format!("ALTER TABLE model_calls ADD COLUMN {col} INTEGER NOT NULL DEFAULT 0"), []);
+        }
         // Migration: review routines — a routine can dispatch an AGENT with a
         // stored task on a schedule instead of running a shell command, so
         // judgment checks (page critiques, code audits) become durable
@@ -962,12 +969,45 @@ explore (buys knowledge).\n{}\n",
 
     // --- model performance (so hiring runs on measured speed and reliability, not price alone) ---
 
-    pub fn record_model_call(&self, model: &str, ms: u64, ok: bool, err: &str) {
+    pub fn record_model_call(&self, model: &str, ms: u64, ok: bool, err: &str, usage: crate::llm::Usage) {
         let c = self.conn.lock().unwrap();
         let _ = c.execute(
-            "INSERT INTO model_calls(ts, model, ms, ok, err) VALUES(?1,?2,?3,?4,?5)",
-            params![chrono::Utc::now().to_rfc3339(), model, ms as i64, ok as i64, err],
+            "INSERT INTO model_calls(ts, model, ms, ok, err, prompt_tokens, completion_tokens, micros) \
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",
+            params![
+                chrono::Utc::now().to_rfc3339(),
+                model,
+                ms as i64,
+                ok as i64,
+                err,
+                usage.prompt_tokens as i64,
+                usage.completion_tokens as i64,
+                usage.billed_micros as i64
+            ],
         );
+    }
+
+    /// What a model has actually cost this company lately: settled
+    /// micro-dollars per million tokens (prompt and completion together, so
+    /// the blend is our real mix, not a guess), over the last `hours`. None
+    /// until there are enough fills to mean something.
+    ///
+    /// Deliberate ceiling: fills at the gateway's minimum charge (~$0.002 for
+    /// settlement gas) are left out, since a 20-token answer billed at the
+    /// floor says nothing about the per-token rate; if every call is that
+    /// small the price is unknown rather than wrong.
+    pub fn realized_price(&self, model: &str, hours: i64) -> Option<u64> {
+        let since = (chrono::Utc::now() - chrono::Duration::hours(hours)).to_rfc3339();
+        let c = self.conn.lock().unwrap();
+        let (n, micros, tokens): (i64, i64, i64) = c
+            .query_row(
+                "SELECT COUNT(*), COALESCE(SUM(micros),0), COALESCE(SUM(prompt_tokens+completion_tokens),0) \
+                 FROM model_calls WHERE model=?1 AND ts>?2 AND ok=1 AND micros>2000 AND prompt_tokens+completion_tokens>0",
+                params![model, since],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .ok()?;
+        (n >= 5 && tokens > 0).then(|| (micros as u128 * 1_000_000 / tokens as u128) as u64)
     }
 
     /// Measured per-model performance over the recent window, busiest first, for

@@ -67,6 +67,11 @@ pub struct FunctionCall {
 pub struct Usage {
     pub prompt_tokens: u64,
     pub completion_tokens: u64,
+    /// What the gateway settled this fill at, in micro-dollars. bu0y fills at
+    /// the cheapest source that will serve, so this — not the catalog average —
+    /// is the price of a model as this company actually pays it. 0 when the
+    /// provider does not say.
+    pub billed_micros: u64,
 }
 
 /// The model spent its entire output budget before it produced anything: HTTP
@@ -469,6 +474,9 @@ impl Client {
                 // The gateway says whether the route that filled was one it
                 // knew met our speed floor. `unverified` means it fell back to
                 // an unmeasured route; more than the odd one is worth reporting.
+                if let Some(n) = v["bu0y"]["billed_micros"].as_u64() {
+                    usage.billed_micros = n;
+                }
                 if let Some(sf) = v["bu0y"]["speed_floor"].as_str() {
                     if sf != "verified" {
                         eprintln!("[llm] speed_floor={sf}");

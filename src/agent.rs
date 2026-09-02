@@ -164,6 +164,9 @@ pub(crate) fn overdue_ideas_line(workspace: &std::path::Path) -> String {
 /// messages). Generous for a brief, and small enough that the gateway reserves
 /// against a real number instead of the model's whole 64k ceiling.
 pub(crate) const SUMMARY_MAX_TOKENS: u32 = 8192;
+/// Window for a model's realized price. Short enough to follow a repricing
+/// within the hour, long enough to hold the five fills the price needs.
+const PEER_PRICE_HOURS: i64 = 3;
 
 /// How long a stall stays on a model's record, and how many inside that window
 /// bench it. Three in ten minutes is a route that is cutting answers off, not a
@@ -711,11 +714,11 @@ impl Orchestrator {
                 if secs >= 60 {
                     self.log_line(agent, "slow-model", &format!("{model} took {secs}s to answer"));
                 }
-                self.ctx.store.record_model_call(model, started.elapsed().as_millis() as u64, true, "");
+                self.ctx.store.record_model_call(model, started.elapsed().as_millis() as u64, true, "", r.1);
                 Ok(r)
             }
             Err(e) => {
-                self.ctx.store.record_model_call(model, started.elapsed().as_millis() as u64, false, &format!("{e:#}"));
+                self.ctx.store.record_model_call(model, started.elapsed().as_millis() as u64, false, &format!("{e:#}"), Usage::default());
                 let why = format!("{e:#}");
                 self.log_line(agent, "llm-error", &format!("{model} failed: {why}"));
                 // A stall is a fill cut mid-answer (the gateway relays the
@@ -757,12 +760,12 @@ impl Orchestrator {
                     let alt_started = std::time::Instant::now();
                     match self.llm.chat_capped(&self.ctx.cfg, &alt, messages, tools, cap).await {
                         Ok(r) => {
-                            self.ctx.store.record_model_call(&alt, alt_started.elapsed().as_millis() as u64, true, "");
+                            self.ctx.store.record_model_call(&alt, alt_started.elapsed().as_millis() as u64, true, "", r.1);
                             self.log_line(agent, "model-fallback", &format!("{model} failed, answered by {alt}"));
                             return Ok(r);
                         }
                         Err(alt_err) => {
-                            self.ctx.store.record_model_call(&alt, alt_started.elapsed().as_millis() as u64, false, &format!("{alt_err:#}"));
+                            self.ctx.store.record_model_call(&alt, alt_started.elapsed().as_millis() as u64, false, &format!("{alt_err:#}"), Usage::default());
                             self.log_line(agent, "llm-error", &format!("{alt} failed too: {alt_err:#}"));
                         }
                     }
@@ -933,6 +936,20 @@ Drop superseded detail, resolved dead ends, and chatter.",
             self.log_line(name, "re-homed", &format!("seat {model} is denied; moving to {to}"));
             self.ctx.store.save_agent(name, &role, &prompt_name, &to, &hist_json);
             model = to;
+        }
+        // The home seat stays on record; the run goes to whichever peer the
+        // company is actually paying less for. Logged on change only, so the
+        // log shows repricings rather than every dispatch.
+        let key = format!("peer_seat:{name}");
+        if let Some(to) = self.cheaper_peer(&model) {
+            if self.ctx.store.kv_get(&key).as_deref() != Some(to.as_str()) {
+                self.log_line(name, "peer-seat", &format!("{model} -> {to} ({})", self.peer_reason(&model, &to)));
+                self.ctx.store.kv_set(&key, &to);
+            }
+            model = to;
+        } else if self.ctx.store.kv_get(&key).is_some_and(|v| !v.is_empty()) {
+            self.log_line(name, "peer-seat", &format!("back on {model}"));
+            self.ctx.store.kv_set(&key, "");
         }
         // Refuse-don't-drop, same as the history below: a missing prompt row
         // used to hand the employee an EMPTY system prompt silently. Fall back
@@ -1859,6 +1876,34 @@ detail, and anything already acted on and closed.",
             *cur = chosen.clone();
         }
         chosen
+    }
+
+    /// The peer an agent's dispatch should run on instead of its home seat:
+    /// the cheapest peer by realized price when it beats home by more than
+    /// `peer_switch_pct`. One dispatch in ten goes to a peer regardless, so a
+    /// model nobody is calling keeps a fresh price — a catalog-only rule can
+    /// never learn that the loser got cheap again.
+    fn cheaper_peer(&self, home: &str) -> Option<String> {
+        let peers = self.ctx.cfg.peers_of(home);
+        if peers.is_empty() {
+            return None;
+        }
+        if chrono::Utc::now().timestamp() % 10 == 0 {
+            return peers.first().cloned();
+        }
+        let mine = self.ctx.store.realized_price(home, PEER_PRICE_HOURS)?;
+        let best = peers
+            .iter()
+            .filter_map(|p| self.ctx.store.realized_price(p, PEER_PRICE_HOURS).map(|c| (c, p.clone())))
+            .min()?;
+        (best.0 * 100 < mine * (100 - self.ctx.cfg.peer_switch_pct)).then_some(best.1)
+    }
+
+    fn peer_reason(&self, home: &str, to: &str) -> String {
+        match (self.ctx.store.realized_price(home, PEER_PRICE_HOURS), self.ctx.store.realized_price(to, PEER_PRICE_HOURS)) {
+            (Some(h), Some(t)) => format!("realized {t} vs {h} micro$/1M tokens over {PEER_PRICE_HOURS}h"),
+            _ => "price sample".to_string(),
+        }
     }
 
     /// The seat picked for the episode in flight (bookkeeping paths only).

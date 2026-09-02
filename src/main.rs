@@ -713,6 +713,33 @@ mod tests {
     }
 
     #[test]
+    fn a_seat_moves_to_the_peer_the_company_actually_pays_less_for() {
+        use crate::llm::Usage;
+        let cfg: crate::config::Config = toml::from_str(include_str!("../khan.toml.example")).unwrap();
+        assert_eq!(cfg.peers_of("bu0y/glm53flash"), vec!["bu0y/gpt56luna".to_string()]);
+        assert_eq!(cfg.peers_of("bu0y/gpt56luna"), vec!["bu0y/glm53flash".to_string()]);
+        assert!(cfg.peers_of("bu0y/grok46").is_empty());
+        assert_eq!(cfg.peer_switch_pct, 25);
+
+        let store = crate::state::Store::open(":memory:").unwrap();
+        let fill = |tokens: u64, micros: u64| Usage { prompt_tokens: tokens, completion_tokens: 0, billed_micros: micros };
+        // four fills are not a price yet
+        for _ in 0..4 {
+            store.record_model_call("bu0y/glm53flash", 1000, true, "", fill(100_000, 20_000));
+        }
+        assert_eq!(store.realized_price("bu0y/glm53flash", 3), None);
+        // the fifth makes it one: 100k micro$ over 500k tokens = 200k per 1M
+        store.record_model_call("bu0y/glm53flash", 1000, true, "", fill(100_000, 20_000));
+        assert_eq!(store.realized_price("bu0y/glm53flash", 3), Some(200_000));
+        // a minimum-charge fill and a failed call say nothing about the rate
+        store.record_model_call("bu0y/glm53flash", 1000, true, "", fill(20, 2_000));
+        store.record_model_call("bu0y/glm53flash", 1000, false, "boom", Usage::default());
+        assert_eq!(store.realized_price("bu0y/glm53flash", 3), Some(200_000));
+        // a peer with no fills has no price, so there is nothing to move to
+        assert_eq!(store.realized_price("bu0y/gpt56luna", 3), None);
+    }
+
+    #[test]
     fn a_speed_floor_rides_only_the_provider_that_set_it_and_unmet_speed_is_not_a_wait() {
         use crate::llm::unmet_speed;
         // the shipped config carries the floor on bu0y and nowhere else
@@ -1544,10 +1571,10 @@ mod tests {
     #[test]
     fn model_stats_report_latency_and_failures() {
         let store = crate::state::Store::open(":memory:").unwrap();
-        store.record_model_call("bu0y/fast", 2_000, true, "");
-        store.record_model_call("bu0y/fast", 4_000, true, "");
-        store.record_model_call("bu0y/slow", 90_000, true, "");
-        store.record_model_call("bu0y/slow", 70_000, false, "429 rate limited");
+        store.record_model_call("bu0y/fast", 2_000, true, "", crate::llm::Usage::default());
+        store.record_model_call("bu0y/fast", 4_000, true, "", crate::llm::Usage::default());
+        store.record_model_call("bu0y/slow", 90_000, true, "", crate::llm::Usage::default());
+        store.record_model_call("bu0y/slow", 70_000, false, "429 rate limited", crate::llm::Usage::default());
         let s = store.model_stats_text();
         assert!(s.contains("bu0y/fast: 2 calls, avg 3s"), "avg latency per model: {s}");
         assert!(s.contains("bu0y/slow"), "slow model listed: {s}");
@@ -1958,7 +1985,7 @@ mod tests {
         )
         .unwrap();
         let store = crate::state::Store::open(":memory:").unwrap();
-        store.record_model_call("pay/big", 1200, true, "");
+        store.record_model_call("pay/big", 1200, true, "", crate::llm::Usage::default());
         let seen = store.models_seen();
         assert_eq!(seen, vec!["pay/big".to_string()]);
         let untried = cfg.untried_models(&seen);
@@ -1967,7 +1994,7 @@ mod tests {
         // Free models count too — an untried free model is also unmeasured.
         assert!(untried.contains(&"or/cheap:free".to_string()), "{untried:?}");
         // A failed call is still a measurement: it produced data either way.
-        store.record_model_call("pay/fresh", 500, false, "boom");
+        store.record_model_call("pay/fresh", 500, false, "boom", crate::llm::Usage::default());
         assert!(!cfg.untried_models(&store.models_seen()).contains(&"pay/fresh".to_string()));
     }
 

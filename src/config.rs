@@ -65,6 +65,20 @@ pub struct Config {
     /// as the automatic fallback the binary fails through when a seat errors.
     #[serde(default)]
     pub seat_denylist: Vec<String>,
+    /// Groups of interchangeable models (same tools, same vision, comparable
+    /// judgment). On the way into a dispatch an agent's seat is swapped for a
+    /// peer whose REALIZED price — what fills actually settled at over the
+    /// last hours — is more than `peer_switch_pct` cheaper. The catalog's
+    /// average is not the price we pay: bu0y fills at the cheapest source, and
+    /// on 2026-09-02 luna's best ask sat at a twentieth of glm53flash's while
+    /// the averages said the opposite.
+    #[serde(default)]
+    pub model_peers: Vec<Vec<String>>,
+    /// How much cheaper a peer must be before the seat moves. Small enough to
+    /// catch a real repricing, large enough that a few-percent wobble does not
+    /// scatter an agent's work across two models every dispatch.
+    #[serde(default = "default_peer_switch_pct")]
+    pub peer_switch_pct: u64,
     /// Low-fuel floor in provider micro-dollars (bu0y GET /account
     /// availableMicros). Below it the binary files an hourly "fuel-low" routine
     /// alert so the CEO tops up before calls start bouncing with 402. 0 disables.
@@ -109,6 +123,10 @@ pub struct Config {
 
 fn default_workspace() -> String {
     "workspace".into()
+}
+
+fn default_peer_switch_pct() -> u64 {
+    25
 }
 
 fn default_ceo_max_input_price() -> u64 {
@@ -274,6 +292,17 @@ impl Config {
             .with_context(|| format!("env var {} not set (needed by provider {})", prov.api_key_env, prov.name))?
             .clone();
         Ok((prov.clone(), mname.to_string(), key))
+    }
+
+    /// The other members of `model`'s peer group, denied seats excluded.
+    pub fn peers_of(&self, model: &str) -> Vec<String> {
+        self.model_peers
+            .iter()
+            .filter(|g| g.iter().any(|m| m == model))
+            .flatten()
+            .filter(|m| *m != model && !self.seat_denied(m))
+            .cloned()
+            .collect()
     }
 
     pub fn utility_model(&self) -> String {
