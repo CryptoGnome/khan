@@ -186,6 +186,9 @@ impl Store {
              CREATE TABLE IF NOT EXISTS messages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, msg TEXT NOT NULL,
                 created_at TEXT NOT NULL, delivered INTEGER NOT NULL DEFAULT 0);
+             CREATE TABLE IF NOT EXISTS dispatches (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL, agent TEXT NOT NULL,
+                objective INTEGER, class TEXT NOT NULL, shape TEXT NOT NULL);
              CREATE TABLE IF NOT EXISTS skill_loads (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL,
                 agent TEXT NOT NULL, skill TEXT NOT NULL);
@@ -496,6 +499,81 @@ impl Store {
     }
 
     /// Stamp activity on an objective (a dispatch just went out against it).
+    // --- dispatch accounting: what the company's hands are doing, by kind ---
+    //
+    // On 2026-09-01, 188 of 384 dispatches were checks of earlier work, the
+    // same task shape went out four times, and 173 carried no objective. The
+    // classification is a leading-verb heuristic (agent.rs classify_task);
+    // the table is what the budget, the repeat refusal and the board read.
+
+    pub fn record_dispatch(&self, agent: &str, objective: Option<i64>, class: &str, shape: &str) {
+        let c = self.conn.lock().unwrap();
+        let _ = c.execute(
+            "INSERT INTO dispatches(ts, agent, objective, class, shape) VALUES(?1,?2,?3,?4,?5)",
+            params![chrono::Utc::now().to_rfc3339(), agent, objective, class, shape],
+        );
+    }
+
+    /// Check-class dispatches on an objective since its last build-class one
+    /// (all of them, if nothing was ever built).
+    pub fn consecutive_checks(&self, objective: i64) -> u32 {
+        let c = self.conn.lock().unwrap();
+        let mut stmt = match c.prepare(
+            "SELECT class FROM dispatches WHERE objective=?1 ORDER BY id DESC LIMIT 20",
+        ) {
+            Ok(s) => s,
+            Err(_) => return 0,
+        };
+        let classes: Vec<String> = stmt
+            .query_map(params![objective], |r| r.get(0))
+            .map(|it| it.flatten().collect())
+            .unwrap_or_default();
+        let mut n = 0;
+        for cl in classes {
+            match cl.as_str() {
+                "check" => n += 1,
+                "build" => break,
+                _ => {}
+            }
+        }
+        n
+    }
+
+    /// How many times this task shape went out in the last 24h.
+    pub fn shape_count_24h(&self, shape: &str) -> u32 {
+        let since = (chrono::Utc::now() - chrono::Duration::hours(24)).to_rfc3339();
+        let c = self.conn.lock().unwrap();
+        c.query_row(
+            "SELECT COUNT(*) FROM dispatches WHERE shape=?1 AND ts>?2",
+            params![shape, since],
+            |r| r.get::<_, u32>(0),
+        )
+        .unwrap_or(0)
+    }
+
+    /// Per objective, (build, check) dispatch counts over the last 24h.
+    pub fn objective_mix_24h(&self) -> std::collections::HashMap<i64, (u32, u32)> {
+        let since = (chrono::Utc::now() - chrono::Duration::hours(24)).to_rfc3339();
+        let c = self.conn.lock().unwrap();
+        let mut out = std::collections::HashMap::new();
+        let Ok(mut stmt) = c.prepare(
+            "SELECT objective, class, COUNT(*) FROM dispatches WHERE ts>?1 AND objective IS NOT NULL GROUP BY objective, class",
+        ) else {
+            return out;
+        };
+        if let Ok(rows) = stmt.query_map(params![since], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, u32>(2)?))) {
+            for (o, cl, n) in rows.flatten() {
+                let e = out.entry(o).or_insert((0, 0));
+                match cl.as_str() {
+                    "build" => e.0 += n,
+                    "check" => e.1 += n,
+                    _ => {}
+                }
+            }
+        }
+        out
+    }
+
     pub fn touch_objective(&self, id: i64) {
         let now = chrono::Utc::now().to_rfc3339();
         let c = self.conn.lock().unwrap();
@@ -516,16 +594,17 @@ impl Store {
     /// with in-flight counts (passed in from the orchestrator) and how long since
     /// anything advanced each one. Facts only — the judgment is the model's job.
     pub fn objectives_board(&self, inflight: &std::collections::HashMap<i64, usize>) -> String {
+        let mix = self.objective_mix_24h();
         let c = self.conn.lock().unwrap();
         let Ok(mut stmt) = c.prepare(
-            "SELECT id, title, rank, plan, note, blocked_by, updated_at, owner, COALESCE(plan_updated_at,'') FROM objectives
+            "SELECT id, title, rank, plan, note, blocked_by, updated_at, owner, COALESCE(plan_updated_at,''), COALESCE(kind,'') FROM objectives
              WHERE status='active' ORDER BY rank, id",
         ) else {
             return String::new();
         };
-        let rows: Vec<(i64, String, i64, String, String, String, String, String, String)> = stmt
+        let rows: Vec<(i64, String, i64, String, String, String, String, String, String, String)> = stmt
             .query_map([], |r| {
-                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?, r.get(8)?))
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?, r.get(8)?, r.get(9)?))
             })
             .map(|it| it.filter_map(|x| x.ok()).collect())
             .unwrap_or_default();
@@ -535,7 +614,7 @@ impl Store {
             rows.iter().map(|r| (r.0, r.1.as_str())).collect();
         let now = chrono::Utc::now();
         let (mut ready, mut blocked) = (Vec::new(), Vec::new());
-        for (id, title, rank, plan, note, blocked_by, updated, owner, plan_updated) in &rows {
+        for (id, title, rank, plan, note, blocked_by, updated, owner, plan_updated, kind) in &rows {
             let waiting = Self::unresolved(blocked_by, &active);
             if waiting.is_empty() {
                 // Warnings live only here: a blocked objective is exempt from
@@ -552,6 +631,20 @@ impl Store {
                 }
                 if busy == 0 {
                     line.push_str(" — UNSTAFFED");
+                }
+                // The mix is what "going in circles" looks like from the board:
+                // an objective whose day was all checks of earlier work is not
+                // advancing, however busy it reads.
+                if let Some((built, checked)) = mix.get(id) {
+                    line.push_str(&format!(" — 24h: {built} built / {checked} checks"));
+                    if *built == 0 && *checked >= 3 {
+                        line.push_str(" — ALL CHECKS, nothing built: CONVERT OR KILL");
+                    }
+                } else if kind == "explore" {
+                    line.push_str(" — 24h: nothing dispatched");
+                }
+                if kind == "explore" && mix.get(id).is_none_or(|(b, _)| *b == 0) {
+                    line.push_str(" — EXPLORE with no build in 24h: route a candidate to an execution lane or kill it");
                 }
                 if plan.is_empty() {
                     line.push_str(" — NO PLAN YET");

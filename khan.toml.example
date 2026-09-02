@@ -113,6 +113,14 @@ workspace = "workspace"
 heartbeat_secs = 300
 # Turn cap per CEO episode (backstop when it never calls finish_episode)
 episode_max_steps = 12
+# Turn cap for a QUIET heartbeat: nothing queued, no finished task. One look,
+# one action or close. Measured 2026-09-01: 151 heartbeats, 786 steps, 88 of
+# them dispatched nothing — five steps of spot-checks each, every five minutes.
+quiet_heartbeat_max_steps = 2
+# A quiet heartbeat that puts no one to work doubles the wait to the next one,
+# up to this ceiling; any report, alert or founder message resets it to
+# heartbeat_secs. Silence gets cheaper; events never wait longer. 0 disables.
+heartbeat_backoff_max_secs = 1800
 # Max loop iterations per delegated employee task
 employee_max_iters = 30
 # Output ceiling sent on EVERY request, and only a fallback: where a provider

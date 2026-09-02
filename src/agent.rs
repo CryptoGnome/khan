@@ -28,8 +28,8 @@ fn ceo_schemas() -> Vec<Value> {
             json!(["tasks"])),
         tool("dispatch", "Send an employee off to work in the BACKGROUND and return immediately — you keep orchestrating while they work. Their report is delivered to you automatically when they finish. Prefer this over delegate for substantial work; call it several times to keep many employees busy at once.", json!({
             "agent": {"type": "string"}, "task": {"type": "string"},
-            "objective": {"type": "integer", "description": "Objective id from the board this task advances — tag every dispatch so the board shows where the company's hands actually are"}}),
-            json!(["agent", "task"])),
+            "objective": {"type": "integer", "description": "REQUIRED: the board objective this task advances, or 0 for company upkeep (bookkeeping, infra, hygiene). The board shows each objective's 24h build/check mix from these tags."}}),
+            json!(["agent", "task", "objective"])),
         tool("objectives", "Maintain the OBJECTIVE BOARD — the standing, restart-proof list of every live bet, ranked. It is shown to you every iteration with in-flight counts and staleness, and it is the source of truth for allocation. Actions: add (title, rank — lower rank = more important, 1 is P0), update (id + any of title/rank/plan/note/blocked_by), done (id), drop (id). Store each objective's plan with update once a planner has produced one. Declare dependencies honestly with blocked_by — blocked objectives are exempt from staffing pressure, and completing a blocker automatically surfaces its dependents as READY.", json!({
             "action": {"type": "string", "enum": ["add", "update", "done", "drop"]},
             "id": {"type": "integer"},
@@ -134,6 +134,18 @@ pub(crate) fn fuel_brief_line(store: &crate::state::Store) -> String {
         avail as f64 / 1e6,
         target as f64 / 1e6
     )
+}
+
+/// base * 2^level, capped. Pure so the ladder is testable.
+pub(crate) fn backoff_interval(base: u64, max: u64, level: u32) -> u64 {
+    let mut v = base;
+    for _ in 0..level.min(16) {
+        v = v.saturating_mul(2);
+        if v >= max {
+            return max.max(base);
+        }
+    }
+    v.min(max.max(base))
 }
 
 /// Marks the running brief that replaces compacted history, so a later compaction
@@ -352,8 +364,94 @@ fn manager_schemas() -> Vec<Value> {
 /// exact kill-check/routine-grinding episodes the guard exists for — sat
 /// past 12. More than 12 hands-on calls in a 12-step episode is an
 /// employee's transcript, not a CEO's.
-pub(crate) const CEO_EXEC_SOFT: u32 = 4;
-pub(crate) const CEO_EXEC_HARD: u32 = 12;
+/// Re-calibrated 2026-09-02 on the previous 24h: 48 episodes sat in the 5-12
+/// band and their shell purposes were spot-checks of employee reports, not
+/// investigation ("verifying x-mgr's claimed evidence file"). 348 shells in a
+/// day, 218 of 269 ratings self-verified.
+pub(crate) const CEO_EXEC_SOFT: u32 = 3;
+pub(crate) const CEO_EXEC_HARD: u32 = 8;
+
+/// What kind of work a dispatch is, from its leading verbs: "build" advances
+/// something (build, ship, write, launch, design…), "check" looks at earlier
+/// work (verify, recheck, spot-check, re-run, audit, sweep, checkpoint…),
+/// anything else is "other". A heuristic, not a judge — it only has to be
+/// right often enough for the budget, the repeat refusal and the board mix
+/// to describe the day: on 2026-09-01 it split 384 dispatches 190/188/6 and
+/// the check half matched the founder's own read of the log.
+pub(crate) fn classify_task(task: &str) -> &'static str {
+    let head: String = task.chars().take(160).collect::<String>().to_lowercase();
+    const CHECK: &[&str] = &[
+        "verify", "re-verify", "recheck", "re-check", "spot-check", "spot check", "re-run", "rerun", "re-read",
+        "reconcil", "recon ", "audit", "sweep", "checkpoint", "confirm", "validate", "liveness", "triage",
+        "re-validate", "status check", "verify-what-landed", "done check", "read-only",
+    ];
+    const BUILD: &[&str] = &[
+        "build", "ship", "write", "create", "implement", "launch", "deploy", "publish", "design", "redesign",
+        "draft", "generate", "execute", "fund", "send", "submit", "post ", "fix", "migrate", "wire",
+    ];
+    let first_check = CHECK.iter().filter_map(|w| head.find(w)).min();
+    let first_build = BUILD.iter().filter_map(|w| head.find(w)).min();
+    match (first_build, first_check) {
+        (Some(b), Some(c)) => if b <= c { "build" } else { "check" },
+        (Some(_), None) => "build",
+        (None, Some(_)) => "check",
+        (None, None) => "other",
+    }
+}
+
+/// The shape of a task for repeat detection: objective plus its first six
+/// words with punctuation and case folded. "METADATA GATE COIN IMAGE for the
+/// PINKPROOF launch" went out four times as four "different" tasks.
+pub(crate) fn task_shape(objective: Option<i64>, task: &str) -> String {
+    let folded = task
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c.to_ascii_lowercase() } else { ' ' })
+        .collect::<String>()
+        .split_whitespace()
+        .take(6)
+        .collect::<Vec<_>>()
+        .join(" ");
+    format!("{}:{folded}", objective.unwrap_or(0))
+}
+
+/// How many identical shapes in 24h before the next is refused as routine
+/// work, and how many consecutive checks on one objective before the next is
+/// refused as circling.
+pub(crate) const REPEAT_SHAPE_LIMIT: u32 = 3;
+pub(crate) const CONSECUTIVE_CHECK_LIMIT: u32 = 3;
+
+/// The refusal a dispatch gets when it is the same shape again or one more
+/// check on an objective that has not built anything since. None = allowed.
+/// Records the dispatch when allowed so the next call sees it.
+pub(crate) fn admit_dispatch(store: &crate::state::Store, agent: &str, objective: Option<i64>, task: &str) -> Option<String> {
+    let class = classify_task(task);
+    let shape = task_shape(objective, task);
+    let repeats = store.shape_count_24h(&shape);
+    if repeats >= REPEAT_SHAPE_LIMIT {
+        return Some(format!(
+            "REFUSED: this is the {}th dispatch of the same task shape in 24h ({}). Work that recurs is a ROUTINE — \
+             write the check as a script and add_routine it (zero model cost, survives restarts), or if it truly \
+             needs judgment each time, say what changed since the last run in the task.",
+            repeats + 1,
+            shape.split_once(':').map(|(_, t)| t).unwrap_or(&shape)
+        ));
+    }
+    if class == "check" {
+        if let Some(o) = objective {
+            let n = store.consecutive_checks(o);
+            if n >= CONSECUTIVE_CHECK_LIMIT {
+                return Some(format!(
+                    "REFUSED: objective #{o} has had {n} check-class dispatches in a row with nothing built between \
+                     them — verifying, re-verifying and sweeping is not advancing it. Dispatch work that BUILDS \
+                     something on #{o}, turn the recurring check into a routine, or rate the last report on the \
+                     evidence it already carries (txids, row ids, file hashes) and move on."
+                ));
+            }
+        }
+    }
+    store.record_dispatch(agent, objective, class, &shape);
+    None
+}
 
 /// True when a tool call is the CEO doing work rather than directing or
 /// reading: shell, sql, or any custom registry tool (a name that is neither
@@ -967,6 +1065,10 @@ Drop superseded detail, resolved dead ends, and chatter.",
             }
             "delegate" => {
                 let (agent, task) = (s(a, "agent").to_string(), s(a, "task").to_string());
+                if let Some(why) = admit_dispatch(&self.ctx.store, &agent, None, &task) {
+                    self.log_line("CEO", "dispatch-refused", &why);
+                    return why;
+                }
                 self.run_employee(&agent, &task).await
             }
             "delegate_parallel" => {
@@ -999,7 +1101,18 @@ Drop superseded detail, resolved dead ends, and chatter.",
                     // the opposite lesson: serialise the work rather than grow.
                     return format!("ERROR: {agent} is already working on a background task (see team_status). Wait for their report, dispatch someone else, or hire someone new for this — being short-handed is a reason to grow the team, not to queue the work behind one person.");
                 }
-                let objective = a["objective"].as_i64();
+                // Every dispatch names the objective it advances; 0 is company
+                // upkeep. Untagged work (173 of 384 on 2026-09-01) was invisible
+                // to the board, to owner routing and to every per-objective
+                // signal — so the drift it made up most of could not be seen.
+                let Some(tagged) = a["objective"].as_i64() else {
+                    return "ERROR: dispatch needs `objective`: the board id this task advances, or 0 for company upkeep (bookkeeping, infra, hygiene). Untagged work cannot be routed, counted, or judged.".into();
+                };
+                let objective = if tagged == 0 { None } else { Some(tagged) };
+                if let Some(why) = admit_dispatch(&self.ctx.store, &agent, Some(tagged), &task) {
+                    self.log_line("CEO", "dispatch-refused", &why);
+                    return why;
+                }
                 if let Some(o) = objective {
                     self.ctx.store.touch_objective(o);
                 }
@@ -1569,6 +1682,18 @@ detail, and anything already acted on and closed.",
     }
 
     /// True when the heartbeat interval has elapsed; stamps the clock when so.
+    /// heartbeat_secs doubled per consecutive quiet heartbeat that dispatched
+    /// nothing, capped at heartbeat_backoff_max_secs.
+    pub(crate) fn heartbeat_interval(&self) -> u64 {
+        let base = self.ctx.cfg.heartbeat_secs;
+        let max = self.ctx.cfg.heartbeat_backoff_max_secs;
+        if max == 0 {
+            return base;
+        }
+        let level = self.ctx.store.kv_get("heartbeat_backoff_level").and_then(|v| v.parse::<u32>().ok()).unwrap_or(0);
+        backoff_interval(base, max, level)
+    }
+
     fn heartbeat_due(&self) -> bool {
         let now = chrono::Utc::now();
         let last = self
@@ -1578,7 +1703,7 @@ detail, and anything already acted on and closed.",
             .and_then(|v| chrono::DateTime::parse_from_rfc3339(&v).ok())
             .map(|t| t.with_timezone(&chrono::Utc));
         match last {
-            Some(t) if (now - t).num_seconds() as u64 >= self.ctx.cfg.heartbeat_secs => {
+            Some(t) if (now - t).num_seconds() as u64 >= self.heartbeat_interval() => {
                 self.ctx.store.kv_set("last_heartbeat", &now.to_rfc3339());
                 true
             }
@@ -1847,6 +1972,9 @@ keep the board honest, then close with finish_episode(note)."
             // dispatch redirect.
             let mut exec_spent: u32 = 0;
             let mut obs_streak: u32 = 0;
+            // Whether this episode put anyone to work; a quiet heartbeat that
+            // did not backs the next heartbeat off.
+            let mut dispatched: bool = false;
             // Auto-close only arms after the episode has advanced something:
             // reading before acting is investigation, reading after acting is
             // the poll disease. The step cap still bounds pure investigation.
@@ -1892,7 +2020,17 @@ keep the board honest, then close with finish_episode(note)."
             // this one real request per 5 minutes at most.
             self.check_fuel().await;
             steps += 1;
-            if steps > self.ctx.cfg.episode_max_steps {
+            // A quiet heartbeat is a status sweep: one look, one action or
+            // close. The full cap let it spot-check its way to the cut-off —
+            // 786 heartbeat steps on 2026-09-01, 88 of 151 dispatching nothing.
+            // The moment work drains in it is no longer quiet and gets the
+            // full budget.
+            let cap = if quiet_heartbeat && !work_arrived {
+                self.ctx.cfg.quiet_heartbeat_max_steps.min(self.ctx.cfg.episode_max_steps)
+            } else {
+                self.ctx.cfg.episode_max_steps
+            };
+            if steps > cap {
                 break 'turns;
             }
             iter += 1;
@@ -2016,8 +2154,11 @@ keep the board honest, then close with finish_episode(note)."
                 ceo_model = self.pick_ceo_model().await;
             }
 
-            // The reflection payload opens every heartbeat episode.
-            if heartbeat && steps == 1 {
+            // The reflection payload opens every heartbeat episode that has
+            // room to act on it. A quiet heartbeat has two steps: sending it
+            // the ratings, skill, model and portfolio tables (rebuilt 151
+            // times a day) bought nothing but tokens.
+            if heartbeat && steps == 1 && !quiet_heartbeat {
                 let log = self.ctx.store.recent_log(40);
                 let toks = format!(
                     "Cumulative token usage since last restart (all agents): {} in / {} out. \
@@ -2365,6 +2506,9 @@ Keep the board honest: add new bets, declare blocked_by, mark done what is done.
                     if !OBSERVATION_TOOLS.contains(&tname.as_str()) {
                         advanced = true;
                     }
+                    if matches!(tname.as_str(), "dispatch" | "delegate" | "delegate_parallel" | "hire") {
+                        dispatched = true;
+                    }
                     // The reply text on the founder's private line stays out of
                     // the public log; every other call logs its raw arguments.
                     if tname == "message_founder" {
@@ -2495,6 +2639,18 @@ Keep the board honest: add new bets, declare blocked_by, mark done what is done.
                 )
             });
             self.ctx.store.add_episode(&episode_started, &event_kind, &note, steps as i64);
+            // Heartbeat backoff: a quiet heartbeat that put no one to work
+            // doubles the wait to the next one, up to the ceiling; anything
+            // that drains in resets it. Silence gets cheaper, events do not.
+            if self.ctx.cfg.heartbeat_backoff_max_secs > 0 {
+                if work_arrived || dispatched || !heartbeat {
+                    self.ctx.store.kv_set("heartbeat_backoff_level", "0");
+                } else if quiet_heartbeat {
+                    let level = self.ctx.store.kv_get("heartbeat_backoff_level").and_then(|v| v.parse::<u32>().ok()).unwrap_or(0) + 1;
+                    self.ctx.store.kv_set("heartbeat_backoff_level", &level.to_string());
+                    self.log_line("CEO", "heartbeat-backoff", &format!("quiet heartbeat dispatched nothing — next in {}s", self.heartbeat_interval()));
+                }
+            }
             // Re-arm the instant empty wake only while work is in flight: the
             // next time the company drains to zero it gets exactly one
             // unprompted staffing episode, then holds for events or heartbeat.

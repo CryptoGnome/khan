@@ -256,6 +256,18 @@ token count is printed. **There is no spend cap — watch it.**
   rates each report (`rate_work`, 1-5);
   per-agent/per-prompt-version stats feed the reflection step so prompt
   changes are judged on outcomes, not vibes.
+- **Quiet heartbeats are cheap** — a heartbeat with nothing queued gets
+  `quiet_heartbeat_max_steps` (2) instead of the full episode cap and no
+  reflection payload, and one that puts no one to work doubles the wait to
+  the next (`heartbeat_backoff_max_secs`); any event resets it. Measured
+  before: 151 heartbeats a day, 88 dispatching nothing, 786 steps.
+- **Dispatches are accounted** — every `dispatch` names the objective it
+  advances (0 = upkeep) and is classified build / check by its leading verbs.
+  Three check-class dispatches in a row on one objective with nothing built
+  between refuse the fourth; the same task shape three times in 24h refuses
+  the fourth with the add_routine redirect. The board shows each objective's
+  24h build/check mix and flags ALL CHECKS and explore objectives with no
+  build as CONVERT OR KILL. `scripts/throughput_audit.py` measures all of it.
 - **The log bounds itself** — the site's stats daemon uses `run_log` as the
   bus to the viewer's event stream at ~80 KB every 12 seconds; the binary
   ages ticker rows out after six hours on the same path that writes them,

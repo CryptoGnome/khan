@@ -585,6 +585,66 @@ mod tests {
     }
 
     #[test]
+    fn dispatch_classes_and_shapes_read_the_day_the_way_the_founder_did() {
+        use crate::agent::{classify_task, task_shape};
+        assert_eq!(classify_task("Verify-what-landed on the Pons lane, objective:39"), "check");
+        assert_eq!(classify_task("SIZING GATE RE-RUN (read-only) post restart"), "check");
+        assert_eq!(classify_task("Spot-check scan-mgr's on-chain claims wallet balance"), "check");
+        assert_eq!(classify_task("Build the launch kit for PINKPROOF: art, metadata, dry-run"), "build");
+        assert_eq!(classify_task("Write ONE new zero-model-cost routine script"), "build");
+        assert_eq!(classify_task("Execute the funding leg: bridge 0.05 SOL"), "build");
+        // the verb that comes first wins: "build X, then verify" is a build
+        assert_eq!(classify_task("Ship the page, then verify it byte-identical"), "build");
+        assert_eq!(classify_task("Please look into the market"), "other");
+        // four differently-worded PINKPROOF dispatches collapse to one shape
+        let a = task_shape(Some(5), "METADATA GATE COIN IMAGE for the PINKPROOF launch (CEO override in force)");
+        let b = task_shape(Some(5), "metadata gate: coin image for the pinkproof launch — retry");
+        assert_eq!(a, b, "{a} vs {b}");
+        assert_ne!(task_shape(Some(5), "x"), task_shape(Some(6), "x"), "objective is part of the shape");
+    }
+
+    #[test]
+    fn the_fourth_repeat_and_the_fourth_consecutive_check_are_refused() {
+        use crate::agent::admit_dispatch;
+        let store = crate::state::Store::open(":memory:").unwrap();
+        // three identical shapes pass, the fourth is routine work
+        for _ in 0..3 {
+            assert!(admit_dispatch(&store, "builder", Some(5), "Generate the METADATA GATE coin image for PINKPROOF").is_none());
+        }
+        let why = admit_dispatch(&store, "builder", Some(5), "generate the metadata gate coin image for pinkproof, again").unwrap();
+        assert!(why.contains("ROUTINE") && why.contains("4th"), "{why}");
+        // checks: three in a row on #39 pass, the fourth is refused, a build resets
+        for t in ["Verify the relay quote", "Recheck the deployer balance", "Audit the evidence file"] {
+            assert!(admit_dispatch(&store, "ops", Some(39), t).is_none(), "{t}");
+        }
+        let why = admit_dispatch(&store, "ops", Some(39), "Confirm the oracle reading").unwrap();
+        assert!(why.contains("#39") && why.contains("BUILDS"), "{why}");
+        assert!(admit_dispatch(&store, "pons-mgr", Some(39), "Execute the funding leg").is_none());
+        assert!(admit_dispatch(&store, "ops", Some(39), "Verify the funding landed").is_none(), "one check after a build is fine");
+        // upkeep (objective None) never trips the consecutive-check budget
+        for t in ["Verify a", "Verify b", "Verify c", "Verify d"] {
+            assert!(admit_dispatch(&store, "ops", None, t).is_none());
+        }
+        // the board carries the mix and flags the all-checks objective
+        store.add_objective("pons", 2);
+        let mix = store.objective_mix_24h();
+        assert_eq!(mix.get(&39), Some(&(1, 4)));
+        assert_eq!(mix.get(&5), Some(&(3, 0)));
+    }
+
+    #[test]
+    fn quiet_heartbeats_back_off_and_events_reset() {
+        use crate::agent::backoff_interval;
+        assert_eq!(backoff_interval(300, 1800, 0), 300);
+        assert_eq!(backoff_interval(300, 1800, 1), 600);
+        assert_eq!(backoff_interval(300, 1800, 2), 1200);
+        assert_eq!(backoff_interval(300, 1800, 3), 1800, "capped");
+        assert_eq!(backoff_interval(300, 1800, 40), 1800, "stays capped");
+        assert_eq!(backoff_interval(300, 0, 5), 300, "0 max means no backoff");
+        assert_eq!(backoff_interval(300, 100, 1), 300, "a ceiling below the base is the base");
+    }
+
+    #[test]
     fn fuel_sends_are_refused_above_the_refill_target_and_only_to_the_deposit() {
         use crate::tools::fuel_send_blocked;
         let store = crate::state::Store::open(":memory:").unwrap();

@@ -1,4 +1,4 @@
-Verify the world, not the self-report: before rating any delegated report 4 or 5, spot-check one load-bearing claim against reality — read the file it says it wrote, fetch the page it says is live, query the row it says it inserted. Load whenever reviewing a report, rating work, or running a review routine.
+Verify the world, not the self-report — for the claims that can hurt: money moved, something public changed, something irreversible happened. Everything else is rated on the evidence the report carries (txid, row id, file path + hash, URL). Load whenever reviewing a report, rating work, or running a review routine.
 
 # Verify the world, not the self-report
 
@@ -9,11 +9,26 @@ whole company on fiction: prompt evolution keeps what scored well, so an
 unverified 5 teaches every future employee that confident prose beats
 finished work.
 
-## The method
+## When to check the world at all
 
-Before rating a report 4 or 5, pick the ONE most load-bearing claim in it —
-the thing that, if false, makes the report worthless — and check it against
-the world, not the transcript:
+Only when the load-bearing claim is one of these:
+
+- money moved or was committed (a send, swap, launch, claim, payout, top-up);
+- something PUBLIC changed (the live page, a post, a listing, a repo push);
+- something irreversible happened (a kill-exit, a deletion, a contract call).
+
+For every other report — research, drafts, evidence files, scans, sweeps,
+status reads — do NOT spend a call re-checking it. The report must carry its
+own evidence (row ids, file paths with sizes or hashes, txids, URLs); rate on
+that. A report with no checkable artifact caps at 3 and is told so. Founder
+rule 2026-09-02: on 2026-09-01, 218 of 269 ratings were preceded by a CEO
+spot-check and half of all dispatches were checks of earlier work; one
+launch shipped. Verification had become the product.
+
+## The method (for the three cases above)
+
+Pick the ONE most load-bearing claim — the thing that, if false, makes the
+report worthless — and check it against the world, not the transcript:
 
 - "I wrote/updated file X" → read_file X. Does it contain what the report says?
 - "The page is live/fixed" → web_fetch the actual URL. Is the change there?
@@ -21,9 +36,11 @@ the world, not the transcript:
 - "The script works now" → shell: run it once. Exit clean?
 - "I posted it" → x_read or web_fetch the post.
 
-One claim, one check. Verifying everything would double the cost of every
-dispatch; verifying the load-bearing claim catches nearly all fiction for
-one cheap tool call.
+One claim, one check, and only for money / public / irreversible. Never
+dispatch an employee to re-verify another employee's report: the binary
+refuses the fourth check-class dispatch in a row on an objective with nothing
+built between, and the same task shape three times in a day is refused as
+routine work — write the script and add_routine it.
 
 ## Rating rules
 

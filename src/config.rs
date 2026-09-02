@@ -62,6 +62,17 @@ pub struct Config {
     /// alert so the CEO tops up before calls start bouncing with 402. 0 disables.
     #[serde(default = "default_fuel_low_micros")]
     pub fuel_low_micros: u64,
+    /// Step cap for a QUIET heartbeat — nothing queued, no finished task. The
+    /// full episode_max_steps let a status sweep run five steps and spot-check
+    /// its way to the cut-off: 151 heartbeats on 2026-09-01, 786 steps, 88 of
+    /// them dispatched nothing. Two steps is one look and one action or close.
+    #[serde(default = "default_quiet_heartbeat_max_steps")]
+    pub quiet_heartbeat_max_steps: u64,
+    /// A quiet heartbeat that dispatches nothing doubles the interval to the
+    /// next one, up to this ceiling; any event (report, alert, founder message)
+    /// resets it to heartbeat_secs. 0 disables the backoff.
+    #[serde(default = "default_heartbeat_backoff_max_secs")]
+    pub heartbeat_backoff_max_secs: u64,
     #[serde(default = "default_workspace")]
     pub workspace: String,
     pub providers: Vec<Provider>,
@@ -119,6 +130,12 @@ fn default_employee_max_iters() -> u64 {
     30
 }
 
+fn default_quiet_heartbeat_max_steps() -> u64 {
+    2
+}
+fn default_heartbeat_backoff_max_secs() -> u64 {
+    1800
+}
 fn default_max_tokens() -> u32 {
     16_384
 }
