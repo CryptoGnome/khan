@@ -334,6 +334,13 @@ token count is printed. **There is no spend cap — watch it.**
   (nonzero exit or `ALERT` output), while review routines dispatch an agent on
   a cadence for work that needs judgment — an outsider-eyes site review, an
   adversarial audit of the scripts.
+- **Tool schemas are checked before they can break every call** — an agent's
+  custom tool is refused at creation if its parameter schema is not valid JSON
+  Schema (Python type names like `str`, a `required` object instead of an array
+  of names, requiredness on the property itself), and a malformed schema already
+  in the store is dropped to a permissive one rather than sent. The tool list
+  rides every request, so one bad schema is refused by strict sellers and fails
+  the whole fleet over to dearer routes.
 - **Model failover** — if an agent's model keeps failing (free-tier 429s/outages),
   the call is answered by the next available free model automatically and the
   swap is logged. A refusal that names a ceiling that would fit

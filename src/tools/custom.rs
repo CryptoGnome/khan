@@ -33,14 +33,82 @@ pub fn management_schemas() -> Vec<Value> {
     ]
 }
 
+/// JSON Schema types a provider will accept. Python's own names are the trap:
+/// a tool written by an agent naturally says "str" where the schema wants
+/// "string".
+const SCHEMA_TYPES: [&str; 7] = ["string", "number", "integer", "object", "array", "boolean", "null"];
+
+/// What is wrong with a tool's parameter schema, if anything.
+///
+/// Strict sellers validate the schema and refuse the whole request with a 400
+/// when it is malformed — and the tool list rides EVERY call, so one bad tool
+/// takes down every agent on every model. That is what happened on
+/// 2026-09-02: `send_guard` was saved with `required` as an object of example
+/// values rather than an array of names, and calls failed over to routes at
+/// roughly ten times the price for half a day before the gateway told us why.
+pub fn schema_fault(params: &Value) -> Option<String> {
+    match &params["required"] {
+        Value::Null => {}
+        Value::Array(a) => {
+            if let Some(bad) = a.iter().find(|v| !v.is_string()) {
+                return Some(format!(
+                    "\"required\" must list property NAMES as strings; found {bad}. Example: \"required\": [\"action\", \"target\"]"
+                ));
+            }
+        }
+        other => {
+            return Some(format!(
+                "\"required\" must be an ARRAY of property names, not {}. Example values belong in each property's \"description\",                  not here: \"required\": [\"action\"], not {other}",
+                match other {
+                    Value::Object(_) => "an object",
+                    Value::String(_) => "a string",
+                    _ => "that",
+                }
+            ));
+        }
+    }
+    if let Some(props) = params["properties"].as_object() {
+        for (name, spec) in props {
+            let Some(t) = spec["type"].as_str() else { continue };
+            if !SCHEMA_TYPES.contains(&t) {
+                let hint = match t {
+                    "str" => " (use \"string\")",
+                    "int" => " (use \"integer\")",
+                    "float" => " (use \"number\")",
+                    "bool" => " (use \"boolean\")",
+                    "dict" => " (use \"object\")",
+                    "list" => " (use \"array\")",
+                    _ => "",
+                };
+                return Some(format!(
+                    "property \"{name}\" has type \"{t}\", which is not a JSON Schema type{hint}. Valid: {}",
+                    SCHEMA_TYPES.join(", ")
+                ));
+            }
+            if spec.get("required").is_some() {
+                return Some(format!(
+                    "property \"{name}\" carries its own \"required\" flag; requiredness belongs in the schema-level \"required\" array"
+                ));
+            }
+        }
+    }
+    None
+}
+
 /// Schemas for all registered custom tools (latest versions).
 pub fn registry_schemas(ctx: &ToolCtx) -> Vec<Value> {
     ctx.store
         .list_tools()
         .into_iter()
         .map(|(name, desc, params)| {
-            let parameters: Value = serde_json::from_str(&params)
+            let mut parameters: Value = serde_json::from_str(&params)
                 .unwrap_or_else(|_| json!({"type": "object", "properties": {}}));
+            // Rows saved before the create-time check exist, and one of them
+            // refuses every request that carries the tool list. A malformed
+            // schema is dropped to a permissive one here rather than sent.
+            if schema_fault(&parameters).is_some() {
+                parameters = json!({"type": "object", "properties": {}});
+            }
             json!({"type": "function", "function": {
                 "name": name, "description": format!("[custom tool] {desc}"), "parameters": parameters}})
         })
@@ -62,6 +130,9 @@ pub fn create(ctx: &ToolCtx, args: &Value) -> Result<String> {
     let params = &args["parameters"];
     if !params.is_object() || params["type"] != "object" {
         bail!("parameters must be a JSON Schema object with \"type\": \"object\"");
+    }
+    if let Some(why) = schema_fault(params) {
+        bail!("{why}");
     }
     let script = args["script"].as_str().unwrap_or("");
     if script.trim().is_empty() {

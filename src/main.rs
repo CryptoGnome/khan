@@ -715,6 +715,38 @@ mod tests {
     }
 
     #[test]
+    fn a_malformed_tool_schema_never_rides_a_request() {
+        use crate::tools::custom::schema_fault;
+        // the shape that took the fleet down on 2026-09-02: required as an
+        // object of example values rather than an array of names
+        let bad = serde_json::json!({
+            "type": "object",
+            "properties": {"args": {"type": "object", "description": "JSON args"}},
+            "required": {"args": {"action": "reserve", "outlet": "str"}}
+        });
+        let why = schema_fault(&bad).expect("an object `required` must be refused");
+        assert!(why.contains("ARRAY of property names"), "{why}");
+        // python type names, named with the fix
+        let py = serde_json::json!({"type": "object", "properties": {"n": {"type": "int"}}});
+        let why = schema_fault(&py).unwrap();
+        assert!(why.contains("integer"), "{why}");
+        // requiredness on the property itself
+        let onprop = serde_json::json!({
+            "type": "object",
+            "properties": {"q": {"type": "string", "required": true}}
+        });
+        assert!(schema_fault(&onprop).unwrap().contains("required"));
+        // a correct schema passes, with or without `required`
+        let good = serde_json::json!({
+            "type": "object",
+            "properties": {"action": {"type": "string"}, "n": {"type": "integer"}},
+            "required": ["action"]
+        });
+        assert!(schema_fault(&good).is_none());
+        assert!(schema_fault(&serde_json::json!({"type": "object", "properties": {}})).is_none());
+    }
+
+    #[test]
     fn a_lane_answers_for_its_own_date_and_the_board_is_a_budget() {
         let store = crate::state::Store::open(":memory:").unwrap();
         let today = "2026-09-02";
