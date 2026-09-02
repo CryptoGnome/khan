@@ -180,6 +180,12 @@ paid_models = [
                                 #   vision, 1M context, 0 failures in 200+ calls. Its
                                 #   launch-window price (18x) collapsed 2026-08-30;
                                 #   input now undercuts deepseekv4flash.
+  "gpt56luna",                  # 1.5x / 2.7x — the rung glm53flash fails THROUGH to
+                                #   mid-call. It was on the seat ladder but not here, so
+                                #   when glm53flash's gateway ceiling collapsed to 3,584
+                                #   tokens on 2026-09-02 every call fell to deepseek —
+                                #   the one model policy says is never a seat — because
+                                #   this list is what a failing call walks, not the ladder.
   "deepseekv4flash",            # 1.37x — FALLBACK ONLY, never a seat (model_policy).
                                 #   Priced on two marketplaces, so the router can fail
                                 #   over; the pinned -0731 cannot.
