@@ -160,6 +160,11 @@ pub(crate) fn overdue_ideas_line(workspace: &std::path::Path) -> String {
     )
 }
 
+/// Output ceiling for the summarisation calls (history compaction, dropped
+/// messages). Generous for a brief, and small enough that the gateway reserves
+/// against a real number instead of the model's whole 64k ceiling.
+pub(crate) const SUMMARY_MAX_TOKENS: u32 = 8192;
+
 /// How long a stall stays on a model's record, and how many inside that window
 /// bench it. Three in ten minutes is a route that is cutting answers off, not a
 /// bad afternoon: on 2026-09-02 the failures came every three minutes.
@@ -690,9 +695,15 @@ impl Orchestrator {
     /// Chat with automatic failover: if the requested model keeps failing (429/404/down),
     /// try each configured free model once before giving up.
     async fn chat_fb(&self, agent: &str, model: &str, messages: &[Message], tools: &[Value]) -> Result<(Message, Usage)> {
+        self.chat_fb_capped(agent, model, messages, tools, None).await
+    }
+
+    /// A summary is a few thousand tokens whatever the history was; asking for
+    /// the model's whole output ceiling only inflates the gateway's reserve.
+    async fn chat_fb_capped(&self, agent: &str, model: &str, messages: &[Message], tools: &[Value], cap: Option<u32>) -> Result<(Message, Usage)> {
         let started = std::time::Instant::now();
         self.log_line(agent, "thinking", &format!("{} ({model})", thinking_phrase()));
-        match self.llm.chat(&self.ctx.cfg, model, messages, tools).await {
+        match self.llm.chat_capped(&self.ctx.cfg, model, messages, tools, cap).await {
             Ok(r) => {
                 // Say so when a model is dragging. Without this a slow provider and a
                 // hung one look identical from the outside.
@@ -713,12 +724,24 @@ impl Orchestrator {
                 if truncation(&e).is_none() && is_stall(&why, started.elapsed().as_secs()) {
                     self.record_stall(model, agent);
                 }
-                // Running out of output budget is the one failure another model
-                // cannot rescue: the request is unchanged, so every fallback spends
-                // its budget the same way. Walking the ladder here only burns
+                // Running out of output budget is normally the one failure another
+                // model cannot rescue: the request is unchanged, so every fallback
+                // spends its budget the same way. Walking the ladder here only burns
                 // minutes and free-tier requests before failing anyway.
-                if truncation(&e).is_some() {
+                //
+                // The exception is a budget we did not choose. When the gateway
+                // shrinks the ceiling to what THIS model can produce at its recent
+                // speed, a stalling route hands back a ceiling too small to answer
+                // inside — 13,824 tokens then 6,400 on 2026-09-02, both spent
+                // entirely on reasoning, both of them compaction runs that had to
+                // succeed. Another model is quoted its own ceiling, so the ladder
+                // is exactly the cure, and the shrunken ceiling is itself evidence
+                // this route is degraded.
+                if truncation(&e).is_some_and(|t| !t.gateway_capped) {
                     return Err(e);
+                }
+                if truncation(&e).is_some() {
+                    self.record_stall(model, agent);
                 }
                 // Bounded on purpose. The paid ladder grew from two entries to
                 // seven, and during a provider outage every rung fails slowly — up
@@ -732,7 +755,7 @@ impl Orchestrator {
                     }
                     self.log_line(agent, "thinking", &format!("{} ({alt})", thinking_phrase()));
                     let alt_started = std::time::Instant::now();
-                    match self.llm.chat(&self.ctx.cfg, &alt, messages, tools).await {
+                    match self.llm.chat_capped(&self.ctx.cfg, &alt, messages, tools, cap).await {
                         Ok(r) => {
                             self.ctx.store.record_model_call(&alt, alt_started.elapsed().as_millis() as u64, true, "");
                             self.log_line(agent, "model-fallback", &format!("{model} failed, answered by {alt}"));
@@ -850,7 +873,7 @@ Drop superseded detail, resolved dead ends, and chatter.",
                 ),
             ),
         ];
-        match self.chat_fb(name, &self.ctx.cfg.utility_model(), &req, &[]).await {
+        match self.chat_fb_capped(name, &self.ctx.cfg.utility_model(), &req, &[], Some(SUMMARY_MAX_TOKENS)).await {
             Ok((msg, u)) => {
                 self.add_usage(u);
                 let summary = msg.content.unwrap_or_default();
@@ -1613,7 +1636,7 @@ detail, and anything already acted on and closed.",
                 ),
             ),
         ];
-        match self.chat_fb("CEO", &self.ctx.cfg.utility_model(), &req, &[]).await {
+        match self.chat_fb_capped("CEO", &self.ctx.cfg.utility_model(), &req, &[], Some(SUMMARY_MAX_TOKENS)).await {
             Ok((msg, u)) => {
                 self.add_usage(u);
                 let brief = msg.content.unwrap_or_default();

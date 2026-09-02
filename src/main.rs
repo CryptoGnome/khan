@@ -734,6 +734,23 @@ mod tests {
         }
         // never above the binary's own ceiling, whatever the gateway says
         assert_eq!(retry_max_tokens(r#"{"error":{"retry_max_tokens":999999999}}"#), Some(65_536));
+
+        // A budget WE chose and blew is the model's own doing, and no other
+        // model would fare differently — the caller must not walk the ladder.
+        // A budget the GATEWAY shrank to this route's recent speed is a routing
+        // problem: another model is quoted its own ceiling, so the ladder helps.
+        let ours = anyhow::Error::new(crate::llm::Truncated {
+            max_tokens: 65_536, reasoning_tokens: 65_536, gateway_capped: false,
+        });
+        let theirs = anyhow::Error::new(crate::llm::Truncated {
+            max_tokens: 6_400, reasoning_tokens: 6_400, gateway_capped: true,
+        });
+        assert!(crate::llm::truncation(&ours).is_some_and(|t| !t.gateway_capped));
+        assert!(crate::llm::truncation(&theirs).is_some_and(|t| t.gateway_capped));
+        assert!(theirs.to_string().contains("the ceiling the gateway said would fit"), "{theirs}");
+        assert!(!ours.to_string().contains("gateway"), "{ours}");
+        // a summary never asks for the model's whole ceiling
+        assert!(crate::agent::SUMMARY_MAX_TOKENS < 65_536 / 4);
     }
 
     #[test]
@@ -1720,7 +1737,7 @@ mod tests {
     #[test]
     fn truncation_is_distinguishable_from_an_ordinary_failure() {
         use crate::llm::{truncation, Truncated};
-        let t = anyhow::Error::new(Truncated { max_tokens: 16_384, reasoning_tokens: 16_000 })
+        let t = anyhow::Error::new(Truncated { max_tokens: 16_384, reasoning_tokens: 16_000, gateway_capped: false })
             .context("openrouter/some-model");
         let got = truncation(&t).expect("must survive being wrapped in context");
         assert_eq!(got.max_tokens, 16_384);

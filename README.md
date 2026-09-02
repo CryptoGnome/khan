@@ -318,7 +318,13 @@ token count is printed. **There is no spend cap — watch it.**
   delivering output keeps what arrived — those tokens are billed, so a retry
   would buy the same answer twice — while dropping any tool call whose
   arguments were cut off mid-JSON. A break before any output is free and is
-  retried. The client's own deadline sits above the gateway's 480s fill
+  retried. That named ceiling is derived from the model's recent speed, so a
+  degraded route can hand back one too small to answer inside: when a call
+  truncates on a ceiling the gateway chose, the fallback ladder tries another
+  model (which is quoted its own) and the route takes a stall strike, while a
+  budget the binary chose and the model blew still fails outright. Summarising
+  calls ask for a summary-sized ceiling rather than the model's whole 64k,
+  since the gateway reserves against whatever is asked. The client's own deadline sits above the gateway's 480s fill
   ceiling, since hanging up first pays for output nobody reads.
 - **Work tools** (all agents): file read/write/list (confined to `workspace/`),
   shell (with local `git` for version control; the GitHub CLI is blocked so

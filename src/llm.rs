@@ -80,15 +80,23 @@ pub struct Usage {
 pub struct Truncated {
     pub max_tokens: u32,
     pub reasoning_tokens: u64,
+    /// True when the ceiling was the gateway's `retry_max_tokens`, not ours.
+    /// That number is derived from the model's RECENT SPEED, so a degraded
+    /// route hands back a ceiling too small to answer inside — and unlike a
+    /// budget we chose, another model would be given a different one. The
+    /// caller uses this to decide whether walking the ladder can help.
+    pub gateway_capped: bool,
 }
 
 impl std::fmt::Display for Truncated {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "used its entire {}-token output budget on reasoning ({} reasoning tokens) \
+            "used its entire {}-token output budget{} on reasoning ({} reasoning tokens) \
 and never reached an answer (finish_reason=length)",
-            self.max_tokens, self.reasoning_tokens
+            self.max_tokens,
+            if self.gateway_capped { " (the ceiling the gateway said would fit)" } else { "" },
+            self.reasoning_tokens
         )
     }
 }
@@ -516,13 +524,21 @@ impl Client {
         Ok((msg, usage, finish, reasoning_tokens, broke))
     }
 
-    /// Chat completion against any OpenAI-compatible endpoint. `model` is "provider/model".
-    pub async fn chat(
+    /// Chat completion against any OpenAI-compatible endpoint, with an output
+    /// ceiling for answers whose size is known (None = the model's own limit).
+    ///
+    /// The gateway reserves against the ceiling and refuses when it is larger
+    /// than the model can produce at its recent speed, so asking 65,536 tokens
+    /// for a summary is not free caution — it is what got two compaction runs
+    /// refused, retried into a shrunken budget, and spent entirely on
+    /// reasoning on 2026-09-02.
+    pub async fn chat_capped(
         &self,
         cfg: &Config,
         model: &str,
         messages: &[Message],
         tools: &[Value],
+        cap: Option<u32>,
     ) -> Result<(Message, Usage)> {
         let (prov, model_id, key) = cfg.resolve(model)?;
         if let Some(left) = self.cooling(model) {
@@ -534,7 +550,7 @@ impl Client {
             bail!("{model} hit its free-tier request cap; paused for {}s", wait.as_secs());
         }
         let url = format!("{}/chat/completions", prov.base_url.trim_end_matches('/'));
-        let max_out = self.output_limit(model, cfg);
+        let max_out = cap.unwrap_or(u32::MAX).min(self.output_limit(model, cfg));
         let mut body = Self::build_request(&model_id, messages, tools, max_out);
         // The gateway names a ceiling that fits; take it once and never climb back.
         let mut shrunk = false;
@@ -652,7 +668,7 @@ impl Client {
             let nothing = msg.content.as_deref().is_none_or(|c| c.trim().is_empty())
                 && msg.tool_calls.as_ref().is_none_or(|t| t.is_empty());
             if nothing && finish == "length" {
-                return Err(anyhow::Error::new(Truncated { max_tokens: sent_max, reasoning_tokens })
+                return Err(anyhow::Error::new(Truncated { max_tokens: sent_max, reasoning_tokens, gateway_capped: shrunk })
                     .context(model.to_string()));
             }
             return Ok((msg, usage));
