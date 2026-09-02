@@ -730,6 +730,13 @@ mod tests {
         let line = crate::agent::overdue_objectives_line(&store);
         assert!(line.contains("#1 listings"), "{line}");
         assert!(line.contains("kills if: still not listed anywhere"), "{line}");
+        // the date rides the board line too, so it is felt where allocation happens
+        let board = store.objectives_board(&std::collections::HashMap::new());
+        assert!(board.contains("REVIEW DUE 2026-09-01"), "{board}");
+        assert!(store.set_objective_review(a, "2099-01-01", ""));
+        let board = store.objectives_board(&std::collections::HashMap::new());
+        assert!(board.contains("review 2099-01-01") && !board.contains("REVIEW DUE"), "{board}");
+        assert!(store.set_objective_review(a, "2026-09-01", ""));
         // closing it takes it off the board entirely
         store.update_objective(a, None, None, None, None, Some("done"));
         assert!(store.overdue_objectives(today).is_empty());

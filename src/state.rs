@@ -670,14 +670,14 @@ impl Store {
         let mix = self.objective_mix_24h();
         let c = self.conn.lock().unwrap();
         let Ok(mut stmt) = c.prepare(
-            "SELECT id, title, rank, plan, note, blocked_by, updated_at, owner, COALESCE(plan_updated_at,''), COALESCE(kind,'') FROM objectives
+            "SELECT id, title, rank, plan, note, blocked_by, updated_at, owner, COALESCE(plan_updated_at,''), COALESCE(kind,''), COALESCE(review_date,'') FROM objectives
              WHERE status='active' ORDER BY rank, id",
         ) else {
             return String::new();
         };
-        let rows: Vec<(i64, String, i64, String, String, String, String, String, String, String)> = stmt
+        let rows: Vec<(i64, String, i64, String, String, String, String, String, String, String, String)> = stmt
             .query_map([], |r| {
-                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?, r.get(8)?, r.get(9)?))
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?, r.get(8)?, r.get(9)?, r.get(10)?))
             })
             .map(|it| it.filter_map(|x| x.ok()).collect())
             .unwrap_or_default();
@@ -687,7 +687,8 @@ impl Store {
             rows.iter().map(|r| (r.0, r.1.as_str())).collect();
         let now = chrono::Utc::now();
         let (mut ready, mut blocked) = (Vec::new(), Vec::new());
-        for (id, title, rank, plan, note, blocked_by, updated, owner, plan_updated, kind) in &rows {
+        let today = now.format("%Y-%m-%d").to_string();
+        for (id, title, rank, plan, note, blocked_by, updated, owner, plan_updated, kind, review_date) in &rows {
             let waiting = Self::unresolved(blocked_by, &active);
             if waiting.is_empty() {
                 // Warnings live only here: a blocked objective is exempt from
@@ -704,6 +705,16 @@ impl Store {
                 }
                 if busy == 0 {
                     line.push_str(" — UNSTAFFED");
+                }
+                // A lane carries its own deadline everywhere the CEO looks. It
+                // was set from the brief on 2026-09-02 and then never shown
+                // back here, so the date existed and did nothing.
+                if review_date.is_empty() {
+                    line.push_str(" — NO REVIEW DATE");
+                } else if review_date.as_str() <= today.as_str() {
+                    line.push_str(&format!(" — REVIEW DUE {review_date}: close it, drop it, or recommit with a new date"));
+                } else {
+                    line.push_str(&format!(" — review {review_date}"));
                 }
                 // The mix is what "going in circles" looks like from the board:
                 // an objective whose day was all checks of earlier work is not
