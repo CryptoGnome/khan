@@ -114,20 +114,18 @@ model_peers = [["bu0y/glm53flash", "bu0y/gpt56luna"]]
 # How much cheaper (percent) a peer must be before the seat moves. A peer
 # answering under 80% of its recent calls is never moved onto, however cheap.
 peer_switch_pct = 25
-# Price ceilings per model, in the catalog's per-1M units. bu0y fills at the
-# cheapest source that can serve, and when luna's cheap band was full it
-# overflowed to a seller at ~4x (117 of 132 fills on 2026-09-02). With a cap
-# the fill waits for the cheap band — a 503 the retry loop sits out — instead
-# of taking the dear one; four misses walk the fallback ladder. Numbers from
-# bu0y for luna's low band; a cap below a model's whole book refuses it.
-# Set from bu0y'"'"'s stated low band, then raised on 2026-09-02: within the hour
-# the cheapest source quoted 13977 in / 83859 out and every luna call became a
-# below_floor 503, four wasted attempts before the ladder moved on. A cap has
-# to sit above where the cheap band actually trades or it is an outage, so
-# these leave headroom over that quote and still refuse the ~4x seller.
+# Refuse the dear seller without guessing where the cheap band trades. bu0y
+# fills at the cheapest source that can serve, and on 2026-09-02 luna's cheap
+# band filled up and 117 of 132 fills overflowed to a seller at ~4x. A fixed
+# ceiling is the wrong answer: when those cheap sellers refused for ten
+# minutes the quote started a rung up (13977 in / 83859 out) and a cap set to
+# the cheap band's own numbers turned a working market into a 503 on every
+# call. The multiple is recomputed per request against the book's cheapest
+# print, so it refuses the overflow and never refuses a whole market. A fixed
+# max_input_per_1m / max_output_per_1m pair may sit alongside and applies if
+# lower; deliberately unset here for the reason above.
 [model_caps."bu0y/gpt56luna"]
-max_input_per_1m = 20000
-max_output_per_1m = 120000
+max_price_multiple = 4
 
 # Founder direct line (Telegram): set TELEGRAM_BOT_TOKEN (from @BotFather) and
 # TELEGRAM_CHAT_ID (the founder's chat id) in the environment. Inbound messages

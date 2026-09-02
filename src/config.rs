@@ -136,6 +136,13 @@ fn default_workspace() -> String {
 
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct ModelCap {
+    /// Ceiling as a multiple of the cheapest print on the model's book right
+    /// now, recomputed per request. The fixed pair below is the trap this
+    /// avoids: on 2026-09-02 luna's cheap sellers refused for ten minutes, the
+    /// quote started a rung up at 13977/83859, and a cap set to the cheap
+    /// band's own numbers turned a working market into a 503.
+    #[serde(default)]
+    pub max_price_multiple: Option<u64>,
     #[serde(default)]
     pub max_input_per_1m: Option<u64>,
     #[serde(default)]

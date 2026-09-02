@@ -590,6 +590,9 @@ impl Client {
             // 503 the loop below waits on, rather than an overflow to whoever
             // is dearest and free.
             if let Some(caps) = cfg.model_caps.get(model) {
+                if let Some(n) = caps.max_price_multiple {
+                    b["max_price_multiple"] = Value::from(n);
+                }
                 if let Some(n) = caps.max_input_per_1m {
                     b["max_input_per_1m"] = Value::from(n);
                 }
