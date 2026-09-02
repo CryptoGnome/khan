@@ -12,6 +12,14 @@ pub struct Provider {
     pub free_models: Vec<String>,
     #[serde(default)]
     pub paid_models: Vec<String>,
+    /// Floor on a route's recent decode speed, in tokens per second, sent as
+    /// the gateway's `min_tokens_per_sec` hint. A route slower than this is
+    /// skipped even when it is cheapest; when none qualifies the call fails
+    /// fast with `unmet_speed` and walks the fallback ladder instead of
+    /// waiting out a fill that cannot finish. bu0y only; other providers get
+    /// no hint. Unset = no floor.
+    #[serde(default)]
+    pub min_tokens_per_sec: Option<u32>,
 }
 
 #[derive(Debug, Deserialize, Clone)]

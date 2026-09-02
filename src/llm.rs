@@ -131,6 +131,16 @@ pub(crate) fn retry_max_tokens(body: &str) -> Option<u32> {
         .map(|n| n.min(MAX_OUTPUT as u64) as u32)
 }
 
+/// A 503 whose type is `unmet_speed`: every route is slower than the floor we
+/// sent. Type-checked rather than text-matched because the message carries a
+/// number that changes.
+pub(crate) fn unmet_speed(body: &str) -> bool {
+    serde_json::from_str::<Value>(body)
+        .ok()
+        .and_then(|v| v["error"]["type"].as_str().map(|t| t == "unmet_speed"))
+        .unwrap_or(false)
+}
+
 /// The truncation behind an error, when that is what it was.
 pub fn truncation(e: &anyhow::Error) -> Option<Truncated> {
     e.downcast_ref::<Truncated>().copied()
@@ -552,6 +562,12 @@ impl Client {
         let url = format!("{}/chat/completions", prov.base_url.trim_end_matches('/'));
         let max_out = cap.unwrap_or(u32::MAX).min(self.output_limit(model, cfg));
         let mut body = Self::build_request(&model_id, messages, tools, max_out);
+        // The speed floor rides every request to a provider that has one. It is
+        // the answer to 2026-09-02: a route decoding at 4.5 tokens/s was the
+        // cheapest and so was picked every time, cutting fills at ~128s all day.
+        if let Some(tps) = prov.min_tokens_per_sec {
+            body["min_tokens_per_sec"] = Value::from(tps);
+        }
         // The gateway names a ceiling that fits; take it once and never climb back.
         let mut shrunk = false;
         let mut sent_max = max_out;
@@ -630,6 +646,16 @@ impl Client {
                         bail!(
                             "{model} upstream timed out mid-generation — not retried, the request may already be billed: {}",
                             text.chars().take(200).collect::<String>()
+                        );
+                    }
+                    // No route clears the speed floor. Retrying the same request
+                    // asks the same question; the message names the fastest
+                    // speed seen, and the fallback ladder is the relaxation —
+                    // another model has its own routes.
+                    if unmet_speed(&text) {
+                        bail!(
+                            "{model}: no route meets the speed floor right now — {}",
+                            text.chars().take(240).collect::<String>()
                         );
                     }
                     // 503 is the gateway saying the market is thin right now and to

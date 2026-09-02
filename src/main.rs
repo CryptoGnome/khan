@@ -713,6 +713,22 @@ mod tests {
     }
 
     #[test]
+    fn a_speed_floor_rides_only_the_provider_that_set_it_and_unmet_speed_is_not_a_wait() {
+        use crate::llm::unmet_speed;
+        // the shipped config carries the floor on bu0y and nowhere else
+        let cfg: crate::config::Config = toml::from_str(include_str!("../khan.toml.example")).unwrap();
+        let bu0y = cfg.providers.iter().find(|p| p.name == "bu0y").unwrap();
+        assert_eq!(bu0y.min_tokens_per_sec, Some(12));
+        for p in cfg.providers.iter().filter(|p| p.name != "bu0y") {
+            assert_eq!(p.min_tokens_per_sec, None, "{}", p.name);
+        }
+        // the refusal is recognised by type, not by its changing message
+        assert!(unmet_speed(r#"{"error":{"message":"fastest recent route decodes at 9.8 tokens/s","type":"unmet_speed"}}"#));
+        assert!(!unmet_speed(r#"{"error":{"message":"below floor","type":"api_error","retry_max_tokens":4096}}"#));
+        assert!(!unmet_speed("not json"));
+    }
+
+    #[test]
     fn a_named_smaller_ceiling_is_a_retry_not_a_dead_request() {
         use crate::llm::retry_max_tokens;
         // the 400 that is really "ask for less" — the number rides the body

@@ -158,6 +158,14 @@ max_tokens = 65536
 name = "bu0y"
 base_url = "https://api.bu0y.com/v1"
 api_key_env = "BU0Y_API_KEY"
+# Floor on a route's recent decode speed (tokens/s). The router fills at the
+# cheapest route that can deliver — and on 2026-09-02 the cheapest glm53flash
+# route decoded at 4.5 tokens/s, so every call went there and 21 fills were cut
+# at ~128s. A healthy marketplace pod runs ~25; this admits a slow-but-working
+# pod and refuses the one that cannot finish. When nothing qualifies the call
+# fails fast (503 unmet_speed) and walks the fallback ladder to another model
+# rather than waiting out a fill that will not land. Comment out for no floor.
+min_tokens_per_sec = 12
 # Only the default is listed — the CEO fetches the full live catalog + prices
 # itself (https://bu0y.com/llms.txt, https://api.bu0y.com/v1/models) and can
 # hire onto ANY catalog slug as "bu0y/<slug>".
