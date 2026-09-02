@@ -414,6 +414,27 @@ pub(crate) fn task_shape(objective: Option<i64>, task: &str) -> String {
     format!("{}:{folded}", objective.unwrap_or(0))
 }
 
+/// The objective a task names in its own words: "obj 34", "objective #9",
+/// "obj39". Only the first mention counts; a task about routing one objective's
+/// finding to another is the first objective's work.
+pub(crate) fn named_objective(task: &str) -> Option<i64> {
+    let low = task.to_ascii_lowercase();
+    let mut rest = low.as_str();
+    while let Some(i) = rest.find("obj") {
+        let after = &rest[i + 3..];
+        let after = after.strip_prefix("ective").unwrap_or(after);
+        let after = after.trim_start_matches(|c: char| c == ' ' || c == '#');
+        let digits: String = after.chars().take_while(|c| c.is_ascii_digit()).collect();
+        if let Ok(n) = digits.parse::<i64>() {
+            if n > 0 {
+                return Some(n);
+            }
+        }
+        rest = &rest[i + 3..];
+    }
+    None
+}
+
 /// How many identical shapes in 24h before the next is refused as routine
 /// work, and how many consecutive checks on one objective before the next is
 /// refused as circling.
@@ -435,6 +456,17 @@ pub(crate) fn admit_dispatch(store: &crate::state::Store, agent: &str, objective
             repeats + 1,
             shape.split_once(':').map(|(_, t)| t).unwrap_or(&shape)
         ));
+    }
+    // Upkeep is exempt from the check budget below, so a task that says
+    // "obj 34 floor sweep" and is tagged 0 has found the way around it: 12 of
+    // the first 43 dispatches after the budget landed (2026-09-02) did exactly
+    // that. A task that names an objective is that objective's work.
+    if objective.is_none_or(|o| o == 0) {
+        if let Some(named) = named_objective(task) {
+            return Some(format!(
+                "REFUSED: tagged as upkeep (objective 0) but the task names objective #{named}. Dispatch it with                  objective={named} so the board, owner routing and the check budget see it."
+            ));
+        }
     }
     // Upkeep (objective 0/None) is exempt from the consecutive-check budget:
     // recon and page-health ARE checks by nature. The repeat-shape refusal
@@ -1504,7 +1536,11 @@ detail, and anything already acted on and closed.",
         let Some(available) = v["availableMicros"].as_u64() else { return };
         // Update the burn gauge: EMA of the drop between polls, in micro$/hr.
         // A rising balance (a top-up landed) updates the anchor without
-        // polluting the rate.
+        // polluting the rate. The rate sizes a three-day refill, so it has a
+        // day of memory: a fixed 0.3 weight per five-minute poll remembered
+        // fifteen minutes, and the restart burst of 2026-09-02 walked the
+        // target from $25 to $113 in an hour. The last published rate seeds
+        // the gauge across restarts so the first poll is not the whole story.
         let burn_per_hour = {
             let mut g = self.seat.gauge.lock().unwrap();
             let now = std::time::Instant::now();
@@ -1512,13 +1548,24 @@ detail, and anything already acted on and closed.",
                 Some((prev, t, ema)) if prev > available => {
                     let hrs = (now - t).as_secs_f64() / 3600.0;
                     if hrs > 0.0 {
-                        ema * 0.7 + ((prev - available) as f64 / hrs) * 0.3
+                        let sample = (prev - available) as f64 / hrs;
+                        if ema == 0.0 {
+                            sample
+                        } else {
+                            let a = (hrs / 24.0).min(1.0);
+                            ema * (1.0 - a) + sample * a
+                        }
                     } else {
                         ema
                     }
                 }
                 Some((_, _, ema)) => ema,
-                None => 0.0,
+                None => self
+                    .ctx
+                    .store
+                    .kv_get("fuel_burn_micros_per_hour")
+                    .and_then(|v| v.parse::<f64>().ok())
+                    .unwrap_or(0.0),
             };
             *g = Some((available, now, ema));
             ema

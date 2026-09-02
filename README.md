@@ -235,7 +235,8 @@ token count is printed. **There is no spend cap — watch it.**
   benches it to the cheap floor seat until the tank is refilled — the strong
   model is earned back by topping up, not by arguing with the alert. The
   same arithmetic works the other way: while the tank is above the refill
-  target (floor + three days of measured burn), the shell and custom-tool
+  target (floor + three days of measured burn, a day-long average that
+  survives restarts), the shell and custom-tool
   paths refuse any send to the provider's deposit address, so no
   self-invented runway doctrine can top up a tank that has days left. If calls
   bounce anyway (402), the seat goes into fuel
@@ -262,7 +263,8 @@ token count is printed. **There is no spend cap — watch it.**
   the next (`heartbeat_backoff_max_secs`); any event resets it. Measured
   before: 151 heartbeats a day, 88 dispatching nothing, 786 steps.
 - **Dispatches are accounted** — every `dispatch` names the objective it
-  advances (0 = upkeep) and is classified build / check by its leading verbs.
+  advances (0 = upkeep; a task tagged 0 whose text names an objective is
+  refused) and is classified build / check by its leading verbs.
   Three check-class dispatches in a row on one objective with nothing built
   between refuse the fourth; the same task shape three times in 24h refuses
   the fourth with the add_routine redirect. The board shows each objective's

@@ -628,6 +628,14 @@ mod tests {
         for t in ["Verify e", "Verify f", "Verify g", "Verify h"] {
             assert!(admit_dispatch(&store, "ops", Some(0), t).is_none(), "{t}");
         }
+        // ...unless the task names the objective it is really for
+        for t in ["obj34 cycle 18 floor sweep", "QA gate on obj 9 draft", "Objective #18 M1-M6 bookkeeping only"] {
+            let why = admit_dispatch(&store, "ops", Some(0), t).unwrap();
+            assert!(why.contains("objective="), "{t}: {why}");
+        }
+        assert_eq!(crate::agent::named_objective("obj 35 / obj 39 follow-through"), Some(35));
+        assert_eq!(crate::agent::named_objective("read-only contract recon, no objective yet"), None);
+        assert!(admit_dispatch(&store, "ops", Some(0), "Kill the objectionable log noise").is_none());
         // the board carries the mix and flags the all-checks objective
         store.add_objective("pons", 2);
         let mix = store.objective_mix_24h();
