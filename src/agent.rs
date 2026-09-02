@@ -464,7 +464,7 @@ pub(crate) fn admit_dispatch(store: &crate::state::Store, agent: &str, objective
     if objective.is_none_or(|o| o == 0) {
         if let Some(named) = named_objective(task) {
             return Some(format!(
-                "REFUSED: tagged as upkeep (objective 0) but the task names objective #{named}. Dispatch it with                  objective={named} so the board, owner routing and the check budget see it."
+                "REFUSED: tagged as upkeep (objective 0) but the task names objective #{named}. Dispatch it with objective={named} so the board, owner routing and the check budget see it."
             ));
         }
     }
