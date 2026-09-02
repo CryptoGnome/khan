@@ -101,7 +101,11 @@ viewer gives you a live window into what the company is doing from anywhere.
      routine alerts (billed per delivered event) instead of paid mention
      polling — replies to the company's own posts are the bulk of real
      engagement and the reply wall permits answering them; obvious dm-me /
-     pump-it bait is flagged on the alert so silence is the default. The stream
+     pump-it bait is flagged on the alert so silence is the default. Each tweet
+     gets one reply for good: the target is recorded permanently and `x_post`
+     refuses a second reply to the same id, since the per-day billing ledger
+     resets at UTC midnight and was letting yesterday's mention be answered
+     twice. The stream
      is outbound-only — no webhook endpoint is exposed — and degrades to
      hourly reconnect attempts if the plan doesn't include the Activity API.
      The stream authenticates app-only: set `X_BEARER_TOKEN` (the app's

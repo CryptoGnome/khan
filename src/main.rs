@@ -690,6 +690,24 @@ mod tests {
     }
 
     #[test]
+    fn a_tweet_gets_one_reply_and_the_memory_outlives_the_day() {
+        let store = crate::state::Store::open(":memory:").unwrap();
+        assert_eq!(store.x_reply_to("2094781874174357640"), None);
+        store.x_record_reply("2094781874174357640", "2094800000000000001");
+        let (_, ours) = store.x_reply_to("2094781874174357640").unwrap();
+        assert_eq!(ours, "2094800000000000001");
+        // the billing ledger rolls at UTC midnight; the reply memory must not
+        store.x_mark_seen(&["2094781874174357640"], "2026-09-01");
+        store.x_mark_seen(&["2094913224747737227"], "2026-09-02");
+        assert!(store.x_reply_to("2094781874174357640").is_some(), "a new day is not a new conversation");
+        // a different tweet in the same thread is still answerable
+        assert_eq!(store.x_reply_to("2094913224747737227"), None);
+        // recording twice keeps the first reply as the record
+        store.x_record_reply("2094781874174357640", "2094899999999999999");
+        assert_eq!(store.x_reply_to("2094781874174357640").unwrap().1, "2094800000000000001");
+    }
+
+    #[test]
     fn ideas_past_their_own_review_date_stand_in_the_brief() {
         let dir = std::env::temp_dir().join("khan-overdue-ideas-test");
         let _ = std::fs::remove_dir_all(&dir);

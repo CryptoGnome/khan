@@ -219,6 +219,8 @@ impl Store {
                 WHERE NOT EXISTS (SELECT 1 FROM x_ledger);
              CREATE TABLE IF NOT EXISTS x_seen (
                 rid TEXT NOT NULL, day TEXT NOT NULL, PRIMARY KEY (rid, day));
+             CREATE TABLE IF NOT EXISTS x_replied (
+                tweet_id TEXT PRIMARY KEY, ts TEXT NOT NULL, our_id TEXT NOT NULL);
              CREATE TABLE IF NOT EXISTS routine_alerts (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL,
                 name TEXT NOT NULL, detail TEXT NOT NULL, delivered INTEGER NOT NULL DEFAULT 0);
@@ -1176,6 +1178,33 @@ explore (buys knowledge).\n{}\n",
     /// it drifts pessimistic and strands real prepaid credits at a fake $0.
     /// `day` is the caller's UTC date; rows from other days are purged here,
     /// keeping the table one day wide.
+    // --- who we have already answered ---
+    //
+    // x_seen above is a BILLING ledger: X charges once per tweet per UTC day,
+    // so it is wiped at midnight. It was doing double duty as the "have we
+    // handled this?" memory, and at midnight that memory emptied — tweets
+    // 2094781874174357640 and 2094913224747737227 each got a second reply the
+    // next day. A reply is permanent, so its record is too.
+
+    /// (when, our reply's tweet id) if we have already replied to this tweet.
+    pub fn x_reply_to(&self, tweet_id: &str) -> Option<(String, String)> {
+        let c = self.conn.lock().unwrap();
+        c.query_row(
+            "SELECT ts, our_id FROM x_replied WHERE tweet_id=?1",
+            params![tweet_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .ok()
+    }
+
+    pub fn x_record_reply(&self, tweet_id: &str, our_id: &str) {
+        let c = self.conn.lock().unwrap();
+        let _ = c.execute(
+            "INSERT OR IGNORE INTO x_replied(tweet_id, ts, our_id) VALUES(?1,?2,?3)",
+            params![tweet_id, chrono::Utc::now().to_rfc3339(), our_id],
+        );
+    }
+
     pub fn x_mark_seen(&self, ids: &[&str], day: &str) -> usize {
         let c = self.conn.lock().unwrap();
         let _ = c.execute("DELETE FROM x_seen WHERE day <> ?1", params![day]);
