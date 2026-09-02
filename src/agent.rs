@@ -136,6 +136,30 @@ pub(crate) fn fuel_brief_line(store: &crate::state::Store) -> String {
     )
 }
 
+/// The brief's standing debt: ideas the company gave a review date that has
+/// come and gone. Scanning is on a routine and a review routine; converting was
+/// on nobody's calendar, so 16 premise rows and 13 candidates accumulated and
+/// the only writes they got were appended notes. A date the company set for
+/// itself is a promise, and this line keeps it in front of the CEO until the
+/// row moves.
+pub(crate) fn overdue_ideas_line(workspace: &std::path::Path) -> String {
+    let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+    let rows = crate::tools::sql::overdue_ideas(workspace, &today);
+    if rows.is_empty() {
+        return String::new();
+    }
+    let shown = rows.iter().take(8).map(|(id, name, status, due)| {
+        format!("\n  - id{id} {name} ({status}, review date {due})")
+    }).collect::<String>();
+    let more = if rows.len() > 8 { format!("\n  ...and {} more.", rows.len() - 8) } else { String::new() };
+    format!(
+        "\n\nIDEAS PAST THEIR OWN REVIEW DATE ({}):{shown}{more}\nThe company set these dates, and they have passed. Each is a decision you owe now: \
+         hand it to an execution lane with a named owner, kill it with the number that killed it, or write the ONE missing fact and the date you will have it. \
+         Appending a note to the row is not a decision, and another scan cycle does not answer for them.",
+        rows.len()
+    )
+}
+
 /// base * 2^level, capped. Pure so the ladder is testable.
 pub(crate) fn backoff_interval(base: u64, max: u64, level: u32) -> u64 {
     let mut v = base;
@@ -435,6 +459,25 @@ pub(crate) fn named_objective(task: &str) -> Option<i64> {
     None
 }
 
+/// True when the task names the revenue-idea row it advances: "id65", "id 65",
+/// "row 54", "idea 17". A bare "#65" does not count — objectives are written
+/// that way, and the whole point is telling the two apart.
+pub(crate) fn names_revenue_idea(task: &str) -> bool {
+    let low = task.to_ascii_lowercase();
+    for key in ["idea", "id", "row"] {
+        let mut at = 0;
+        while let Some(i) = low[at..].find(key).map(|i| i + at) {
+            let starts_word = i == 0 || !low.as_bytes()[i - 1].is_ascii_alphanumeric();
+            let after = low[i + key.len()..].trim_start_matches([' ', '#', '=', ':']);
+            if starts_word && after.starts_with(|c: char| c.is_ascii_digit()) {
+                return true;
+            }
+            at = i + key.len();
+        }
+    }
+    false
+}
+
 /// How many identical shapes in 24h before the next is refused as routine
 /// work, and how many consecutive checks on one objective before the next is
 /// refused as circling.
@@ -445,7 +488,19 @@ pub(crate) const CONSECUTIVE_CHECK_LIMIT: u32 = 3;
 /// check on an objective that has not built anything since. None = allowed.
 /// Records the dispatch when allowed so the next call sees it.
 pub(crate) fn admit_dispatch(store: &crate::state::Store, agent: &str, objective: Option<i64>, task: &str) -> Option<String> {
-    let class = classify_task(task);
+    let mut class = classify_task(task);
+    // An explore objective's product is a lane, not a longer list. Running the
+    // next scan cycle is generation, and the leading-verb classifier scored it
+    // build: on 2026-09-02 objective 35 read "7 built / 7 checks" on the board
+    // while 16 premise rows sat unmoved and five were past their own review
+    // date, so the CONVERT-OR-KILL flag never fired. On an explore objective,
+    // only work that names the revenue idea it advances counts as a build.
+    if class == "build"
+        && objective.is_some_and(|o| o != 0 && store.objective_kind(o) == "explore")
+        && !names_revenue_idea(task)
+    {
+        class = "other";
+    }
     let shape = task_shape(objective, task);
     let repeats = store.shape_count_24h(&shape);
     if repeats >= REPEAT_SHAPE_LIMIT {
@@ -2008,12 +2063,13 @@ detail, and anything already acted on and closed.",
                 .unwrap_or_default();
             let directives = open_directives_text(&self.ctx.store.open_directives());
             let fuel = fuel_brief_line(&self.ctx.store);
+            let ideas = overdue_ideas_line(&self.ctx.workspace);
             history.push(Message::text(
                 "user",
                 format!(
                     "[Company brief — composed fresh each episode; durable truth lives on the objective board, in memories and in skills]\n\
 It is now {now} UTC. Anything dated before this already happened. A dated announcement is history, not a catalyst — and a date WITHOUT a year never resolves to the current calendar: it resolves to the document's own publication date (commit date, Last-Modified, weekday arithmetic). Check that before treating any date as upcoming.\n\n\
-BASE DIRECTIVE from your founder:\n{directive}\n\nTEAM:\n{roster}{policy}{directives}{fuel}\n\nRECENT ACTIVITY (public log tail):\n{recent}",
+BASE DIRECTIVE from your founder:\n{directive}\n\nTEAM:\n{roster}{policy}{directives}{fuel}{ideas}\n\nRECENT ACTIVITY (public log tail):\n{recent}",
                     now = chrono::Utc::now().format("%Y-%m-%d %H:%M")
                 ),
             ));

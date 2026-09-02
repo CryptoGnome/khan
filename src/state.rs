@@ -410,6 +410,13 @@ impl Store {
         let _ = c.execute("UPDATE objectives SET plan_updated_at=?2 WHERE id=?1", params![id, plan_updated_at]);
     }
 
+    /// An objective's portfolio category, or "" when it has none.
+    pub fn objective_kind(&self, id: i64) -> String {
+        let c = self.conn.lock().unwrap();
+        c.query_row("SELECT COALESCE(kind,'') FROM objectives WHERE id=?1", params![id], |r| r.get(0))
+            .unwrap_or_default()
+    }
+
     /// Set an objective's portfolio category. Only the four known kinds are
     /// accepted — a free-text category would silently fall out of the weekly
     /// review's grouping.

@@ -663,6 +663,61 @@ mod tests {
     }
 
     #[test]
+    fn an_explore_lane_only_builds_when_it_names_the_idea_it_advances() {
+        use crate::agent::{admit_dispatch, names_revenue_idea};
+        let store = crate::state::Store::open(":memory:").unwrap();
+        let scan = store.add_objective("opportunity scan", 4);
+        assert!(store.set_objective_kind(scan, "explore"));
+        let lane = store.add_objective("trend launch", 1);
+        assert!(store.set_objective_kind(lane, "profit"));
+        // another scan cycle is generation, however it is worded
+        for t in ["Run the opportunity scan cycle 31", "Build the cycle-32 beat map"] {
+            assert!(admit_dispatch(&store, "scan-mgr", Some(scan), t).is_none());
+        }
+        assert_eq!(store.objective_mix_24h().get(&scan), Some(&(0, 0)), "generation is not a build");
+        // naming the row it moves is
+        assert!(admit_dispatch(&store, "scan-mgr", Some(scan), "Build id65 stage 2 into a lane").is_none());
+        assert_eq!(store.objective_mix_24h().get(&scan), Some(&(1, 0)));
+        // the reclassification is explore-only: an execution lane still builds
+        assert!(admit_dispatch(&store, "launch-mgr", Some(lane), "Build the next costume").is_none());
+        assert_eq!(store.objective_mix_24h().get(&lane), Some(&(1, 0)));
+        for t in ["id65 stage 2", "advance row 54", "idea 17 gate", "obj35 id 9 promote"] {
+            assert!(names_revenue_idea(t), "{t}");
+        }
+        for t in ["objective #35 cycle 31", "did the grid render", "no ideas yet"] {
+            assert!(!names_revenue_idea(t), "{t}");
+        }
+    }
+
+    #[test]
+    fn ideas_past_their_own_review_date_stand_in_the_brief() {
+        let dir = std::env::temp_dir().join("khan-overdue-ideas-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        // no workspace.db at all: no line, and the read must not create one
+        assert_eq!(crate::agent::overdue_ideas_line(&dir), "");
+        assert!(!dir.join("workspace.db").exists());
+        let c = rusqlite::Connection::open(dir.join("workspace.db")).unwrap();
+        c.execute_batch(
+            "CREATE TABLE revenue_ideas(id INTEGER PRIMARY KEY, name TEXT, status TEXT, review_date TEXT);
+             INSERT INTO revenue_ideas VALUES
+               (9,'USDC yield','candidate','2026-08-29'),
+               (16,'EQUITYCAT rider','candidate','2026-09-01'),
+               (44,'memorial costume','premise','2099-01-01'),
+               (60,'tape-death exit','parked','2026-08-01'),
+               (12,'LP fee review','done','2026-08-01'),
+               (7,'no date','premise','');",
+        )
+        .unwrap();
+        let due = crate::tools::sql::overdue_ideas(&dir, "2026-09-02");
+        let ids: Vec<i64> = due.iter().map(|(id, ..)| *id).collect();
+        assert_eq!(ids, vec![9, 16], "only undecided rows whose date has passed, oldest first");
+        let line = crate::agent::overdue_ideas_line(&dir);
+        assert!(line.contains("id9 USDC yield") && line.contains("2026-08-29"), "{line}");
+        assert!(line.contains("kill it with the number"), "{line}");
+    }
+
+    #[test]
     fn quiet_heartbeats_back_off_and_events_reset() {
         use crate::agent::backoff_interval;
         assert_eq!(backoff_interval(300, 1800, 0), 300);

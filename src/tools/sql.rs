@@ -25,6 +25,34 @@ pub fn run(ctx: &ToolCtx, query: &str) -> Result<String> {
 /// The scratch DB's table names, comma-joined — None when the db doesn't
 /// exist yet or holds nothing. Read-only open so a missing file is never
 /// created as a side effect of building tool schemas.
+/// Revenue ideas whose own review date has passed while they are still only
+/// ideas: (id, name, status, review_date), oldest first.
+///
+/// The table belongs to the agents, so every step fails soft — no db, no
+/// table, no columns, no rows. The status list is literal on purpose: statuses
+/// are free text there, and these are the pre-commitment states the pipeline
+/// stalls in. A status the company invents later is invisible here until it is
+/// added, which is the deliberate ceiling.
+pub fn overdue_ideas(workspace: &std::path::Path, today: &str) -> Vec<(i64, String, String, String)> {
+    let Ok(conn) = Connection::open_with_flags(
+        workspace.join("workspace.db"),
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    ) else {
+        return Vec::new();
+    };
+    let Ok(mut stmt) = conn.prepare(
+        "SELECT id, name, status, review_date FROM revenue_ideas \
+         WHERE COALESCE(review_date,'') <> '' AND review_date < ?1 \
+           AND status IN ('premise','candidate','screening','watch','verified-open') \
+         ORDER BY review_date, id",
+    ) else {
+        return Vec::new();
+    };
+    stmt.query_map([today], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+        .map(|it| it.flatten().collect())
+        .unwrap_or_default()
+}
+
 pub fn table_names(workspace: &std::path::Path) -> Option<String> {
     let conn = Connection::open_with_flags(
         workspace.join("workspace.db"),

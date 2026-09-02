@@ -269,9 +269,19 @@ token count is printed. **There is no spend cap — watch it.**
   refused) and is classified build / check by its leading verbs.
   Three check-class dispatches in a row on one objective with nothing built
   between refuse the fourth; the same task shape three times in 24h refuses
-  the fourth with the add_routine redirect. The board shows each objective's
-  24h build/check mix and flags ALL CHECKS and explore objectives with no
-  build as CONVERT OR KILL. `scripts/throughput_audit.py` measures all of it.
+  the fourth with the add_routine redirect. On an `explore` objective only a
+  task that names the revenue idea it advances (`id65`, `row 54`) counts as a
+  build, so another scan cycle cannot pass for conversion. The board shows each
+  objective's 24h build/check mix and flags ALL CHECKS and explore objectives
+  with no build as CONVERT OR KILL. `scripts/throughput_audit.py` measures all
+  of it.
+- **Ideas answer for their own dates** — every `revenue_ideas` row carries a
+  review date, and the CEO brief stands a list of the rows whose date has
+  passed while they are still premise, candidate, screening, watch or
+  verified-open. Each one is a decision owed: hand it to a lane, kill it with
+  the number, or name the missing fact and its date. Scanning ran on a routine
+  and converting ran on nobody's calendar, so 16 premise rows and 13 candidates
+  banked up and the only writes they got were appended notes.
 - **The log bounds itself** — the site's stats daemon uses `run_log` as the
   bus to the viewer's event stream at ~80 KB every 12 seconds; the binary
   ages ticker rows out after six hours on the same path that writes them,
