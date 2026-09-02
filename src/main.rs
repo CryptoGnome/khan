@@ -646,6 +646,15 @@ mod tests {
         assert!(admit_dispatch(&store, "scout", crate::agent::named_objective("obj#5 trend-scout, door 1 of 3"), "obj#5 trend-scout, door 1 of 3").is_none());
         assert_eq!(crate::agent::named_objective("read-only contract recon, no objective yet"), None);
         assert!(admit_dispatch(&store, "ops", Some(0), "Kill the objectionable log noise").is_none());
+        // the CEO cannot block its episode on a manager's whole crew; a manager
+        // may still run its own workers inline
+        store.save_agent("pons-mgr", "pons lane", "pons-mgr", "m", "[]");
+        store.set_manager("pons-mgr", true);
+        store.save_agent("chainwatch-1", "reads chains", "chainwatch-1", "m", "[]");
+        let why = crate::agent::blocking_manager_run(&store, "CEO", "pons-mgr").unwrap();
+        assert!(why.contains("dispatch(pons-mgr"), "{why}");
+        assert!(crate::agent::blocking_manager_run(&store, "CEO", "chainwatch-1").is_none());
+        assert!(crate::agent::blocking_manager_run(&store, "pons-mgr", "chainwatch-1").is_none());
         // the board carries the mix and flags the all-checks objective
         store.add_objective("pons", 2);
         let mix = store.objective_mix_24h();

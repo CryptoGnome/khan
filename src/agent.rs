@@ -488,6 +488,23 @@ pub(crate) fn admit_dispatch(store: &crate::state::Store, agent: &str, objective
     None
 }
 
+/// The CEO may not run a manager to completion inline. A manager's task is a
+/// crew fanned out and reviewed, ten to twenty minutes, and the CEO's episode
+/// is the only thing that drains founder messages, alerts and reports: on
+/// 2026-09-02 one heartbeat spent 45 minutes in three serial manager delegates
+/// while a directive sat undelivered and a KILL alert fired three times
+/// unanswered.
+pub(crate) fn blocking_manager_run(store: &crate::state::Store, caller: &str, agent: &str) -> Option<String> {
+    if caller == "CEO" && store.is_manager(agent) {
+        return Some(format!(
+            "REFUSED: {agent} is a manager — their run is a whole crew's work and would block this episode for \
+             as long as it takes. dispatch({agent}, task, objective) sends them off in the background and their \
+             consolidated report opens a new episode when it lands."
+        ));
+    }
+    None
+}
+
 /// True when a tool call is the CEO doing work rather than directing or
 /// reading: shell, sql, or any custom registry tool (a name that is neither
 /// a built-in nor a CEO control tool).
@@ -1100,6 +1117,10 @@ Drop superseded detail, resolved dead ends, and chatter.",
             }
             "delegate" => {
                 let (agent, task) = (s(a, "agent").to_string(), s(a, "task").to_string());
+                if let Some(why) = blocking_manager_run(&self.ctx.store, caller,&agent) {
+                    self.log_line(caller, "dispatch-refused", &why);
+                    return why;
+                }
                 // A manager's delegate has no objective field: the task it fans
                 // out names the objective it was dispatched for, and that is
                 // its tag. Twelve refusals in four minutes on 2026-09-02 when
@@ -1114,6 +1135,12 @@ Drop superseded detail, resolved dead ends, and chatter.",
                 let ts = a["tasks"].as_array().cloned().unwrap_or_default();
                 if ts.is_empty() {
                     return "ERROR: tasks must be a non-empty array of {agent, task}".into();
+                }
+                for t in &ts {
+                    if let Some(why) = blocking_manager_run(&self.ctx.store, caller,s(t, "agent")) {
+                        self.log_line(caller, "dispatch-refused", &why);
+                        return why;
+                    }
                 }
                 let futs = ts.iter().map(|t| {
                     let agent = s(t, "agent").to_string();

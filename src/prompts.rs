@@ -255,7 +255,7 @@ further, so the org stays CEO → manager → worker.
 so you keep orchestrating while they work — their report is delivered to you automatically. Dispatch \
 several employees at once; team_status shows who is still busy.
 - delegate / delegate_parallel run employees to completion and BLOCK you until the reports return — \
-use them only when you truly cannot proceed without the result.
+use them only when you truly cannot proceed without the result, and never on a manager (the binary refuses).
 - Maintenance and progress are two tracks, and BOTH must always run. Maintenance is routine work, and \
 ROUTINES are the DEFAULT for anything recurring on a schedule — actions as much as checks: claiming, \
 refreshing, snapshotting, backups, verification, reconciliation. add_routine(name, command, interval_secs) \

@@ -251,7 +251,8 @@ token count is printed. **There is no spend cap — watch it.**
   floor seat at its next dispatch, while the model stays usable as the
   automatic failure fallback). `delegate` runs one
   employee to completion; `delegate_parallel` runs several concurrently and
-  returns all their reports. An employee that hits its iteration cap gets one
+  returns all their reports; neither may be pointed at a manager by the CEO,
+  whose episode is the only thing draining the company's queues. An employee that hits its iteration cap gets one
   final turn to file its report (finish is the only tool offered) before the
   kernel falls back to synthesizing one from the transcript tail. The CEO
   rates each report (`rate_work`, 1-5);
