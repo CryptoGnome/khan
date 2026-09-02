@@ -760,7 +760,7 @@ mod tests {
         assert!(!fresh("never-looked"));
         // the shipped caps ride luna and nothing else
         let luna = cfg.model_caps.get("bu0y/gpt56luna").unwrap();
-        assert_eq!((luna.max_input_per_1m, luna.max_output_per_1m), (Some(10_000), Some(60_000)));
+        assert_eq!((luna.max_input_per_1m, luna.max_output_per_1m), (Some(20_000), Some(120_000)));
         assert!(cfg.model_caps.get("bu0y/glm53flash").is_none());
     }
 
