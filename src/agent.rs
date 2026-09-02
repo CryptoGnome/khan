@@ -39,6 +39,8 @@ fn ceo_schemas() -> Vec<Value> {
             "note": {"type": "string", "description": "One-line status note shown on the board"},
             "blocked_by": {"type": "string", "description": "Comma-separated objective ids this waits on (e.g. '3' or '2,3'); empty string clears. Work that needs an account or artifact another objective produces is BLOCKED, not hard."},
             "owner": {"type": "string", "description": "Manager who OWNS this objective; empty string clears. Workers' reports on an owned objective route to the owner, who reviews, rates and drives follow-up work — you get their summary and escalations only. Give every big objective an owner so your attention stays on allocation."},
+            "review_date": {"type": "string", "description": "YYYY-MM-DD: the date you will judge this bet and decide to continue or close it. Every objective needs one — a lane with no review date is one nobody ever closes."},
+            "kill_criterion": {"type": "string", "description": "The condition that ENDS this bet, written as a number where possible ('under $50 of fees by the review date', 'still not listed anywhere'). Written when the bet opens, while it is still cheap to be honest."},
             "kind": {"type": "string", "enum": ["profit", "growth", "infra", "explore"], "description": "Portfolio category — every objective needs one, and the weekly portfolio review judges each by its own yardstick. profit: exists to earn (launches, fees, trading) — judged revenue vs cost. growth: buys audience (social presence, listings, content) — judged cost per attention and trend, NEVER on revenue. infra: keeps the company running (automation, bookkeeping, site plumbing) — judged reliability and cost trend. explore: buys knowledge (premise checks, probes) — judged learning per capped dollar."}}),
             json!(["action"])),
         tool("team_status", "List background tasks started with dispatch: who is still working and on what.", json!({}), json!([])),
@@ -156,6 +158,32 @@ pub(crate) fn overdue_ideas_line(workspace: &std::path::Path) -> String {
         "\n\nIDEAS PAST THEIR OWN REVIEW DATE ({}):{shown}{more}\nThe company set these dates, and they have passed. Each is a decision you owe now: \
          hand it to an execution lane with a named owner, kill it with the number that killed it, or write the ONE missing fact and the date you will have it. \
          Appending a note to the row is not a decision, and another scan cycle does not answer for them.",
+        rows.len()
+    )
+}
+
+/// The objectives whose own review date has passed, as a block for the CEO
+/// brief. Same shape as the ideas line, and for the same reason: the ideas
+/// version cleared five stale rows within an hour of shipping, because a
+/// decision asked for by name gets made and one left implicit does not.
+pub(crate) fn overdue_objectives_line(store: &crate::state::Store) -> String {
+    let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+    let rows = store.overdue_objectives(&today);
+    if rows.is_empty() {
+        return String::new();
+    }
+    let shown = rows
+        .iter()
+        .take(8)
+        .map(|(id, title, due, kill)| {
+            let when = if due.is_empty() { "NO REVIEW DATE EVER SET".to_string() } else { format!("review date {due}") };
+            let k = if kill.is_empty() { String::new() } else { format!(", kills if: {kill}") };
+            format!("\n  - #{id} {title} ({when}{k})")
+        })
+        .collect::<String>();
+    let more = if rows.len() > 8 { format!("\n  ...and {} more.", rows.len() - 8) } else { String::new() };
+    format!(
+        "\n\nOBJECTIVES PAST THEIR OWN REVIEW DATE ({}):{shown}{more}\nEach is a decision you owe THIS episode, not a status line: close it with objectives(done) or objectives(drop), or recommit with objectives(update, review_date, kill_criterion) naming the date you will judge it and the number that would kill it. An objective nobody will close is not a bet, it is furniture — and every one you keep open divides the company's attention again.",
         rows.len()
     )
 }
@@ -524,12 +552,26 @@ pub(crate) fn names_revenue_idea(task: &str) -> bool {
 /// work, and how many consecutive checks on one objective before the next is
 /// refused as circling.
 pub(crate) const REPEAT_SHAPE_LIMIT: u32 = 3;
+/// Fallback when no config is in hand (tests). The live limit rides
+/// `max_consecutive_checks`, tightened to 2 on 2026-09-02: three-in-a-row let
+/// a lane spend two thirds of a day re-auditing itself before the guard bit.
 pub(crate) const CONSECUTIVE_CHECK_LIMIT: u32 = 3;
 
 /// The refusal a dispatch gets when it is the same shape again or one more
 /// check on an objective that has not built anything since. None = allowed.
 /// Records the dispatch when allowed so the next call sees it.
 pub(crate) fn admit_dispatch(store: &crate::state::Store, agent: &str, objective: Option<i64>, task: &str) -> Option<String> {
+    admit_dispatch_limit(store, agent, objective, task, CONSECUTIVE_CHECK_LIMIT)
+}
+
+/// As `admit_dispatch`, with the consecutive-check limit the config sets.
+pub(crate) fn admit_dispatch_limit(
+    store: &crate::state::Store,
+    agent: &str,
+    objective: Option<i64>,
+    task: &str,
+    check_limit: u32,
+) -> Option<String> {
     let mut class = classify_task(task);
     // An explore objective's product is a lane, not a longer list. Running the
     // next scan cycle is generation, and the leading-verb classifier scored it
@@ -571,7 +613,7 @@ pub(crate) fn admit_dispatch(store: &crate::state::Store, agent: &str, objective
     if class == "check" {
         if let Some(o) = objective.filter(|o| *o != 0) {
             let n = store.consecutive_checks(o);
-            if n >= CONSECUTIVE_CHECK_LIMIT {
+            if check_limit > 0 && n >= check_limit {
                 return Some(format!(
                     "REFUSED: objective #{o} has had {n} check-class dispatches in a row with nothing built between \
                      them — verifying, re-verifying and sweeping is not advancing it. Dispatch work that BUILDS \
@@ -1277,7 +1319,7 @@ Drop superseded detail, resolved dead ends, and chatter.",
                 // out names the objective it was dispatched for, and that is
                 // its tag. Twelve refusals in four minutes on 2026-09-02 when
                 // this path passed None into the upkeep guard.
-                if let Some(why) = admit_dispatch(&self.ctx.store, &agent, named_objective(&task), &task) {
+                if let Some(why) = admit_dispatch_limit(&self.ctx.store, &agent, named_objective(&task), &task, self.ctx.cfg.max_consecutive_checks as u32) {
                     self.log_line(caller, "dispatch-refused", &why);
                     return why;
                 }
@@ -1327,7 +1369,7 @@ Drop superseded detail, resolved dead ends, and chatter.",
                     return "ERROR: dispatch needs `objective`: the board id this task advances, or 0 for company upkeep (bookkeeping, infra, hygiene). Untagged work cannot be routed, counted, or judged.".into();
                 };
                 let objective = if tagged == 0 { None } else { Some(tagged) };
-                if let Some(why) = admit_dispatch(&self.ctx.store, &agent, Some(tagged), &task) {
+                if let Some(why) = admit_dispatch_limit(&self.ctx.store, &agent, Some(tagged), &task, self.ctx.cfg.max_consecutive_checks as u32) {
                     self.log_line(caller, "dispatch-refused", &why);
                     return why;
                 }
@@ -1507,6 +1549,32 @@ Drop superseded detail, resolved dead ends, and chatter.",
                         if title.is_empty() {
                             return "ERROR: add needs a title".into();
                         }
+                        // A new lane while old ones are past their own dates is
+                        // how eight objectives stayed open for four days and
+                        // none closed. Close or recommit first; the board is a
+                        // budget of attention, not a list.
+                        let cap = self.ctx.cfg.max_active_objectives;
+                        if cap > 0 && self.ctx.store.active_objective_count() >= cap {
+                            let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+                            let overdue = self.ctx.store.overdue_objectives(&today);
+                            if !overdue.is_empty() {
+                                let names = overdue
+                                    .iter()
+                                    .take(6)
+                                    .map(|(id, t, d, _)| {
+                                        format!("#{id} {t} ({})", if d.is_empty() { "no review date" } else { d })
+                                    })
+                                    .collect::<Vec<_>>()
+                                    .join(", ");
+                                return format!(
+                                    "REFUSED: {} objectives are already active (cap {cap}) and {} of them are past their own review date: {names}. \
+                                     Close one with objectives(done) or objectives(drop), or recommit it with objectives(update, id, review_date, kill_criterion), \
+                                     then add this. Opening a lane while old ones answer to nobody is how every lane ends up half-driven.",
+                                    self.ctx.store.active_objective_count(),
+                                    overdue.len()
+                                );
+                            }
+                        }
                         let rank = a["rank"].as_i64().unwrap_or(100);
                         let id = self.ctx.store.add_objective(title, rank);
                         // Plans, notes and blockers supplied at add time must not be dropped.
@@ -1525,6 +1593,13 @@ Drop superseded detail, resolved dead ends, and chatter.",
                             if !self.ctx.store.set_objective_kind(id, k) {
                                 return format!("ERROR: kind must be profit, growth, infra or explore (got '{k}')");
                             }
+                        }
+                        self.ctx.store.set_objective_review(id, s(a, "review_date"), s(a, "kill_criterion"));
+                        if s(a, "review_date").is_empty() {
+                            return format!(
+                                "objective #{id} added at rank {rank}, but with NO REVIEW DATE — it will stand in your brief every episode until it has one. \
+                                 Set it now: objectives(update, id={id}, review_date=YYYY-MM-DD, kill_criterion=...). Tag dispatches with objective:{id}."
+                            );
                         }
                         format!("objective #{id} added at rank {rank}. Tag dispatches with objective:{id} so the board tracks its progress; if it needs more than one dispatch, get a plan onto it first.")
                     }
@@ -1553,6 +1628,7 @@ Drop superseded detail, resolved dead ends, and chatter.",
                             }
                             ok |= self.ctx.store.set_objective_kind(id, k);
                         }
+                        ok |= self.ctx.store.set_objective_review(id, s(a, "review_date"), s(a, "kill_criterion"));
                         if ok { format!("objective #{id} updated") } else { format!("ERROR: no objective #{id} (or nothing to change)") }
                     }
                     "done" | "drop" => {
@@ -2248,12 +2324,13 @@ detail, and anything already acted on and closed.",
             let directives = open_directives_text(&self.ctx.store.open_directives());
             let fuel = fuel_brief_line(&self.ctx.store);
             let ideas = overdue_ideas_line(&self.ctx.workspace);
+            let stale_objectives = overdue_objectives_line(&self.ctx.store);
             history.push(Message::text(
                 "user",
                 format!(
                     "[Company brief — composed fresh each episode; durable truth lives on the objective board, in memories and in skills]\n\
 It is now {now} UTC. Anything dated before this already happened. A dated announcement is history, not a catalyst — and a date WITHOUT a year never resolves to the current calendar: it resolves to the document's own publication date (commit date, Last-Modified, weekday arithmetic). Check that before treating any date as upcoming.\n\n\
-BASE DIRECTIVE from your founder:\n{directive}\n\nTEAM:\n{roster}{policy}{directives}{fuel}{ideas}\n\nRECENT ACTIVITY (public log tail):\n{recent}",
+BASE DIRECTIVE from your founder:\n{directive}\n\nTEAM:\n{roster}{policy}{directives}{fuel}{ideas}{stale_objectives}\n\nRECENT ACTIVITY (public log tail):\n{recent}",
                     now = chrono::Utc::now().format("%Y-%m-%d %H:%M")
                 ),
             ));

@@ -258,6 +258,12 @@ impl Store {
         // only measured signal per model is latency and failure rate, which favours
         // cheap fast models by construction and can never justify a better one.
         let _ = conn.execute("ALTER TABLE ratings ADD COLUMN model TEXT NOT NULL DEFAULT ''", []);
+        // Migration: an objective answers for its own date the way a revenue
+        // idea does. Eight lanes opened 2026-08-29..31 were all still active on
+        // 09-02 with 623 dispatches spread across them and nothing closing —
+        // nothing ever asked one to justify staying open.
+        let _ = conn.execute("ALTER TABLE objectives ADD COLUMN review_date TEXT NOT NULL DEFAULT ''", []);
+        let _ = conn.execute("ALTER TABLE objectives ADD COLUMN kill_criterion TEXT NOT NULL DEFAULT ''", []);
         // Migration: what a call cost. The catalog's average price is what the
         // ladder read for a week while the models page showed luna's best ask
         // at a twentieth of glm53flash's (2026-09-02); the fill's own settled
@@ -417,6 +423,57 @@ impl Store {
     pub fn backdate_plan(&self, id: i64, plan_updated_at: &str) {
         let c = self.conn.lock().unwrap();
         let _ = c.execute("UPDATE objectives SET plan_updated_at=?2 WHERE id=?1", params![id, plan_updated_at]);
+    }
+
+    /// Set an objective's review date (YYYY-MM-DD) and the condition that
+    /// would kill it. Either may be empty to leave it alone.
+    pub fn set_objective_review(&self, id: i64, review_date: &str, kill_criterion: &str) -> bool {
+        let now = chrono::Utc::now().to_rfc3339();
+        let c = self.conn.lock().unwrap();
+        let mut changed = 0;
+        if !review_date.is_empty() {
+            changed += c
+                .execute("UPDATE objectives SET review_date=?2, updated_at=?3 WHERE id=?1", params![id, review_date, now])
+                .unwrap_or(0);
+        }
+        if !kill_criterion.is_empty() {
+            changed += c
+                .execute("UPDATE objectives SET kill_criterion=?2, updated_at=?3 WHERE id=?1", params![id, kill_criterion, now])
+                .unwrap_or(0);
+        }
+        changed > 0
+    }
+
+    /// Active objectives whose own review date has passed, oldest first, plus
+    /// the ones that never got a date at all (reported with an empty date).
+    /// (id, title, review_date, kill_criterion)
+    pub fn overdue_objectives(&self, today: &str) -> Vec<(i64, String, String, String)> {
+        let c = self.conn.lock().unwrap();
+        let Ok(mut stmt) = c.prepare(
+            "SELECT id, title, COALESCE(review_date,''), COALESCE(kill_criterion,'') FROM objectives \
+             WHERE status='active' AND (COALESCE(review_date,'')='' OR review_date < ?1) \
+             ORDER BY COALESCE(NULLIF(review_date,''), '0000-00-00'), id",
+        ) else {
+            return Vec::new();
+        };
+        let rows = stmt
+            .query_map(params![today], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+            .map(|it| it.filter_map(|x| x.ok()).collect())
+            .unwrap_or_default();
+        rows
+    }
+
+    /// The classes of an objective's most recent dispatches, newest first.
+    pub fn recent_dispatch_classes(&self, objective: i64, n: usize) -> Vec<String> {
+        let c = self.conn.lock().unwrap();
+        let Ok(mut stmt) =
+            c.prepare("SELECT class FROM dispatches WHERE objective=?1 ORDER BY id DESC LIMIT ?2")
+        else {
+            return Vec::new();
+        };
+        stmt.query_map(params![objective, n as i64], |r| r.get::<_, String>(0))
+            .map(|it| it.filter_map(|x| x.ok()).collect())
+            .unwrap_or_default()
     }
 
     /// An objective's portfolio category, or "" when it has none.

@@ -715,6 +715,44 @@ mod tests {
     }
 
     #[test]
+    fn a_lane_answers_for_its_own_date_and_the_board_is_a_budget() {
+        let store = crate::state::Store::open(":memory:").unwrap();
+        let today = "2026-09-02";
+        // an objective with no review date stands in the brief from the moment it opens
+        let a = store.add_objective("listings", 1);
+        assert_eq!(store.overdue_objectives(today).len(), 1);
+        assert!(crate::agent::overdue_objectives_line(&store).contains("NO REVIEW DATE EVER SET"));
+        // a date in the future settles it; one in the past brings it back
+        assert!(store.set_objective_review(a, "2026-09-09", "still not listed anywhere"));
+        assert!(store.overdue_objectives(today).is_empty());
+        assert!(crate::agent::overdue_objectives_line(&store).is_empty());
+        assert!(store.set_objective_review(a, "2026-09-01", ""));
+        let line = crate::agent::overdue_objectives_line(&store);
+        assert!(line.contains("#1 listings"), "{line}");
+        assert!(line.contains("kills if: still not listed anywhere"), "{line}");
+        // closing it takes it off the board entirely
+        store.update_objective(a, None, None, None, None, Some("done"));
+        assert!(store.overdue_objectives(today).is_empty());
+
+        // the shipped budget
+        let cfg: crate::config::Config = toml::from_str(include_str!("../khan.toml.example")).unwrap();
+        assert_eq!(cfg.max_active_objectives, 6);
+        assert_eq!(cfg.max_consecutive_checks, 2);
+
+        // two checks in a row are allowed, the third is refused at the shipped limit
+        let o = store.add_objective("pons", 1);
+        assert!(crate::agent::admit_dispatch_limit(&store, "ops", Some(o), "Build the funding leg", 2).is_none());
+        assert!(crate::agent::admit_dispatch_limit(&store, "ops", Some(o), "Verify the funding landed", 2).is_none());
+        assert!(crate::agent::admit_dispatch_limit(&store, "ops", Some(o), "Confirm the ledger row", 2).is_none());
+        let why = crate::agent::admit_dispatch_limit(&store, "ops", Some(o), "Audit the reconciliation once more", 2)
+            .expect("the third consecutive check must be refused");
+        assert!(why.contains("REFUSED") && why.contains("BUILDS"), "{why}");
+        // and a build clears the run
+        assert!(crate::agent::admit_dispatch_limit(&store, "ops", Some(o), "Write the claim script", 2).is_none());
+        assert!(crate::agent::admit_dispatch_limit(&store, "ops", Some(o), "Verify the claim script ran", 2).is_none());
+    }
+
+    #[test]
     fn an_outbound_pitch_is_refused_by_the_shell_that_would_send_it() {
         use crate::tools::shell::pitches_by_mail;
         // the send that outran directive #155 by three minutes

@@ -299,6 +299,13 @@ token count is printed. **There is no spend cap — watch it.**
   objective's 24h build/check mix and flags ALL CHECKS and explore objectives
   with no build as CONVERT OR KILL. `scripts/throughput_audit.py` measures all
   of it.
+- **Lanes answer for their own dates** — every objective carries a review date
+  and the criterion that would kill it. Ones past their date (or that never got
+  one) stand in the CEO brief as a decision owed this episode: close, drop, or
+  recommit with a new date. A new objective is refused while `max_active_objectives`
+  are open and any is overdue, and an objective that has taken
+  `max_consecutive_checks` check-class dispatches in a row must build or close
+  before it can check again — re-auditing is what a lane does instead of finishing.
 - **Ideas answer for their own dates** — every `revenue_ideas` row carries a
   review date, and the CEO brief stands a list of the rows whose date has
   passed while they are still premise, candidate, screening, watch or

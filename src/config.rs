@@ -79,6 +79,18 @@ pub struct Config {
     /// scatter an agent's work across two models every dispatch.
     #[serde(default = "default_peer_switch_pct")]
     pub peer_switch_pct: u64,
+    /// How many objectives may be active before the board refuses a new one
+    /// while any is past its own review date. A company with four funded lanes
+    /// finishes things; one with eight rotates — on 2026-09-02 eight lanes
+    /// opened four days earlier were all still open, none closed, 623
+    /// dispatches spread across them in a day. 0 disables the cap.
+    #[serde(default = "default_max_active_objectives")]
+    pub max_active_objectives: usize,
+    /// How many consecutive check dispatches an objective may take before the
+    /// next one must build or close it. Verification is a third of all work,
+    /// and re-auditing is what a lane does instead of finishing. 0 disables.
+    #[serde(default = "default_max_consecutive_checks")]
+    pub max_consecutive_checks: usize,
     /// Price ceilings per "provider/model", sent as the gateway's
     /// `max_input_per_1m` / `max_output_per_1m`. A fill above either is not
     /// taken: the gateway answers 503 (below_floor) and the attempt loop
@@ -147,6 +159,14 @@ pub struct ModelCap {
     pub max_input_per_1m: Option<u64>,
     #[serde(default)]
     pub max_output_per_1m: Option<u64>,
+}
+
+fn default_max_active_objectives() -> usize {
+    6
+}
+
+fn default_max_consecutive_checks() -> usize {
+    2
 }
 
 fn default_peer_switch_pct() -> u64 {
