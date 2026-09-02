@@ -941,9 +941,10 @@ Drop superseded detail, resolved dead ends, and chatter.",
         // company is actually paying less for. Logged on change only, so the
         // log shows repricings rather than every dispatch.
         let key = format!("peer_seat:{name}");
-        if let Some(to) = self.cheaper_peer(&model) {
+        if let Some((to, sampled)) = self.cheaper_peer(&model) {
             if self.ctx.store.kv_get(&key).as_deref() != Some(to.as_str()) {
-                self.log_line(name, "peer-seat", &format!("{model} -> {to} ({})", self.peer_reason(&model, &to)));
+                let why = if sampled { "price sample".to_string() } else { self.peer_reason(&model, &to) };
+                self.log_line(name, "peer-seat", &format!("{model} -> {to} ({why})"));
                 self.ctx.store.kv_set(&key, &to);
             }
             model = to;
@@ -1883,20 +1884,23 @@ detail, and anything already acted on and closed.",
     /// `peer_switch_pct`. One dispatch in ten goes to a peer regardless, so a
     /// model nobody is calling keeps a fresh price — a catalog-only rule can
     /// never learn that the loser got cheap again.
-    fn cheaper_peer(&self, home: &str) -> Option<String> {
+    /// The bool says the move is a sample, not a verdict: the first live hour
+    /// logged a sample as "luna 206k vs glm 78k" and read as the switch
+    /// picking the dearer seat.
+    fn cheaper_peer(&self, home: &str) -> Option<(String, bool)> {
         let peers = self.ctx.cfg.peers_of(home);
         if peers.is_empty() {
             return None;
         }
         if chrono::Utc::now().timestamp() % 10 == 0 {
-            return peers.first().cloned();
+            return peers.first().cloned().map(|p| (p, true));
         }
         let mine = self.ctx.store.realized_price(home, PEER_PRICE_HOURS)?;
         let best = peers
             .iter()
             .filter_map(|p| self.ctx.store.realized_price(p, PEER_PRICE_HOURS).map(|c| (c, p.clone())))
             .min()?;
-        (best.0 * 100 < mine * (100 - self.ctx.cfg.peer_switch_pct)).then_some(best.1)
+        (best.0 * 100 < mine * (100 - self.ctx.cfg.peer_switch_pct)).then_some((best.1, false))
     }
 
     fn peer_reason(&self, home: &str, to: &str) -> String {
