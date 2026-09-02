@@ -31,6 +31,16 @@ ceo_models = [
   "bu0y/glm53flash",     # first choice: ~14x cheaper than grok, worker-proven (200+ calls,
                          # 0 failures) — a trial in the big seat; grok is the fallback rung,
                          # so benching this reverts the seat without a deploy
+  "bu0y/gpt56luna",      # probed 2026-09-02: tools verified (correct sql call), full
+                         # vision (named the colour), scam trap refused cleanly, 1.05M
+                         # context, and FAST — 10s where glm53flash took 38s on the same
+                         # prompt (its 178s and 92s slow-model lines are a daily tax).
+                         # Founder tip said similar-or-cheaper; the catalog says otherwise:
+                         # 1.5x glm53flash on input, 2.7x on output. It sits here rather
+                         # than first because glm53flash's token hunger (2-3x) may close
+                         # that gap in practice and nobody has measured it yet. Still 11x
+                         # cheaper than grok46 in, 5.5x out, so it is the cheap escalation
+                         # rung grok used to be.
   "bu0y/grok46",         # best all-around probe result, production-proven
   "bu0y/claudeopus5",    # picked only when the rungs above are benched AND its band fits
   "bu0y/claudesonnet5",
@@ -74,7 +84,12 @@ model_policy = """
 - bu0y/deepseekv4flash is NOT a seat. It exists only as the automatic
   fallback the binary fails through when a primary model errors. Never hire
   onto it, and re-home any agent still sitting on it at its next dispatch.
-- Escalate hard novel problems and money-gating plans to glm53, then grok46.
+- bu0y/gpt56luna is a seat: tools and vision verified, 1.05M context, and it
+  answers in about a quarter of glm53flash's wall-clock. It costs more per
+  token (1.5x in, 2.7x out), so use it where latency or a stuck seat is the
+  problem, not as a blanket upgrade — and say in the rating which it was.
+- Escalate hard novel problems and money-gating plans to gpt56luna or glm53,
+  then grok46.
   (glm53 supersedes glm5: newer, 1.3M context, tools verified; probed
   2026-09-01 — correct calls, but routing is noisy: 7.7s warm, 54.7s cold,
   one 502. Fine for rare escalations; never a high-cadence seat.)
