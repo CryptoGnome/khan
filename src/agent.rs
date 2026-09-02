@@ -177,9 +177,13 @@ pub(crate) const STALL_STRIKES: usize = 3;
 /// True when a failed call means the ROUTE stalled rather than the model
 /// running out of its own budget. Either the gateway relayed an upstream
 /// timeout, or the call burned two minutes before failing — at that point what
-/// it says matters less than the two minutes the company spent waiting.
+/// it says matters less than the two minutes the company spent waiting. A
+/// speed-floor refusal is the same verdict delivered early: the gateway saying
+/// no route to this model can keep up. Without the strike the CEO ladder
+/// re-picked glm53flash every episode through 15:10–15:30Z on 2026-09-02 and
+/// paid a refusal before every luna answer.
 pub(crate) fn is_stall(err: &str, elapsed_secs: u64) -> bool {
-    crate::llm::upstream_timeout(err) || elapsed_secs >= 120
+    crate::llm::upstream_timeout(err) || err.contains("no route meets the speed floor") || elapsed_secs >= 120
 }
 
 /// Drop stalls that have aged out, record this one, and return how many now

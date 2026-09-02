@@ -338,7 +338,8 @@ token count is printed. **There is no spend cap — watch it.**
   request carries a decode-speed floor (`min_tokens_per_sec` in the provider
   block) so the cheapest route is skipped when it is one that cannot finish;
   when no route clears it the gateway's `unmet_speed` refusal goes straight
-  to the fallback ladder, and a fill on an unmeasured route is logged as
+  to the fallback ladder and counts as a stall strike, so a floored seat is
+  benched off the CEO ladder rather than refused again every episode, and a fill on an unmeasured route is logged as
   `speed_floor=unverified`.
 - **Work tools** (all agents): file read/write/list (confined to `workspace/`),
   shell (with local `git` for version control; the GitHub CLI is blocked so

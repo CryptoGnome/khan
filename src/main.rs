@@ -699,6 +699,8 @@ mod tests {
         assert!(is_stall("502 Bad Gateway: a source refused this request", 135));
         // a fast failure is a fault to diagnose, not a stalled route
         assert!(!is_stall("429 rate limited", 2));
+        // a speed-floor refusal is a stall verdict delivered early
+        assert!(is_stall("bu0y/glm53flash: no route meets the speed floor right now — {\"error\":{\"type\":\"unmet_speed\"}}", 3));
         assert!(!is_stall("400 bad body", 1));
 
         let now = std::time::Instant::now();
