@@ -252,6 +252,10 @@ token count is printed. **There is no spend cap — watch it.**
   rates each report (`rate_work`, 1-5);
   per-agent/per-prompt-version stats feed the reflection step so prompt
   changes are judged on outcomes, not vibes.
+- **The log bounds itself** — the site's stats daemon uses `run_log` as the
+  bus to the viewer's event stream at ~80 KB every 12 seconds; the binary
+  ages ticker rows out after six hours on the same path that writes them,
+  so the volume cannot fill the way it did on 2026-09-01.
 - **Live steering** — `khan tell "..."` from a second terminal (or a Telegram
   message from the allowlisted founder chat) queues a founder message; the
   running CEO wakes on it immediately. No restart needed. A `khan tell` is

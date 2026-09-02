@@ -713,6 +713,48 @@ explore (buys knowledge).\n{}\n",
         let _ = c.execute("INSERT INTO kv(k,v) VALUES(?1,?2) ON CONFLICT(k) DO UPDATE SET v=?2", params![k, v]);
     }
 
+    /// Ticker events: the site's stats daemon writes an ~80KB snapshot every
+    /// 12 seconds and a team widget row beside it, using run_log as the bus
+    /// to the viewer's event stream. That is 575MB a day into a 4.6GB volume;
+    /// /data hit 100% on 2026-09-01 22:53Z and every routine died with ENOSPC.
+    /// Only the latest few rows are ever read (page health looks at ten), so
+    /// anything older than the window is dead weight.
+    const TICKER_EVENTS: &'static [&'static str] = &["stats", "team"];
+    const TICKER_KEEP_SECS: i64 = 6 * 3600;
+
+    /// Drop ticker rows older than the window. Called from log() on the path
+    /// that keeps the table growing — the spill directory cleans itself the
+    /// same way — so there is no cadence to schedule and nothing depends on a
+    /// routine staying registered. Ceiling: freed pages are reused by SQLite
+    /// but the file never shrinks without a VACUUM, which this deliberately
+    /// does not run — it takes an exclusive lock and a temp copy the size of
+    /// the database.
+    pub fn prune_ticker(&self) -> usize {
+        let cutoff = (chrono::Utc::now() - chrono::Duration::seconds(Self::TICKER_KEEP_SECS)).to_rfc3339();
+        let c = self.conn.lock().unwrap();
+        c.execute(
+            "DELETE FROM run_log WHERE event IN ('stats','team') AND ts < ?1",
+            params![cutoff],
+        )
+        .unwrap_or(0)
+    }
+
+    #[cfg(test)]
+    pub fn raw_log_at(&self, ts: &str, agent: &str, event: &str, detail: &str) {
+        let c = self.conn.lock().unwrap();
+        let _ = c.execute(
+            "INSERT INTO run_log(ts, agent, event, detail) VALUES(?1,?2,?3,?4)",
+            params![ts, agent, event, detail],
+        );
+    }
+
+    #[cfg(test)]
+    pub fn log_events_for_test(&self) -> Vec<(String, String)> {
+        let c = self.conn.lock().unwrap();
+        let mut stmt = c.prepare("SELECT event, ts FROM run_log ORDER BY id").unwrap();
+        stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().flatten().collect()
+    }
+
     pub fn log(&self, agent: &str, event: &str, detail: &str) {
         let ts = chrono::Utc::now().to_rfc3339();
         // Scrub before the insert, so the viewer's history replay is covered too.
@@ -728,6 +770,12 @@ explore (buys knowledge).\n{}\n",
             }
         };
         let _ = self.log_tx.send(log_row_json(id, &ts, agent, event, &detail));
+        // Every 500th row: the binary logs several times a minute, so the
+        // ticker's window is enforced within the hour regardless of what the
+        // daemon does, and the delete costs nothing when there is nothing old.
+        if id > 0 && id % 500 == 0 {
+            self.prune_ticker();
+        }
     }
 
     /// Last n log rows as JSON (oldest first), same shape as the live stream.

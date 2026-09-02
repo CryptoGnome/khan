@@ -585,6 +585,26 @@ mod tests {
     }
 
     #[test]
+    fn ticker_rows_age_out_and_real_events_do_not() {
+        // The stats daemon writes ~80KB into run_log every 12s; /data hit 100%
+        // on 2026-09-01 22:53Z. Only the latest rows are read, so the window
+        // is enforced by the binary, not by a routine staying registered.
+        let store = crate::state::Store::open(":memory:").unwrap();
+        let old = (chrono::Utc::now() - chrono::Duration::hours(7)).to_rfc3339();
+        let daemon_style = (chrono::Utc::now() - chrono::Duration::hours(7)).format("%Y-%m-%dT%H:%M:%S.000000+00:00").to_string();
+        store.raw_log_at(&old, "khan", "stats", "{}");
+        store.raw_log_at(&daemon_style, "khan", "stats", "{}");
+        store.raw_log_at(&old, "core", "team", "{}");
+        store.raw_log_at(&old, "CEO", "dispatch", "{}"); // a real event, same age
+        store.log("khan", "stats", "{}"); // fresh
+        assert_eq!(store.prune_ticker(), 3, "the three aged ticker rows go");
+        let left: Vec<(String, String)> = store.log_events_for_test();
+        assert!(left.iter().any(|(e, _)| e == "dispatch"), "real events are never pruned by age here: {left:?}");
+        assert_eq!(left.iter().filter(|(e, _)| e == "stats").count(), 1, "the fresh ticker row stays: {left:?}");
+        assert_eq!(store.prune_ticker(), 0, "idempotent");
+    }
+
+    #[test]
     fn founder_directives_stand_in_the_brief_until_acked() {
         // The 23:44Z x_api_ops fold request was read, stated as "must land in
         // the skill", then lost at the episode cut-off. A khan tell now stays
