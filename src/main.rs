@@ -746,6 +746,18 @@ mod tests {
         }
         assert_eq!(store.success_rate("bu0y/gpt56luna", 3), Some((1, 5)));
         assert!(1 * 100 < 5 * crate::agent::PEER_MIN_OK_PCT);
+        // a screenshot in the last day pins an agent to its home seat
+        store.kv_set("vision_agent:site-mgr", &chrono::Utc::now().to_rfc3339());
+        store.kv_set("vision_agent:old-hand", &(chrono::Utc::now() - chrono::Duration::hours(30)).to_rfc3339());
+        let fresh = |n: &str| {
+            store
+                .kv_get(&format!("vision_agent:{n}"))
+                .and_then(|ts| chrono::DateTime::parse_from_rfc3339(&ts).ok())
+                .is_some_and(|t| (chrono::Utc::now() - t.with_timezone(&chrono::Utc)).num_hours() < 24)
+        };
+        assert!(fresh("site-mgr"));
+        assert!(!fresh("old-hand"));
+        assert!(!fresh("never-looked"));
         // the shipped caps ride luna and nothing else
         let luna = cfg.model_caps.get("bu0y/gpt56luna").unwrap();
         assert_eq!((luna.max_input_per_1m, luna.max_output_per_1m), (Some(10_000), Some(60_000)));

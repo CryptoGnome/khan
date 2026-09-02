@@ -173,6 +173,8 @@ const PEER_PRICE_HOURS: i64 = 3;
 /// them in waits. Unknown (too few calls) counts as fit, so a quiet peer
 /// still gets sampled and earns a rate.
 pub(crate) const PEER_MIN_OK_PCT: u64 = 80;
+/// How long an agent stays known as one that uses pictures.
+const VISION_MEMORY_HOURS: i64 = 24;
 
 /// How long a stall stays on a model's record, and how many inside that window
 /// bench it. Three in ten minutes is a route that is cutting answers off, not a
@@ -714,6 +716,14 @@ impl Orchestrator {
     /// A summary is a few thousand tokens whatever the history was; asking for
     /// the model's whole output ceiling only inflates the gateway's reserve.
     async fn chat_fb_capped(&self, agent: &str, model: &str, messages: &[Message], tools: &[Value], cap: Option<u32>) -> Result<(Message, Usage)> {
+        // An agent that looks at pictures is an agent the peer swap must leave
+        // alone: a peer priced per token says nothing about whether its sources
+        // take image content, and on 2026-09-02 every luna source refused a PNG
+        // that glm53flash answered. Recorded here because histories drop their
+        // images on save — the only place that knows is the call itself.
+        if messages.iter().any(|m| m.images.as_ref().is_some_and(|v| !v.is_empty())) {
+            self.ctx.store.kv_set(&format!("vision_agent:{agent}"), &chrono::Utc::now().to_rfc3339());
+        }
         let started = std::time::Instant::now();
         self.log_line(agent, "thinking", &format!("{} ({model})", thinking_phrase()));
         match self.llm.chat_capped(&self.ctx.cfg, model, messages, tools, cap).await {
@@ -951,7 +961,7 @@ Drop superseded detail, resolved dead ends, and chatter.",
         // company is actually paying less for. Logged on change only, so the
         // log shows repricings rather than every dispatch.
         let key = format!("peer_seat:{name}");
-        if let Some((to, sampled)) = self.cheaper_peer(&model) {
+        if let Some((to, sampled)) = self.cheaper_peer(&model).filter(|_| !self.uses_vision(name)) {
             if self.ctx.store.kv_get(&key).as_deref() != Some(to.as_str()) {
                 let why = if sampled { "price sample".to_string() } else { self.peer_reason(&model, &to) };
                 self.log_line(name, "peer-seat", &format!("{model} -> {to} ({why})"));
@@ -1922,6 +1932,17 @@ detail, and anything already acted on and closed.",
             .filter_map(|p| self.ctx.store.realized_price(p, PEER_PRICE_HOURS).map(|c| (c, p.clone())))
             .min()?;
         (best.0 * 100 < mine * (100 - self.ctx.cfg.peer_switch_pct)).then_some((best.1, false))
+    }
+
+    /// True when this agent has put a picture in front of its model lately.
+    /// The window is generous on purpose: a screenshot every few episodes is
+    /// still a vision agent, and being wrong costs a swap, not a call.
+    fn uses_vision(&self, name: &str) -> bool {
+        self.ctx
+            .store
+            .kv_get(&format!("vision_agent:{name}"))
+            .and_then(|ts| chrono::DateTime::parse_from_rfc3339(&ts).ok())
+            .is_some_and(|t| (chrono::Utc::now() - t.with_timezone(&chrono::Utc)).num_hours() < VISION_MEMORY_HOURS)
     }
 
     fn peer_reason(&self, home: &str, to: &str) -> String {

@@ -238,7 +238,10 @@ token count is printed. **There is no spend cap — watch it.**
   the peer that has been more than `peer_switch_pct` cheaper over the last
   three hours, one dispatch in ten samples the other so a repricing gets
   noticed, and each move is logged once as `peer-seat`. A peer answering
-  under 80% of its recent calls is never moved onto, however cheap. Per-model
+  under 80% of its recent calls is never moved onto, however cheap, and an
+  agent that has shown its model a picture in the last day is never moved at
+  all — a per-token price says nothing about whether a peer's sources accept
+  image content. Per-model
   price ceilings (`model_caps`) ride bu0y requests as `max_input_per_1m` /
   `max_output_per_1m`, so a fill waits for the cheap band (a 503 the retry
   loop sits out) instead of overflowing to a seller at four times the price.
