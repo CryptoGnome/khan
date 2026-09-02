@@ -621,9 +621,12 @@ mod tests {
         assert!(why.contains("#39") && why.contains("BUILDS"), "{why}");
         assert!(admit_dispatch(&store, "pons-mgr", Some(39), "Execute the funding leg").is_none());
         assert!(admit_dispatch(&store, "ops", Some(39), "Verify the funding landed").is_none(), "one check after a build is fine");
-        // upkeep (objective None) never trips the consecutive-check budget
+        // upkeep (objective None or 0) never trips the consecutive-check budget
         for t in ["Verify a", "Verify b", "Verify c", "Verify d"] {
             assert!(admit_dispatch(&store, "ops", None, t).is_none());
+        }
+        for t in ["Verify e", "Verify f", "Verify g", "Verify h"] {
+            assert!(admit_dispatch(&store, "ops", Some(0), t).is_none(), "{t}");
         }
         // the board carries the mix and flags the all-checks objective
         store.add_objective("pons", 2);

@@ -436,8 +436,11 @@ pub(crate) fn admit_dispatch(store: &crate::state::Store, agent: &str, objective
             shape.split_once(':').map(|(_, t)| t).unwrap_or(&shape)
         ));
     }
+    // Upkeep (objective 0/None) is exempt from the consecutive-check budget:
+    // recon and page-health ARE checks by nature. The repeat-shape refusal
+    // still applies to it, which is what turns a recurring check into a routine.
     if class == "check" {
-        if let Some(o) = objective {
+        if let Some(o) = objective.filter(|o| *o != 0) {
             let n = store.consecutive_checks(o);
             if n >= CONSECUTIVE_CHECK_LIMIT {
                 return Some(format!(
@@ -1066,7 +1069,7 @@ Drop superseded detail, resolved dead ends, and chatter.",
             "delegate" => {
                 let (agent, task) = (s(a, "agent").to_string(), s(a, "task").to_string());
                 if let Some(why) = admit_dispatch(&self.ctx.store, &agent, None, &task) {
-                    self.log_line("CEO", "dispatch-refused", &why);
+                    self.log_line(caller, "dispatch-refused", &why);
                     return why;
                 }
                 self.run_employee(&agent, &task).await
@@ -1110,7 +1113,7 @@ Drop superseded detail, resolved dead ends, and chatter.",
                 };
                 let objective = if tagged == 0 { None } else { Some(tagged) };
                 if let Some(why) = admit_dispatch(&self.ctx.store, &agent, Some(tagged), &task) {
-                    self.log_line("CEO", "dispatch-refused", &why);
+                    self.log_line(caller, "dispatch-refused", &why);
                     return why;
                 }
                 if let Some(o) = objective {
