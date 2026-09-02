@@ -586,6 +586,17 @@ impl Client {
             if let Some(tps) = prov.min_tokens_per_sec {
                 b["min_tokens_per_sec"] = Value::from(tps);
             }
+            // Price ceilings keep a fill in the cheap band or turn it into a
+            // 503 the loop below waits on, rather than an overflow to whoever
+            // is dearest and free.
+            if let Some(caps) = cfg.model_caps.get(model) {
+                if let Some(n) = caps.max_input_per_1m {
+                    b["max_input_per_1m"] = Value::from(n);
+                }
+                if let Some(n) = caps.max_output_per_1m {
+                    b["max_output_per_1m"] = Value::from(n);
+                }
+            }
             b
         };
         let mut body = build(max_out);

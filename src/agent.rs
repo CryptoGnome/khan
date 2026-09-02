@@ -167,6 +167,12 @@ pub(crate) const SUMMARY_MAX_TOKENS: u32 = 8192;
 /// Window for a model's realized price. Short enough to follow a repricing
 /// within the hour, long enough to hold the five fills the price needs.
 const PEER_PRICE_HOURS: i64 = 3;
+/// A peer answering fewer than this share of its recent calls is not a seat,
+/// whatever it costs: with price caps on, a cheap band that cannot take our
+/// concurrency shows up here as 503s, and moving agents onto it would park
+/// them in waits. Unknown (too few calls) counts as fit, so a quiet peer
+/// still gets sampled and earns a rate.
+pub(crate) const PEER_MIN_OK_PCT: u64 = 80;
 
 /// How long a stall stays on a model's record, and how many inside that window
 /// bench it. Three in ten minutes is a route that is cutting answers off, not a
@@ -1892,7 +1898,18 @@ detail, and anything already acted on and closed.",
     /// logged a sample as "luna 206k vs glm 78k" and read as the switch
     /// picking the dearer seat.
     fn cheaper_peer(&self, home: &str) -> Option<(String, bool)> {
-        let peers = self.ctx.cfg.peers_of(home);
+        let peers: Vec<String> = self
+            .ctx
+            .cfg
+            .peers_of(home)
+            .into_iter()
+            .filter(|p| {
+                self.ctx
+                    .store
+                    .success_rate(p, PEER_PRICE_HOURS)
+                    .is_none_or(|(ok, n)| ok * 100 >= n * PEER_MIN_OK_PCT)
+            })
+            .collect();
         if peers.is_empty() {
             return None;
         }

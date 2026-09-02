@@ -739,6 +739,17 @@ mod tests {
         assert_eq!(store.realized_price("bu0y/glm53flash", 3), Some(200_000));
         // a peer with no fills has no price, so there is nothing to move to
         assert_eq!(store.realized_price("bu0y/gpt56luna", 3), None);
+        // a seat that keeps refusing is not one to move onto: five calls, one answered
+        assert_eq!(store.success_rate("bu0y/gpt56luna", 3), None);
+        for i in 0..5 {
+            store.record_model_call("bu0y/gpt56luna", 100, i == 0, if i == 0 { "" } else { "503 below_floor" }, Usage::default());
+        }
+        assert_eq!(store.success_rate("bu0y/gpt56luna", 3), Some((1, 5)));
+        assert!(1 * 100 < 5 * crate::agent::PEER_MIN_OK_PCT);
+        // the shipped caps ride luna and nothing else
+        let luna = cfg.model_caps.get("bu0y/gpt56luna").unwrap();
+        assert_eq!((luna.max_input_per_1m, luna.max_output_per_1m), (Some(10_000), Some(60_000)));
+        assert!(cfg.model_caps.get("bu0y/glm53flash").is_none());
     }
 
     #[test]

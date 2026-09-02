@@ -987,6 +987,23 @@ explore (buys knowledge).\n{}\n",
         );
     }
 
+    /// Calls answered against calls made over the last `hours`, once there are
+    /// enough to mean something. A refusal counts as a failure: a seat that
+    /// is under its speed floor or priced out of its cap is one nobody can be
+    /// moved onto, however cheap its fills would be.
+    pub fn success_rate(&self, model: &str, hours: i64) -> Option<(u64, u64)> {
+        let since = (chrono::Utc::now() - chrono::Duration::hours(hours)).to_rfc3339();
+        let c = self.conn.lock().unwrap();
+        let (ok, n): (i64, i64) = c
+            .query_row(
+                "SELECT COALESCE(SUM(ok),0), COUNT(*) FROM model_calls WHERE model=?1 AND ts>?2",
+                params![model, since],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .ok()?;
+        (n >= 5).then_some((ok as u64, n as u64))
+    }
+
     /// What a model has actually cost this company lately: settled
     /// micro-dollars per million tokens (prompt and completion together, so
     /// the blend is our real mix, not a guess), over the last `hours`. None

@@ -111,8 +111,18 @@ seat_denylist = ["deepseekv4flash", "deepseekv4flash0731", "glm5"]
 # glm53flash while the best ask (what bu0y fills at) was a twentieth of it.
 # One dispatch in ten samples the other peer so a repricing gets noticed.
 model_peers = [["bu0y/glm53flash", "bu0y/gpt56luna"]]
-# How much cheaper (percent) a peer must be before the seat moves.
+# How much cheaper (percent) a peer must be before the seat moves. A peer
+# answering under 80% of its recent calls is never moved onto, however cheap.
 peer_switch_pct = 25
+# Price ceilings per model, in the catalog's per-1M units. bu0y fills at the
+# cheapest source that can serve, and when luna's cheap band was full it
+# overflowed to a seller at ~4x (117 of 132 fills on 2026-09-02). With a cap
+# the fill waits for the cheap band — a 503 the retry loop sits out — instead
+# of taking the dear one; four misses walk the fallback ladder. Numbers from
+# bu0y for luna's low band; a cap below a model's whole book refuses it.
+[model_caps."bu0y/gpt56luna"]
+max_input_per_1m = 10000
+max_output_per_1m = 60000
 
 # Founder direct line (Telegram): set TELEGRAM_BOT_TOKEN (from @BotFather) and
 # TELEGRAM_CHAT_ID (the founder's chat id) in the environment. Inbound messages

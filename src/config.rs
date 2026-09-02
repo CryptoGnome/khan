@@ -79,6 +79,15 @@ pub struct Config {
     /// scatter an agent's work across two models every dispatch.
     #[serde(default = "default_peer_switch_pct")]
     pub peer_switch_pct: u64,
+    /// Price ceilings per "provider/model", sent as the gateway's
+    /// `max_input_per_1m` / `max_output_per_1m`. A fill above either is not
+    /// taken: the gateway answers 503 (below_floor) and the attempt loop
+    /// waits and asks again, then walks the fallback ladder. This is how a
+    /// model whose cheap band is capacity-limited stays cheap instead of
+    /// overflowing to a seller at four times the price — luna on 2026-09-02,
+    /// where 117 of 132 fills missed the low ask.
+    #[serde(default)]
+    pub model_caps: std::collections::HashMap<String, ModelCap>,
     /// Low-fuel floor in provider micro-dollars (bu0y GET /account
     /// availableMicros). Below it the binary files an hourly "fuel-low" routine
     /// alert so the CEO tops up before calls start bouncing with 402. 0 disables.
@@ -123,6 +132,14 @@ pub struct Config {
 
 fn default_workspace() -> String {
     "workspace".into()
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct ModelCap {
+    #[serde(default)]
+    pub max_input_per_1m: Option<u64>,
+    #[serde(default)]
+    pub max_output_per_1m: Option<u64>,
 }
 
 fn default_peer_switch_pct() -> u64 {
