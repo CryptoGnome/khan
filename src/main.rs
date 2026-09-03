@@ -741,6 +741,41 @@ mod tests {
     }
 
     #[test]
+    fn the_live_database_is_not_the_agents_to_move() {
+        use crate::tools::shell::moves_live_db;
+        // the 2026-09-03 sequence, each step
+        assert!(moves_live_db("cd /data && mv khan.db khan.db.pre_vacuum_20260903").is_some());
+        assert!(moves_live_db("mv /data/khan.db.vacuum_tmp /data/khan.db").is_some());
+        assert!(moves_live_db("python3 -c \"import os; os.replace('/data/khan.db.vacuum_tmp','/data/khan.db')\"").is_some());
+        assert!(moves_live_db("cp /data/khan.db /data/workspace/backup.db").is_some());
+        assert!(moves_live_db("rm -f /data/khan.db").is_some());
+        assert_eq!(moves_live_db("echo > /data/khan.db"), Some(">"));
+        // reads pass, and so does a compaction into a differently named copy
+        assert!(moves_live_db("python3 -c \"import sqlite3; sqlite3.connect('file:/data/khan.db?mode=ro', uri=True)\"").is_none());
+        assert!(moves_live_db("ls -la /data/khan.db && du -sh /data").is_none());
+        assert!(moves_live_db("sqlite3 /data/khan.db 'VACUUM INTO \"/data/khan.db.vacuum_tmp\"'").is_none());
+        assert!(moves_live_db("rm -rf /data/workspace/.spill/*").is_none());
+        // the identity check: a fresh file is itself, and a swapped one is not
+        let dir = std::env::temp_dir().join(format!("khan-dbid-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("khan.db");
+        let store = crate::state::Store::open(path.to_str().unwrap()).unwrap();
+        assert!(store.file_replaced().is_none());
+        assert!(crate::state::Store::open(":memory:").unwrap().file_replaced().is_none());
+        #[cfg(unix)]
+        {
+            std::fs::rename(&path, dir.join("khan.db.aside")).unwrap();
+            std::fs::write(&path, b"").unwrap();
+            assert!(store.file_replaced().unwrap().contains("different file"));
+            std::fs::remove_file(&path).unwrap();
+            assert!(store.file_replaced().unwrap().contains("gone"));
+        }
+        drop(store);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn a_malformed_tool_schema_never_rides_a_request() {
         use crate::tools::custom::schema_fault;
         // the shape that took the fleet down on 2026-09-02: required as an

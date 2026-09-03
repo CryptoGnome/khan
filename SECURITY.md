@@ -31,6 +31,11 @@ Understand the boundaries before deploying:
   mid-task sent one three minutes after the directive landed. Word-list
   enforcement, deliberately: it catches the named categories, not subtler
   framing.
+- The live database file is protected from the agent shell: a command that
+  would rename, copy, overwrite, truncate or remove `khan.db` is refused, and
+  the binary exits for a restart if the file at its path is ever replaced
+  underneath it. An agent did exactly that on 2026-09-03 while freeing disk,
+  and the company ran blind for seven hours with no error anywhere.
 - The GitHub CLI (`gh`) is blocked in the agent shell so agents can never use
   a personal GitHub login; only local `git` is available. The guard sits on
   the shared execution path (custom-tool launches included), and custom-tool

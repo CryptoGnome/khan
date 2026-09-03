@@ -1877,6 +1877,13 @@ detail, and anything already acted on and closed.",
     }
 
     async fn check_fuel(&self) {
+        if let Some(why) = self.ctx.store.file_replaced() {
+            // Nothing written from here reaches anyone; say it where the
+            // platform logs can see it and exit non-zero so it restarts us.
+            eprintln!("FATAL: database {why} — a process holding a replaced file runs blind; exiting for a restart");
+            self.log_line("core", "db-replaced", &why);
+            std::process::exit(1);
+        }
         self.check_disk();
         let threshold = self.ctx.cfg.fuel_low_micros;
         if threshold == 0 {

@@ -102,6 +102,9 @@ pub async fn run_with_env(
     if let Some(word) = pitches_by_mail(command) {
         return Ok(format!("{PITCH_BLOCKED} (matched \"{word}\")"));
     }
+    if let Some(word) = moves_live_db(command) {
+        return Ok(format!("{DB_BLOCKED} (matched \"{word}\")"));
+    }
     let dir = match cwd {
         Some(c) if !c.is_empty() => ctx.workspace.join(c),
         _ => ctx.workspace.clone(),
@@ -112,6 +115,33 @@ pub async fn run_with_env(
 pub const GH_BLOCKED: &str = "ERROR: gh is not available (it would use the founder's personal GitHub login). Plain git works for local version control in the workspace.";
 
 pub const PITCH_BLOCKED: &str = "REFUSED: this is an outbound email pitching for attention, which the founder banned on 2026-09-02 (directive #155, skill email_policy). The company inbox is transactional only: listing submissions and their replies, account verification, deposit and payment problems, anything a counterparty needs to complete a transaction. Podcasts, interviews, features, partnerships, AMAs, newsletter mentions, press and Show-HN asks are not sends — attention comes from being a good account and shipping things worth talking about. If this send genuinely unblocks money, say which objective and which amount in the command itself and it will pass.";
+
+pub const DB_BLOCKED: &str = "REFUSED: khan.db is the running company's open database, and this command would move, replace, or delete the file under it. On 2026-09-03 exactly that (VACUUM INTO a copy, rename the original aside, move the copy into place) left the binary writing to a file nobody could see for seven hours: the board and roster vanished, the site froze, and the X refresh token rotated into a file that was then thrown away. Read it with khan_db_query or sqlite in mode=ro; never rename, copy, truncate, or remove it. Compaction and backups are the founder's, not the company's — if the volume is full, delete evidence dumps and spill files instead.";
+
+/// The verb by which a command would move, overwrite, or remove the live
+/// database, if it does.
+///
+/// A word list like the pitch guard: the command names khan.db and carries a
+/// verb that moves or destroys files. Reads (sqlite3, python mode=ro, cat,
+/// ls, du, `VACUUM INTO` a differently named copy) pass. Copying is refused
+/// in both directions — a 200MB copy is the volume filler this all started
+/// from, and `cp x khan.db` overwrites in place.
+pub fn moves_live_db(command: &str) -> Option<&'static str> {
+    let c = command.to_lowercase();
+    if !c.contains("khan.db") {
+        return None;
+    }
+    // `> khan.db` and `>khan.db` truncate the open file.
+    if c.split('>').skip(1).any(|after| {
+        let a = after.trim_start();
+        a.starts_with("khan.db") || a.trim_start_matches('/').starts_with("data/khan.db")
+    }) {
+        return Some(">");
+    }
+    ["mv", "rename", "rm", "unlink", "truncate", "shred", "dd", "cp", "install", "rsync", "os.replace", "shutil.move", "shutil.copy", "shutil.copyfile"]
+        .into_iter()
+        .find(|w| contains_word(&c, w))
+}
 
 /// The pitch words in an outbound mail command, if it is one.
 ///

@@ -95,31 +95,46 @@ async fn access_token(ctx: &ToolCtx) -> Result<String> {
     let id = ctx.cfg.secret("X_CLIENT_ID").context("X_CLIENT_ID not configured")?;
     let secret = ctx.cfg.secret("X_CLIENT_SECRET").context("X_CLIENT_SECRET not configured")?;
     // kv (a rotated token) beats the env seed: the seed is only valid until
-    // its first use.
-    let refresh = ctx
-        .store
-        .kv_get(KV_REFRESH)
-        .or_else(|| ctx.cfg.secret("X_REFRESH_TOKEN").map(String::from))
-        .context("no X refresh token available")?;
-    let basic = base64::engine::general_purpose::STANDARD.encode(format!("{id}:{secret}"));
-    let resp = ctx
-        .http
-        .post("https://api.x.com/2/oauth2/token")
-        .header("Authorization", format!("Basic {basic}"))
-        .form(&[("grant_type", "refresh_token"), ("refresh_token", refresh.as_str())])
-        .send()
-        .await
-        .context("token refresh request failed")?;
-    let status = resp.status();
-    let body = resp.text().await.unwrap_or_default();
-    if !status.is_success() {
-        bail!(
-            "x token refresh returned {status}: {} — if this says invalid_request/invalid_grant the \
-refresh token chain is broken and the founder must re-authorize the app (do NOT retry in a loop)",
-            body.chars().take(400).collect::<String>()
-        );
+    // its first use. But a kv token X no longer recognises is dead for good,
+    // and the founder's only remedy is a new seed in the environment — so
+    // when kv is refused and a different seed exists, the seed gets its turn.
+    // (2026-09-03: the token rotated inside a database file that was then
+    // thrown away; the surviving copy held the previous, already-spent one.)
+    let stored = ctx.store.kv_get(KV_REFRESH);
+    let seed = ctx.cfg.secret("X_REFRESH_TOKEN").map(String::from);
+    let mut candidates: Vec<String> = stored.iter().cloned().collect();
+    if let Some(s) = seed.filter(|s| stored.as_deref() != Some(s.as_str())) {
+        candidates.push(s);
     }
-    let v: Value = serde_json::from_str(&body).context("token response not json")?;
+    if candidates.is_empty() {
+        bail!("no X refresh token available");
+    }
+    let basic = base64::engine::general_purpose::STANDARD.encode(format!("{id}:{secret}"));
+    let mut last_err = String::new();
+    let mut v: Option<Value> = None;
+    for refresh in &candidates {
+        let resp = ctx
+            .http
+            .post("https://api.x.com/2/oauth2/token")
+            .header("Authorization", format!("Basic {basic}"))
+            .form(&[("grant_type", "refresh_token"), ("refresh_token", refresh.as_str())])
+            .send()
+            .await
+            .context("token refresh request failed")?;
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        if status.is_success() {
+            v = Some(serde_json::from_str(&body).context("token response not json")?);
+            break;
+        }
+        last_err = format!("{status}: {}", body.chars().take(400).collect::<String>());
+    }
+    let Some(v) = v else {
+        bail!(
+            "x token refresh returned {last_err} — if this says invalid_request/invalid_grant the \
+refresh token chain is broken and the founder must re-authorize the app (do NOT retry in a loop)"
+        );
+    };
     let access = v["access_token"].as_str().context("no access_token in response")?.to_string();
     if let Some(new_refresh) = v["refresh_token"].as_str() {
         ctx.store.kv_set(KV_REFRESH, new_refresh);
@@ -265,7 +280,10 @@ pub async fn activity_stream(ctx: ToolCtx) {
                 // 403 means the Activity API is not enabled for this tier —
                 // retrying every few seconds would just spam the log, so back
                 // off to hourly and let a later plan upgrade fix it.
-                if msg.contains(" 403") {
+                // A refused refresh token is not coming back either: it says
+                // so in the message, and on 2026-09-03 it was retried five
+                // times a minute regardless.
+                if msg.contains(" 403") || msg.contains("invalid_request") || msg.contains("invalid_grant") {
                     backoff = 3600;
                 }
                 tokio::time::sleep(std::time::Duration::from_secs(backoff)).await;

@@ -344,6 +344,16 @@ token count is printed. **There is no spend cap — watch it.**
   in the store is dropped to a permissive one rather than sent. The tool list
   rides every request, so one bad schema is refused by strict sellers and fails
   the whole fleet over to dearer routes.
+- **The live database is not the company's to move** — a shell command that
+  would rename, copy, overwrite, truncate or remove `khan.db` is refused
+  (reads and `VACUUM INTO` a differently named copy pass), and the binary
+  checks on every fuel poll that the file at its database path is still the
+  one it opened; if not it exits for a restart rather than run blind. On
+  2026-09-03 an agent swapped a vacuumed copy into place and the running
+  binary spent seven hours writing to a file nobody could see. The X refresh
+  token that rotated inside that file was lost with it, so a refresh refused
+  as `invalid_request` now falls back to a fresh `X_REFRESH_TOKEN` seed when
+  one is set, and the stream backs off to hourly instead of retrying.
 - **The volume is a tank too** — free space is checked on the fuel poll and a
   `disk-low` alert wakes the CEO below 512 MB, naming what to cut. Oversized
   tool output past 16 MB is cut rather than spilled (nobody reads a 900 MB

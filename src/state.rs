@@ -163,11 +163,29 @@ pub fn redact(s: &str) -> String {
     out
 }
 
+/// (device, inode) of the file at `path`; None off Unix or for ":memory:".
+fn file_identity(path: &str) -> Option<(u64, u64)> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let m = std::fs::metadata(path).ok()?;
+        Some((m.dev(), m.ino()))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        None
+    }
+}
+
 /// Internal persistent state (khan.db): prompts, agents, run log, memories, kv.
 pub struct Store {
     pub conn: Mutex<Connection>,
     /// Live feed of run_log rows as JSON, consumed by the web log viewer.
     log_tx: broadcast::Sender<String>,
+    /// The path opened and the inode found there, so a later check can tell
+    /// whether the file at the path is still the one this connection holds.
+    opened: Option<(String, (u64, u64))>,
 }
 
 impl Store {
@@ -310,7 +328,27 @@ impl Store {
         if conn.execute("ALTER TABLE messages ADD COLUMN acked INTEGER NOT NULL DEFAULT 0", []).is_ok() {
             let _ = conn.execute("UPDATE messages SET acked=1 WHERE delivered=1", []);
         }
-        Ok(Store { conn: Mutex::new(conn), log_tx: broadcast::channel(512).0 })
+        let opened = file_identity(path).map(|id| (path.to_string(), id));
+        Ok(Store { conn: Mutex::new(conn), log_tx: broadcast::channel(512).0, opened })
+    }
+
+    /// Why the database file is no longer the one this store opened, if so.
+    ///
+    /// An agent swapped the live file on 2026-09-03: `VACUUM INTO` a copy,
+    /// rename the original aside, move the copy into place. The running
+    /// binary kept its handle on the renamed original, its write-ahead log was
+    /// applied to the wrong file, and by 04:26Z it saw an empty company while
+    /// the site read a frozen snapshot — for seven hours, with no error
+    /// anywhere. A connection to a file nobody else can see is worse than no
+    /// process at all; the caller exits and lets the platform restart on the
+    /// real path.
+    pub fn file_replaced(&self) -> Option<String> {
+        let (path, at_open) = self.opened.as_ref()?;
+        match file_identity(path) {
+            Some(now) if now == *at_open => None,
+            Some(_) => Some(format!("{path} is a different file from the one opened at start")),
+            None => Some(format!("{path} is gone from disk")),
+        }
     }
 
     pub fn subscribe_log(&self) -> broadcast::Receiver<String> {
