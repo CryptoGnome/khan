@@ -95,6 +95,39 @@ Read from the v2 docs directly, so nobody relitigates it from memory:
   locked buybacks, liquidity locked permanently, no mint, no blacklist.
   Our economics go in the copy as reassurance, never as the boast.
 
+## The quote asset is a launch parameter, not a constant
+The factory's launch call takes the QUOTE token as a third argument alongside
+the params struct and the config id. The zero address means "quote in the
+chain's native gas token"; any other address quotes the curve in that ERC-20.
+Verified on-chain: there are no wrapped-native constants baked into the
+factory or curve bytecode — the quote asset is caller-chosen and pinned into
+each curve at construction. A majority of live launches use a non-native
+quote, and ERC-20-quoted curves have graduated end to end, so this is a
+supported path rather than an exotic one.
+
+Two conditions gate an ERC-20 quote, both owner-only on the factory (the
+owner is the protocol's multisig, not us): the token must be in the
+factory's approved-pair-token set, AND it must have pair-token economics
+configured. For an approved ERC-20 quote the launch economics come from the
+per-quote economics mapping, NOT from the launch config's native-wei values —
+reading the wrong one gives numbers that will not match the tx. The factory's
+ABI names the exact revert for each miss (not approved / economics invalid /
+decimals mismatch), and there is a minimum-decimals floor on quote tokens.
+Dozens of quote tokens are already approved, so check the approved set FIRST:
+a launch quoting one of them needs no protocol action at all. A genuinely new
+quote token needs the protocol multisig to approve it and set its economics —
+requestable through the project's contact address, never executable by us, so
+never plan a launch around an unapproved quote.
+
+PRE-FIRE GATE: pin economics PER QUOTE by previewing launch economics for the
+exact (config id, quote token) pair and carrying that digest into the launch
+call's expected-economics field. RE-PIN whenever either the config id or the
+quote token changes — the digest is what makes a config or economics change
+revert the transaction instead of silently changing the terms you launch on.
+On an ERC-20-quoted launch the quote moves as an ERC-20 transfer through the
+router while the protocol's launch fee stays native (msg.value) regardless of
+quote asset — budget both.
+
 ## Procedure
 1. Verify the venue: confirm the live domain from the project's X account
    (@ponsdotfamily) and confirm real-time launch traffic on the explorer.
@@ -103,8 +136,10 @@ Read from the v2 docs directly, so nobody relitigates it from memory:
    split from the code, not a website.
 3. Wallet ours + vaulted, funded with ETH for gas + launch fee + a modest
    dev-buy. Sign locally, always.
-4. Launch with metadata via the verified factory; dev-buy in the same tx.
-5. Verify: token + pool live on the explorer, metadata renders on the live
+4. Choose the quote asset and confirm it is approved with economics set;
+   preview economics for that (config, quote) pair and pin the digest.
+5. Launch with metadata via the verified factory; dev-buy in the same tx.
+6. Verify: token + pool live on the explorer, metadata renders on the live
    site, fees accruing to OUR recipient. Book everything.
 
 ## Verification

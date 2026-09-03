@@ -38,6 +38,20 @@ real-looking amount — a plausible stale figure is the worst of both.
 - Baking a mutable figure into a share card or og:image — it is stale the day
   after the next cycle, and it is cached where you cannot fix it.
 
+## The checker's twin rule
+The same bug class has a second home: the VALIDATOR. A checker that asserts on
+a moving figure must DERIVE its expectation from the database at run time —
+never hold it as a literal. A head-tag checker once baked the current claim
+count into its expected meta description; the next claim landed, the page
+updated correctly, and the checker ALERTed on a healthy page. It cost a
+site-fix dispatch chasing a defect that was in the checker.
+
+Before writing any validator for a figure that moves on a business cycle, ask
+where its expectation comes from. If the answer is a literal in the script, it
+is this bug one cycle later. Have it query the same canon the page queries, or
+call the copy-audit derivation. A checker that false-ALERTs on a healthy page
+lies to the operator exactly as badly as a page showing stale data.
+
 ## Render contract
 Update LEAF spans only, never a parent that contains children. Split sections
 by lifecycle (active rows in one table, completed/dropped in another) — mixing

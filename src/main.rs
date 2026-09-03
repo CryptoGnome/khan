@@ -1646,6 +1646,8 @@ mod tests {
             "workspace_db_schema",
             "x_beat_prep",
             "token_listing_submissions",
+            "email_policy",
+            "token_site_standard",
         ] {
             assert!(names.contains(&n.to_string()), "missing seed '{n}' in {names:?}");
         }

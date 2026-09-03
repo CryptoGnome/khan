@@ -25,6 +25,16 @@ has its own skills; this one governs the portfolio.
    verdict binds the moment it is read, and a KILL left unexecuted past that
    read is itself a process violation.
 
+5. **The entry gate and the kill are ONE definition.** Where the vet uses a
+   momentum precondition to allow entry (token_vetting gate 9), the kill side
+   is fixed at plan time from that same definition and its mirror: the
+   short-window trajectory negative on two consecutive spaced reads = KILL at
+   the second read, same episode per rule 4 — no volume corroboration, no
+   both-legs interpretation. A position can never be entered on a momentum its
+   kill cannot see. Paid for by a both-legs falsifier ("reversal WITH volume
+   decay") that held a dead thesis for eight hours because volume never
+   confirmed; the exit came materially worse than the plan's own trigger. Any
+   change to the entry threshold re-derives the kill in the same edit.
 ## Sizing — the allocation is judgment, not a formula
 The treasury is FIRST a development fund: fuel, launches, contracts, and new
 opportunities always come before the portfolio, which gets only what the

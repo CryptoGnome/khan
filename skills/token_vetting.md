@@ -45,6 +45,29 @@ that won't answer — all read as "not clean", never as "probably fine".
    large share of the pool's liquidity — you cannot exit through a door
    smaller than you are.
 
+9. **Momentum trajectory — what the tape is DOING, not just what the token
+   IS.** Gates 1-8 verify structure; a structurally perfect token can still be
+   bleeding out when you buy it. Require a positive short-window price
+   trajectory (order of +2% over ~6h) confirmed on TWO reads spaced at least an
+   hour apart, AND recent volume run-rate holding at a meaningful fraction
+   (order of half) of the token's daily average hourly rate. Any negative read,
+   a collapsed run-rate, or missing data = REJECT. A SINGLE read is never an
+   entry basis: a window-boundary crossing can flip the sign of a 6h figure
+   within minutes, and one such artifact is what a spaced second read exists to
+   catch. Set the exact thresholds per chain and record them, with a falsifier
+   that would retire the gate.
+   Paid for by a position that entered with all eight structural gates green —
+   concentration, cluster, round-trip, price desync all comfortable — and was
+   dead within five hours. Volume and concentration stayed green at every read
+   through the kill; only the price trajectory ever showed the problem, and
+   nothing was gating on it.
+   **Dual use — this same definition arms the exit.** The kill line is its
+   mirror: the short-window trajectory negative on two consecutive spaced reads
+   = KILL, with no volume corroboration required. Writing entry and kill from
+   one definition removes the both-legs ambiguity ("reversal WITH volume
+   decay") that let a dead position sit for hours while one leg stayed green.
+   The kill half lives in trading_discipline; they must be edited together.
+
 ## PASS-WITH-CAVEAT IS A FAIL
 There is no third verdict. When a hard gate cannot get real data — a
 funding-cluster check running on a weak proxy, a sybil pattern you "could

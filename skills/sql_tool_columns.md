@@ -49,6 +49,13 @@ a substitute for reading the schema.
   concluding a field is missing from the data.
 - A table without an explicit `id` still has `rowid`; reach for it rather than
   inventing a key.
+- SQLite rejects `ORDER BY` / `LIMIT` inside the ARMS of a compound (`UNION`)
+  select — the error names the UNION, not the arm, so it reads as a mystery.
+  The intuitive "latest row per cohort" shape is invalid; wrap each arm as its
+  own parenthesized subquery and put a single `ORDER BY` after the union, or
+  simply run one query per cohort and merge the rows in your report. This one
+  recurs: workers reach for the invalid shape again months after it was
+  documented, because it is what every other dialect allows.
 - Snapshot tables (balances, positions) are stale by construction. After any
   episode that moves real funds, re-sync the touched row to on-chain truth
   before finishing — a correct query against a stale row is still a wrong answer.

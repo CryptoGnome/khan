@@ -11,8 +11,31 @@ done deliberately, on a seat built for thinking.
 
 A planner on a REASONING-tier seat (ideation is thinking work — the one
 class that justifies the expensive seat even in lean times) runs a session
-on a standing cadence. Each session works the lenses below and produces
-2-5 written candidates. No execution, no spend — paper only.
+on a standing cadence. Each session OPENS by reading three inputs, in order:
+1. The scored idea list — never re-propose a live or already-killed idea.
+2. The PREVIOUS session's output — every candidate must state what changed
+   in the world since that session, or it is dead on arrival.
+3. The lane kill log — kills are paid-for market data, and mining them is
+   the dying-lane autopsy lens; it is an INPUT, not an option.
+
+Then it works the lenses below and produces 2-5 written candidates. No
+execution, no spend — paper only.
+
+## INDEPENDENCE GATE (non-negotiable)
+Ideation drifts. Left alone, sessions return thinly-disguised variants of the
+lanes already running, because those are the lanes the session knows best —
+this gate exists because independence had to be re-stated by hand in every
+dispatch until it became part of the contract.
+- Every premise names which LIVE lanes it shares dependencies with: same
+  chain, same venue, same audience, same capital pool, same keystone event.
+- A premise sharing ALL its dependencies with an existing lane is not a new
+  lane; it is scope creep of that one. Hand it to that lane's owner or reject
+  it in the session.
+- A real new lane opens at least one dependency class the company does not
+  already hold — a new venue type, a new payer type, or a new rail. Zero new
+  dependency classes = not ideation output.
+- The portfolio rule this serves: many hands on one thesis is still ONE bet.
+  One wrong fact or one blocked keystone event zeroes the whole day.
 
 ## Lenses (work several, not one)
 
@@ -52,7 +75,10 @@ UTC pays twice.
 
 Each candidate is written as a lane_underwriting-style PREMISE line:
 expected income, cost to try, hit-rate x payoff x trial budget for
-lottery shapes, and the falsifier. Ideas enter the same scored pipeline
+lottery shapes, the payer as a ROLE (never "the community"), time-to-first-
+dollar, the falsifier, and the INDEPENDENCE LINE from the gate above. A
+premise missing any one of these fields is not ready to leave the session.
+Ideas enter the same scored pipeline
 as scan candidates and compete on numbers. An idea that cannot state its
 premise in numbers is not ready to leave the session.
 
