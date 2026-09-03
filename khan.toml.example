@@ -175,6 +175,16 @@ workspace = "workspace"
 heartbeat_secs = 300
 # Turn cap per CEO episode (backstop when it never calls finish_episode)
 episode_max_steps = 12
+# Wall-clock cap per CEO episode, in minutes. Steps alone do not bound one: on
+# 2026-09-03 an episode ran four hours inside the 12-step cap because every
+# step was a blocking delegate, and while an episode is open nothing drains —
+# 153 routine alerts queued and a blocked launch report went unread for three
+# hours. 0 disables.
+episode_max_minutes = 45
+# Blocking runs (delegate / delegate_parallel) allowed per episode before the
+# tool insists on dispatch. Blocking holds the only loop that drains alerts,
+# reports and founder messages; background work does not. 0 disables.
+max_blocking_delegates = 2
 # Turn cap for a QUIET heartbeat: nothing queued, no finished task. One look,
 # one action or close. Measured 2026-09-01: 151 heartbeats, 786 steps, 88 of
 # them dispatched nothing — five steps of spot-checks each, every five minutes.

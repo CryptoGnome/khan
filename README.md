@@ -310,6 +310,14 @@ token count is printed. **There is no spend cap — watch it.**
   report rated in between — after that only done or drop remain. A new
   objective is refused once `max_active_objectives` are open, whatever their
   dates say.
+- **An episode is bounded by the clock, not just by steps** — a CEO episode
+  ends at `episode_max_minutes` however few steps it has taken, blocking runs
+  (`delegate`) are rationed per episode by `max_blocking_delegates`, and routine
+  alerts drain *during* an episode rather than only when the next one is
+  composed. An episode is the only loop that reads alerts, reports and founder
+  messages: on 2026-09-03 thirteen serial delegates held one open for four
+  hours, 153 alerts queued behind it, and a launch blocked on a budget question
+  went unread for three of them.
 - **The board carries what the binary knows** — each profit lane's line shows
   the ledger's own tally (net per asset over every `pnl` row tagged with the
   objective, plus the closed trades on every ticker those rows name),

@@ -1506,10 +1506,14 @@ Drop superseded detail, resolved dead ends, and chatter.",
                         if now - last < 86_400 {
                             let why = if total == 0 {
                                 format!(
-                                    "REFUSED: #{o} is an OPS lane and {} owns no routines yet. An ops lane's work is scripts: \
+                                    "REFUSED: #{o} is an OPS lane, and {}. An ops lane's work is scripts: \
                                      add_routine the check or action and own_routine it to the lane's owner. Its one hands-on \
                                      dispatch per day is spent; the next opens at {}.",
-                                    if owner.is_empty() { "nobody".to_string() } else { owner.clone() },
+                                    if owner.is_empty() {
+                                        "it has no owner, so no routine can be owned by it — assign one first".to_string()
+                                    } else {
+                                        format!("{owner} owns no routines yet")
+                                    },
                                     chrono::DateTime::from_timestamp(last + 86_400, 0).map(|t| t.format("%H:%MZ").to_string()).unwrap_or_default()
                                 )
                             } else {
@@ -1669,6 +1673,17 @@ Drop superseded detail, resolved dead ends, and chatter.",
                 };
                 if orphaned > 0 {
                     out.push_str(&format!("; {orphaned} objective(s) they owned now route to you — reassign or run them yourself"));
+                }
+                // A routine whose owner no longer exists cannot dispatch its
+                // alert: it silently falls back to the CEO inbox. On
+                // 2026-09-03 x-mgr was fired and re-hired, and the alert that
+                // fired inside the gap had nowhere to go.
+                let (_, owned, _) = self.ctx.store.routine_status_for_owner(name);
+                if owned > 0 {
+                    out.push_str(&format!(
+                        "; WARNING: {owned} routine(s) still name {name} as owner — their alerts now fall back to you \
+                         until you own_routine them to someone who exists"
+                    ));
                 }
                 out
             }
@@ -2640,6 +2655,7 @@ keep the board honest, then close with finish_episode(note)."
             ));
 
             let episode_started = chrono::Utc::now().to_rfc3339();
+            let episode_clock = std::time::Instant::now();
             let mut event_kind = if heartbeat { "heartbeat" } else { "event" }.to_string();
             let mut steps: u64 = 0;
             let mut episode_note: Option<String> = None;
@@ -2651,6 +2667,9 @@ keep the board honest, then close with finish_episode(note)."
             // doing is budgeted, and past the cap the tool refuses with a
             // dispatch redirect.
             let mut exec_spent: u32 = 0;
+            // Blocking runs this episode. Each one holds the loop that drains
+            // alerts, reports and founder messages, so they are rationed.
+            let mut blocking_spent: u32 = 0;
             let mut obs_streak: u32 = 0;
             // Whether this episode put anyone to work; a quiet heartbeat that
             // did not backs the next heartbeat off.
@@ -2711,6 +2730,28 @@ keep the board honest, then close with finish_episode(note)."
             // only check sat outside the loop. The 300s throttle inside makes
             // this one real request per 5 minutes at most.
             self.check_fuel().await;
+            // An episode is the company's inbox: nothing else drains alerts,
+            // reports or founder messages. Four hours open on 2026-09-03 meant
+            // 153 queued alerts and a blocked launch nobody read. Out of time
+            // is out of turns — the cut-off block below still asks for a note.
+            let minutes = self.ctx.cfg.episode_max_minutes;
+            if minutes > 0 && episode_clock.elapsed() >= std::time::Duration::from_secs(minutes * 60) {
+                self.log_line("CEO", "episode-overtime", &format!("{minutes}m wall-clock cap reached at step {steps}"));
+                break 'turns;
+            }
+            // Alerts that fire mid-episode used to wait for the next one. They
+            // are the exception path the routines exist for; a long episode
+            // must not be where they queue.
+            for (name, detail) in self.ctx.store.drain_routine_alerts() {
+                work_arrived = true;
+                history.push(Message::text(
+                    "user",
+                    format!(
+                        "[Routine alert — '{name}' failed or printed ALERT while this episode was running]\n{}\n\nHandle it or route it to the owner.",
+                        detail.chars().take(1500).collect::<String>()
+                    ),
+                ));
+            }
             steps += 1;
             // A quiet heartbeat is a status sweep: one look, one action or
             // close. The full cap let it spot-check its way to the cut-off —
@@ -3228,7 +3269,25 @@ Keep the board honest: add new bets, declare blocked_by, mark done what is done.
                     } else {
                         self.log_line("CEO", &tname, &call.function.arguments);
                     }
-                    let out = if CEO_TOOL_NAMES.contains(&tname.as_str()) {
+                    let blocking = matches!(tname.as_str(), "delegate" | "delegate_parallel");
+                    if blocking {
+                        blocking_spent += 1;
+                    }
+                    let blocking_cap = self.ctx.cfg.max_blocking_delegates;
+                    let out = if blocking && blocking_cap > 0 && blocking_spent > blocking_cap {
+                        let why = format!(
+                            "REFUSED: this is blocking run #{blocking_spent} this episode and the budget is {blocking_cap}. \
+                             delegate holds this episode until the employee finishes, and this episode is the ONLY thing that \
+                             drains routine alerts, employee reports and founder messages — on 2026-09-03 thirteen serial \
+                             delegates held one episode for four hours while 153 alerts queued and a launch sat blocked, \
+                             unread, for three of them. dispatch({}, task, objective) sends the same work to the background and \
+                             returns now; their report opens a new episode when it lands. Use delegate only when you genuinely \
+                             cannot take the next step without the result.",
+                            s(&a, "agent")
+                        );
+                        self.log_line("CEO", "dispatch-refused", &why);
+                        why
+                    } else if CEO_TOOL_NAMES.contains(&tname.as_str()) {
                         tools::truncate(self.ceo_tool("CEO", &tname, &a).await)
                     } else if ceo_exec_budgeted(&tname) {
                         exec_spent += 1;

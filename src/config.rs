@@ -141,6 +141,17 @@ pub struct Config {
     /// Turn cap per CEO episode: the backstop when it never calls finish_episode.
     #[serde(default = "default_episode_max_steps")]
     pub episode_max_steps: u64,
+    /// Wall-clock cap per CEO episode, in minutes. Steps alone do not bound an
+    /// episode: on 2026-09-03 one ran four hours inside the 12-step cap because
+    /// every step was a blocking delegate. Nothing drains while an episode is
+    /// open, so a long one is a company with its inbox shut. 0 disables.
+    #[serde(default = "default_episode_max_minutes")]
+    pub episode_max_minutes: u64,
+    /// Blocking runs (delegate / delegate_parallel) the CEO may make in one
+    /// episode before the tool insists on dispatch. A blocking run holds the
+    /// only loop that drains alerts, reports and founder messages.
+    #[serde(default = "default_max_blocking_delegates")]
+    pub max_blocking_delegates: u32,
     /// Max agent-loop iterations for a delegated employee task.
     #[serde(default = "default_employee_max_iters")]
     pub employee_max_iters: u64,
@@ -213,6 +224,14 @@ fn default_heartbeat_secs() -> u64 {
 
 fn default_episode_max_steps() -> u64 {
     12
+}
+
+fn default_episode_max_minutes() -> u64 {
+    45
+}
+
+fn default_max_blocking_delegates() -> u32 {
+    2
 }
 #[allow(dead_code)]
 fn default_reflect_every() -> u64 {

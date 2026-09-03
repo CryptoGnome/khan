@@ -949,6 +949,11 @@ mod tests {
         assert_eq!(cfg.max_consecutive_checks, 2);
         assert_eq!(cfg.max_review_horizon_hours, 24);
         assert_eq!(cfg.max_recommits, 2);
+        // an episode is bounded by the clock as well as by steps, and blocking
+        // runs are rationed: both hold the loop that drains the company's inbox
+        assert_eq!(cfg.episode_max_minutes, 45);
+        assert_eq!(cfg.max_blocking_delegates, 2);
+        assert!(cfg.episode_max_minutes * 60 > cfg.heartbeat_secs, "an episode may not outlast many heartbeats");
         // review times parse at hour resolution, and a bare date is its midnight
         let t = crate::agent::parse_review("2026-09-03T15:00Z").unwrap();
         assert_eq!(t.format("%H:%M").to_string(), "15:00");
