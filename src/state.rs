@@ -174,8 +174,13 @@ pub fn prompt_usable(content: &str) -> bool {
 /// the objective ("obj 5", "obj#5", "objective 5"), per asset. The trend-launch
 /// lane ran eight launches at an identical loss between 2026-08-31 and
 /// 2026-09-02 and stayed open, because no board line ever showed the tally.
-/// Deliberate ceiling: rows carry the tag only when the agent wrote one, so
-/// an untagged trade is invisible here — the board says so per lane.
+/// Tagged rows alone misled within the hour of shipping: objective 5's
+/// exits were tagged and its dev buys were not, so the line read +0.43 SOL
+/// on a lane that had lost 0.22. So the tally also follows the lane's own
+/// tickers — every asset named in a tagged row — into `closed_positions`,
+/// where entry and exit sit on one row per trade. Deliberate ceiling: the
+/// link is the ticker name in the note, and a trade whose ticker never
+/// appears in a tagged row stays invisible.
 pub fn lane_ledger(workspace: &std::path::Path) -> std::collections::HashMap<i64, String> {
     use std::collections::{BTreeMap, HashMap};
     let mut out = HashMap::new();
@@ -189,23 +194,56 @@ pub fn lane_ledger(workspace: &std::path::Path) -> std::collections::HashMap<i64
     let Ok(rows) = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, f64>(2)?, r.get::<_, String>(3)?))) else {
         return out;
     };
-    let mut per: HashMap<i64, (usize, BTreeMap<String, f64>)> = HashMap::new();
+    // (ticker -> (closed trades, winners, net SOL)) from the trade table.
+    let mut closed: HashMap<String, (usize, usize, f64)> = HashMap::new();
+    if let Ok(mut st) = c.prepare("SELECT COALESCE(asset,''), COALESCE(net_sol,0) FROM closed_positions") {
+        if let Ok(rs) = st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, f64>(1)?))) {
+            for (asset, net) in rs.flatten() {
+                let e = closed.entry(asset.to_uppercase()).or_default();
+                e.0 += 1;
+                e.1 += usize::from(net > 0.0);
+                e.2 += net;
+            }
+        }
+    }
+    let mut per: HashMap<i64, (usize, BTreeMap<String, f64>, std::collections::BTreeSet<String>)> = HashMap::new();
     for (category, asset, amount, note) in rows.flatten() {
         let Some(id) = tagged_objective(&note) else { continue };
+        let e = per.entry(id).or_default();
+        // The lane's tickers: any word in a tagged note that is a traded asset.
+        for w in note.split(|ch: char| !ch.is_ascii_alphanumeric()) {
+            let up = w.to_uppercase();
+            if up.len() >= 3 && closed.contains_key(&up) {
+                e.2.insert(up);
+            }
+        }
         if category == "bookkeeping" || amount == 0.0 || asset.is_empty() {
             continue;
         }
-        let e = per.entry(id).or_default();
         e.0 += 1;
         *e.1.entry(asset).or_insert(0.0) += amount;
     }
-    for (id, (n, assets)) in per {
+    for (id, (n, assets, tickers)) in per {
         let nets = assets
             .iter()
             .map(|(a, v)| format!("{v:+.4} {a}"))
             .collect::<Vec<_>>()
             .join(", ");
-        out.insert(id, format!(" — LEDGER (pnl rows tagged #{id}): {n} rows, net {nets}"));
+        let mut line = format!(" — LEDGER (pnl rows tagged #{id}): {n} rows, net {nets}");
+        if !tickers.is_empty() {
+            let (mut t, mut won, mut net) = (0, 0, 0.0);
+            for k in &tickers {
+                let (a, b, c) = closed[k];
+                t += a;
+                won += b;
+                net += c;
+            }
+            line.push_str(&format!(
+                "; closed trades on its tickers ({}): {t} closed, {won} won, net {net:+.4} SOL",
+                tickers.iter().cloned().collect::<Vec<_>>().join(", ")
+            ));
+        }
+        out.insert(id, line);
     }
     out
 }

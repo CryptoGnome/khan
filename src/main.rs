@@ -762,15 +762,25 @@ mod tests {
             w.execute_batch(
                 "CREATE TABLE pnl (id INTEGER PRIMARY KEY, ts TEXT, category TEXT, asset TEXT, amount REAL, usd_value REAL, note TEXT);
                  INSERT INTO pnl(category, asset, amount, note) VALUES
-                   ('expense','SOL',-0.06,'PINKPROOF launch dev buy (obj #5)'),
+                   ('expense','SOL',-0.06,'PINKPROOF launch dev buy'),
                    ('sell','SOL',0.048,'PINKPROOF kill-exit (obj #5)'),
+                   ('sell','SOL',0.048,'CLAW2 kill-exit (obj #5)'),
                    ('creator-fee','ETH',0.0006,'obj39 LICK fee claim'),
-                   ('bookkeeping','SOL',0,'obj 5 note only');",
+                   ('bookkeeping','SOL',0,'obj 5 note only');
+                 CREATE TABLE closed_positions (mint TEXT PRIMARY KEY, asset TEXT, entry_sol REAL, exit_sol REAL, net_sol REAL, txid TEXT, closed_ts REAL);
+                 INSERT INTO closed_positions VALUES
+                   ('m1','PINKPROOF',0.06,0.048,-0.012,'t',0),
+                   ('m2','CLAW2',0.06,0.048,-0.012,'t',0),
+                   ('m3','KHAN',0.05,1.13,1.08,'t',0);",
             )
             .unwrap();
         }
         let tally = lane_ledger(&dir);
-        assert!(tally[&5].contains("2 rows") && tally[&5].contains("-0.0120 SOL"), "{}", tally[&5]);
+        // the untagged dev buy is invisible to the row count, but the trade
+        // table on the lane's own tickers carries the real result
+        assert!(tally[&5].contains("2 rows") && tally[&5].contains("+0.0960 SOL"), "{}", tally[&5]);
+        assert!(tally[&5].contains("(CLAW2, PINKPROOF): 2 closed, 0 won, net -0.0240 SOL"), "{}", tally[&5]);
+        assert!(!tally[&5].contains("KHAN"), "an asset no tagged row names stays out");
         assert!(tally[&39].contains("+0.0006 ETH"), "{}", tally[&39]);
         assert!(lane_ledger(std::path::Path::new("/nonexistent")).is_empty());
 
