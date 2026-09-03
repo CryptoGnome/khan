@@ -311,6 +311,32 @@ mod tests {
     }
 
     #[test]
+    fn a_spill_too_large_to_read_back_is_not_kept_and_the_directory_stays_bounded() {
+        use crate::tools::{purge_spill, truncate_spill, SPILL_MAX_FILE, SPILL_MAX_TOTAL};
+        let dir = std::env::temp_dir().join(format!("khan-spill-cap-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        // a dump past the file cap is cut and not written anywhere
+        let huge = "x".repeat(SPILL_MAX_FILE + 1);
+        let out = truncate_spill(&dir, "shell", huge);
+        assert!(out.contains("too large to keep"), "{}", &out[..120]);
+        assert!(std::fs::read_dir(dir.join(".spill")).map(|d| d.count()).unwrap_or(0) == 0);
+        // over the total, the largest files go first
+        let spill = dir.join(".spill");
+        std::fs::create_dir_all(&spill).unwrap();
+        std::fs::write(spill.join("big.txt"), vec![0u8; (SPILL_MAX_TOTAL / 2 + 1024) as usize]).unwrap();
+        std::fs::write(spill.join("mid.txt"), vec![0u8; (SPILL_MAX_TOTAL / 2) as usize]).unwrap();
+        std::fs::write(spill.join("small.txt"), b"keep me").unwrap();
+        purge_spill(&spill, std::time::Duration::from_secs(3600));
+        assert!(!spill.join("big.txt").exists(), "the largest goes first");
+        assert!(spill.join("mid.txt").exists());
+        assert!(spill.join("small.txt").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+        // the disk floor is a real number and df is readable where it exists
+        assert!(crate::agent::DISK_LOW_BYTES >= 256 * 1024 * 1024);
+        let _ = crate::agent::disk_available(std::path::Path::new("."));
+    }
+
+    #[test]
     fn oversized_tool_output_spills_to_workspace() {
         use crate::tools::{truncate_spill, MAX_RESULT};
         let dir = std::env::temp_dir().join(format!("khan-spill-test-{}", std::process::id()));

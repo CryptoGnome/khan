@@ -202,6 +202,13 @@ pub fn truncate(mut s: String) -> String {
 /// How long a spill file stays useful: an agent reads the tail back within the
 /// episode that produced it, so a week is generous.
 const SPILL_MAX_AGE: std::time::Duration = std::time::Duration::from_secs(7 * 24 * 3600);
+/// Largest single output worth keeping. An agent that cats a database gets a
+/// 911MB spill nobody can read back (2026-09-03: one such file was a fifth
+/// of the volume, and the volume hit 100%). Past this the output is cut and
+/// the cut is final.
+pub(crate) const SPILL_MAX_FILE: usize = 16 * 1024 * 1024;
+/// Total the spill directory may hold; the biggest files go first.
+pub(crate) const SPILL_MAX_TOTAL: u64 = 256 * 1024 * 1024;
 
 /// Delete spill files older than `max_age`. Best-effort: an unreadable entry
 /// or failed remove is skipped, never an error — cleanup must not break the
@@ -219,6 +226,24 @@ pub(crate) fn purge_spill(dir: &std::path::Path, max_age: std::time::Duration) {
             let _ = std::fs::remove_file(e.path());
         }
     }
+    // Age alone does not bound the directory — one afternoon of database
+    // dumps does. Over the total, the largest go first: they are the least
+    // likely to be read back and the most likely to be the problem.
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    let mut files: Vec<(u64, std::path::PathBuf)> = entries
+        .flatten()
+        .filter_map(|e| e.metadata().ok().map(|m| (m.len(), e.path())))
+        .collect();
+    let mut total: u64 = files.iter().map(|(n, _)| n).sum();
+    files.sort_by(|a, b| b.0.cmp(&a.0));
+    for (n, p) in files {
+        if total <= SPILL_MAX_TOTAL {
+            break;
+        }
+        if std::fs::remove_file(&p).is_ok() {
+            total -= n;
+        }
+    }
 }
 
 /// Over-limit tool output is relocated, not dropped: the full text lands in
@@ -233,9 +258,10 @@ pub fn truncate_spill(workspace: &std::path::Path, tool: &str, s: String) -> Str
     }
     purge_spill(&workspace.join(".spill"), SPILL_MAX_AGE);
     let file = format!("{tool}-{}.txt", chrono::Utc::now().timestamp_micros());
-    let saved = std::fs::create_dir_all(workspace.join(".spill"))
-        .and_then(|()| std::fs::write(workspace.join(".spill").join(&file), &s))
-        .is_ok();
+    let saved = s.len() <= SPILL_MAX_FILE
+        && std::fs::create_dir_all(workspace.join(".spill"))
+            .and_then(|()| std::fs::write(workspace.join(".spill").join(&file), &s))
+            .is_ok();
     // Which slice stays visible depends on the tool. Shell-like output (shell,
     // sql, custom tool scripts) buries its error under the preamble, so the
     // TAIL is what matters. Document-like tools lead with what matters — and
@@ -250,7 +276,7 @@ pub fn truncate_spill(workspace: &std::path::Path, tool: &str, s: String) -> Str
         let marker = if saved {
             format!("[truncated — showing the end; full output saved to .spill/{file}, read_file it if you need the start]\n...")
         } else {
-            "[truncated — showing the end]\n...".to_string()
+            format!("[truncated — showing the end; {} MB of output is too large to keep, narrow the command]\n...", s.len() / (1024 * 1024))
         };
         format!("{marker}{}", &s[start..])
     } else {

@@ -344,6 +344,10 @@ token count is printed. **There is no spend cap — watch it.**
   in the store is dropped to a permissive one rather than sent. The tool list
   rides every request, so one bad schema is refused by strict sellers and fails
   the whole fleet over to dearer routes.
+- **The volume is a tank too** — free space is checked on the fuel poll and a
+  `disk-low` alert wakes the CEO below 512 MB, naming what to cut. Oversized
+  tool output past 16 MB is cut rather than spilled (nobody reads a 900 MB
+  file back), and the spill directory is bounded at 256 MB, largest first.
 - **Model failover** — if an agent's model keeps failing (free-tier 429s/outages),
   the call is answered by the next available free model automatically and the
   swap is logged. A refusal that names a ceiling that would fit

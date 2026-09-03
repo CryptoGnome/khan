@@ -192,6 +192,19 @@ pub(crate) fn overdue_objectives_line(store: &crate::state::Store) -> String {
 /// messages). Generous for a brief, and small enough that the gateway reserves
 /// against a real number instead of the model's whole 64k ceiling.
 pub(crate) const SUMMARY_MAX_TOKENS: u32 = 8192;
+/// Free space on the data volume below which the CEO is alerted.
+pub(crate) const DISK_LOW_BYTES: u64 = 512 * 1024 * 1024;
+
+/// Bytes available on the filesystem holding `path`, via `df` — the binary
+/// has no libc binding and this runs on Linux in production; anywhere `df`
+/// is missing the check quietly does nothing.
+pub(crate) fn disk_available(path: &std::path::Path) -> Option<u64> {
+    let out = std::process::Command::new("df").arg("-B1").arg("--output=avail").arg(path).output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&out.stdout).lines().nth(1)?.trim().parse().ok()
+}
 /// The one wider attempt a compaction gets when the first spent its whole
 /// budget on reasoning. Still far below the model's 64k ceiling, so the
 /// gateway keeps reserving against a real number.
@@ -1827,7 +1840,44 @@ detail, and anything already acted on and closed.",
     /// first because large per-call reserves trip the balance check soonest.
     /// Polls GET /account on the first provider (bu0y shape: availableMicros,
     /// micro-dollars); providers without that endpoint are silently skipped.
+    /// The volume is the other tank. A full disk fails every SQLite write at
+    /// once, and nothing measured it: on 2026-09-03 /data reached 100% under a
+    /// 1.2GB evidence dump and a 911MB spill, with 5.8MB to spare. Rides the
+    /// fuel poll; alerts once an hour while it stays low.
+    fn check_disk(&self) {
+        let Some(avail) = disk_available(&self.ctx.workspace) else { return };
+        let floor = DISK_LOW_BYTES;
+        if avail >= floor {
+            return;
+        }
+        let key = "disk_low_alerted_at";
+        let recently = self
+            .ctx
+            .store
+            .kv_get(key)
+            .and_then(|v| v.parse::<i64>().ok())
+            .is_some_and(|t| chrono::Utc::now().timestamp() - t < 3600);
+        if recently {
+            return;
+        }
+        self.ctx.store.kv_set(key, &chrono::Utc::now().timestamp().to_string());
+        let mb = avail / (1024 * 1024);
+        self.log_line("core", "disk-low", &format!("{mb} MB free on the volume"));
+        self.ctx.store.add_routine_alert(
+            "disk-low",
+            &format!(
+                "DISK LOW: {mb} MB free on the data volume. Below zero every database write in the company fails at \
+                 once — bookkeeping, memories, the board, this log. Free space NOW, before anything else: \
+                 find the largest files under the workspace (du -sh, find -size +50M), and delete raw dumps, \
+                 .spill files, scan evidence you have already drawn a verdict from, node_modules copies and \
+                 .bak files. Compress what must be kept. A verdict is the deliverable; the gigabyte of logs \
+                 it was drawn from is not."
+            ),
+        );
+    }
+
     async fn check_fuel(&self) {
+        self.check_disk();
         let threshold = self.ctx.cfg.fuel_low_micros;
         if threshold == 0 {
             return;
