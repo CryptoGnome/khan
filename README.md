@@ -299,18 +299,40 @@ token count is printed. **There is no spend cap — watch it.**
   objective's 24h build/check mix and flags ALL CHECKS and explore objectives
   with no build as CONVERT OR KILL. `scripts/throughput_audit.py` measures all
   of it.
-- **Lanes answer for their own dates** — every objective carries a review date
-  and the criterion that would kill it. Every board line carries its
-  date, and a lane past it reads REVIEW DUE where allocation happens. Ones past
-  their date (or that never got one) also stand in the CEO brief as a decision
-  owed this episode: close, drop, or
-  recommit with a new date. A new objective is refused once `max_active_objectives`
-  are open, whatever their dates say — the refusal names the lanes nearest
-  review so the choice is which one to close. A review date may not be set
-  further than `max_review_horizon_days` ahead, and a lane that comes due and
-  is pushed anyway must say what changed, and an objective that has taken
-  `max_consecutive_checks` check-class dispatches in a row must build or close
-  before it can check again — re-auditing is what a lane does instead of finishing.
+- **Lanes answer for their own times** — every objective carries a review
+  time at hour resolution (`2026-09-03T15:00Z`) and the criterion that would
+  kill it. Every board line carries its time; a lane past it reads REVIEW DUE,
+  and one set further than `max_review_horizon_hours` ahead reads BEYOND THE
+  HORIZON — a shelf, not a commitment. Both stand in the CEO brief as a
+  decision owed this episode: close, drop, or recommit. A push made while the
+  old time is landing (inside its last six hours) must say what changed, and a
+  lane may be recommitted only `max_recommits` times without a build-class
+  report rated in between — after that only done or drop remain. A new
+  objective is refused once `max_active_objectives` are open, whatever their
+  dates say.
+- **The board carries what the binary knows** — each profit lane's line shows
+  the ledger's own tally (net per asset over every `pnl` row tagged with the
+  objective), computed from workspace.db rather than written by the CEO. The
+  trend-launch lane ran eight launches at an identical loss and stayed open
+  because no line ever showed the number.
+- **Ops lanes are run by their routines** — an objective of kind `ops`
+  (treasury checks, listings, inbox, X) shows its owner's routine status on the
+  board (`7/7 ok`, or which are failing), and a dispatch on it is refused while
+  every routine reports ok, except one per 24h as the human look. On boot every
+  shell routine fires within the minute, so restart triage is the scripts' job
+  rather than twenty minutes of the CEO's.
+- **A rating of 4 or 5 needs an artifact** — the rated agent's report must name
+  something that exists: a file under the workspace, a transaction hash, a
+  signature. 477 of 594 ratings in one week were 5s, NOOPs included, so ratings
+  drove nothing.
+- **The skill index is what is in use** — every call carried all 243 skills
+  (about 5k tokens, 11,800 times a day) while 60 had been loaded that week.
+  The index now lists skills loaded in the last 14 days or created in the
+  last 3; `use_skill` with a partial name finds the rest.
+- **A prompt is text, never a pointer** — `update_prompt` refuses a bare URL or
+  anything under 400 characters, and a stored version that fails that check is
+  skipped at read so the last real prompt stays live. The CEO ran five days on
+  its mandate alone after saving a URL as version 11 of its own prompt.
 - **Ideas answer for their own dates** — every `revenue_ideas` row carries a
   review date, and the CEO brief stands a list of the rows whose date has
   passed while they are still premise, candidate, screening, watch or

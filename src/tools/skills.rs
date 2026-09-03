@@ -93,19 +93,42 @@ pub fn load(ctx: &ToolCtx, agent: &str, name: &str) -> String {
             ctx.store.log_skill_load(agent, name);
             format!("# Skill: {name}\n{desc}\n\n{content}")
         }
-        None => format!("no such skill '{name}' — check the skill index"),
+        None => {
+            // The index only lists what is in use; a partial name finds the rest.
+            let hits = ctx.store.search_skills(name);
+            if hits.is_empty() {
+                format!("no such skill '{name}' — nothing in the library matches it either")
+            } else {
+                let list: Vec<String> = hits.iter().take(15).map(|(n, d)| format!("- {n}: {d}")).collect();
+                format!("no skill named exactly '{name}'; {} match it — use_skill with one of these names:\n{}", hits.len(), list.join("\n"))
+            }
+        }
     }
 }
 
-/// Compact index injected into agent context each turn (None when no skills exist).
+/// Skills loaded inside this window stay in the index.
+const INDEX_LOADED_DAYS: i64 = 14;
+/// Skills newer than this stay in the index whether or not anyone loaded them.
+const INDEX_CREATED_DAYS: i64 = 3;
+
+/// Compact index injected into agent context each turn (None when no skills
+/// exist): the skills in use, not the whole library. The library is reachable
+/// by name or partial name through use_skill.
 pub fn index(ctx: &ToolCtx) -> Option<String> {
-    let skills = ctx.store.list_skills();
-    if skills.is_empty() {
+    let all = ctx.store.list_skills();
+    if all.is_empty() {
         return None;
     }
+    let skills = ctx.store.recent_skills(INDEX_LOADED_DAYS, INDEX_CREATED_DAYS);
     let list: Vec<String> = skills.iter().map(|(n, d)| format!("- {n}: {d}")).collect();
+    let rest = all.len().saturating_sub(skills.len());
+    let tail = if rest > 0 {
+        format!("\n...and {rest} more not loaded in {INDEX_LOADED_DAYS} days — use_skill(partial_name) lists the ones matching a word.")
+    } else {
+        String::new()
+    };
     Some(format!(
-        "[Skill library — load one with use_skill(name) before doing work it covers]\n{}",
+        "[Skill library — load one with use_skill(name) before doing work it covers]\n{}{tail}",
         list.join("\n")
     ))
 }

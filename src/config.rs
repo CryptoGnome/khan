@@ -91,13 +91,20 @@ pub struct Config {
     /// and re-auditing is what a lane does instead of finishing. 0 disables.
     #[serde(default = "default_max_consecutive_checks")]
     pub max_consecutive_checks: usize,
-    /// How far ahead a review date may be set. A bet that cannot show anything
-    /// inside this window is the wrong size for this company, and a date far
-    /// enough out is indistinguishable from no date: on 2026-09-02 six of ten
-    /// lanes landed on the same day a week out within minutes of each other.
-    /// 0 disables.
-    #[serde(default = "default_max_review_horizon_days")]
-    pub max_review_horizon_days: i64,
+    /// How far ahead a review time may be set, in hours. A bet that cannot
+    /// show anything inside this window is the wrong size for this company,
+    /// and a date far enough out is indistinguishable from no date: on
+    /// 2026-09-02 six of ten lanes landed on the same day a week out within
+    /// minutes of each other. Was seven days; a company that dispatches every
+    /// few minutes answers for its lanes in hours. 0 disables.
+    #[serde(default = "default_max_review_horizon_hours")]
+    pub max_review_horizon_hours: i64,
+    /// How many times a lane may push its review time later without a
+    /// build-class report rated in between. A date is a prompt to decide, not
+    /// a mechanism that decides: a lane can otherwise be recommitted forever
+    /// on a fresh note. Past this, only done or drop remain. 0 disables.
+    #[serde(default = "default_max_recommits")]
+    pub max_recommits: u32,
     /// Price ceilings per "provider/model", sent as the gateway's
     /// `max_input_per_1m` / `max_output_per_1m`. A fill above either is not
     /// taken: the gateway answers 503 (below_floor) and the attempt loop
@@ -168,8 +175,12 @@ pub struct ModelCap {
     pub max_output_per_1m: Option<u64>,
 }
 
-fn default_max_review_horizon_days() -> i64 {
-    7
+fn default_max_review_horizon_hours() -> i64 {
+    24
+}
+
+fn default_max_recommits() -> u32 {
+    2
 }
 
 fn default_max_active_objectives() -> usize {

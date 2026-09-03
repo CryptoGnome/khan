@@ -39,9 +39,9 @@ fn ceo_schemas() -> Vec<Value> {
             "note": {"type": "string", "description": "One-line status note shown on the board"},
             "blocked_by": {"type": "string", "description": "Comma-separated objective ids this waits on (e.g. '3' or '2,3'); empty string clears. Work that needs an account or artifact another objective produces is BLOCKED, not hard."},
             "owner": {"type": "string", "description": "Manager who OWNS this objective; empty string clears. Workers' reports on an owned objective route to the owner, who reviews, rates and drives follow-up work — you get their summary and escalations only. Give every big objective an owner so your attention stays on allocation."},
-            "review_date": {"type": "string", "description": "YYYY-MM-DD: the date you will judge this bet and decide to continue or close it. Every objective needs one — a lane with no review date is one nobody ever closes."},
+            "review_date": {"type": "string", "description": "YYYY-MM-DDTHH:MMZ (hour resolution, at most max_review_horizon_hours ahead): the time you will judge this bet and decide to continue or close it. Every objective needs one — a lane with no review date is one nobody ever closes."},
             "kill_criterion": {"type": "string", "description": "The condition that ENDS this bet, written as a number where possible ('under $50 of fees by the review date', 'still not listed anywhere'). Written when the bet opens, while it is still cheap to be honest."},
-            "kind": {"type": "string", "enum": ["profit", "growth", "infra", "explore"], "description": "Portfolio category — every objective needs one, and the weekly portfolio review judges each by its own yardstick. profit: exists to earn (launches, fees, trading) — judged revenue vs cost. growth: buys audience (social presence, listings, content) — judged cost per attention and trend, NEVER on revenue. infra: keeps the company running (automation, bookkeeping, site plumbing) — judged reliability and cost trend. explore: buys knowledge (premise checks, probes) — judged learning per capped dollar."}}),
+            "kind": {"type": "string", "enum": ["profit", "growth", "infra", "explore", "ops"], "description": "Portfolio category — every objective needs one, and the weekly portfolio review judges each by its own yardstick. profit: exists to earn (launches, fees, trading) — judged revenue vs cost. growth: buys audience (social presence, listings, content) — judged cost per attention and trend, NEVER on revenue. infra: keeps the company running (automation, bookkeeping, site plumbing) — judged reliability and cost trend. explore: buys knowledge (premise checks, probes) — judged learning per capped dollar. ops: a standing operation the routines run (treasury checks, listings, inbox, X) — its work is scripts at zero model cost; a dispatch on it is refused while every routine its owner holds reports ok, except one per day."}}),
             json!(["action"])),
         tool("team_status", "List background tasks started with dispatch: who is still working and on what.", json!({}), json!([])),
         tool("add_routine", "Schedule a shell command the binary runs itself, forever, at zero model cost. Silent when it passes; if it exits nonzero, times out, or prints ALERT, the alert is DISPATCHED to the routine's owner (set one — an alert is the domain owner's work, not yours); with no owner it lands in your inbox. Any check you have performed the same way roughly three times belongs here — verification scripts, health checks, reconciliation. Same name = replace.", json!({
@@ -166,17 +166,22 @@ pub(crate) fn overdue_ideas_line(workspace: &std::path::Path) -> String {
 /// brief. Same shape as the ideas line, and for the same reason: the ideas
 /// version cleared five stale rows within an hour of shipping, because a
 /// decision asked for by name gets made and one left implicit does not.
-pub(crate) fn overdue_objectives_line(store: &crate::state::Store) -> String {
-    let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
-    let rows = store.overdue_objectives(&today);
+pub(crate) fn overdue_objectives_line(store: &crate::state::Store, horizon_hours: i64) -> String {
+    let rows = store.overdue_objectives(&review_now(), &horizon_limit(horizon_hours));
     if rows.is_empty() {
         return String::new();
     }
     let shown = rows
         .iter()
         .take(8)
-        .map(|(id, title, due, kill)| {
-            let when = if due.is_empty() { "NO REVIEW DATE EVER SET".to_string() } else { format!("review date {due}") };
+        .map(|(id, title, due, kill, shelved)| {
+            let when = if due.is_empty() {
+                "NO REVIEW DATE EVER SET".to_string()
+            } else if *shelved {
+                format!("review {due} is beyond the {horizon_hours}h horizon: a shelf, not a commitment")
+            } else {
+                format!("review time {due} has passed")
+            };
             let k = if kill.is_empty() { String::new() } else { format!(", kills if: {kill}") };
             format!("\n  - #{id} {title} ({when}{k})")
         })
@@ -186,6 +191,62 @@ pub(crate) fn overdue_objectives_line(store: &crate::state::Store) -> String {
         "\n\nOBJECTIVES PAST THEIR OWN REVIEW DATE ({}):{shown}{more}\nEach is a decision you owe THIS episode, not a status line: close it with objectives(done) or objectives(drop), or recommit with objectives(update, review_date, kill_criterion) naming the date you will judge it and the number that would kill it. An objective nobody will close is not a bet, it is furniture — and every one you keep open divides the company's attention again.",
         rows.len()
     )
+}
+
+/// Now, in the form review times are compared in: `YYYY-MM-DDTHH:MMZ`. A
+/// date-only review sorts as its own midnight against this.
+pub(crate) fn review_now() -> String {
+    chrono::Utc::now().format("%Y-%m-%dT%H:%MZ").to_string()
+}
+
+/// The latest review time the horizon allows, in the same form; empty when
+/// the horizon is disabled.
+pub(crate) fn horizon_limit(hours: i64) -> String {
+    if hours <= 0 {
+        return String::new();
+    }
+    (chrono::Utc::now() + chrono::Duration::hours(hours)).format("%Y-%m-%dT%H:%MZ").to_string()
+}
+
+/// A review time as written by the CEO: `YYYY-MM-DDTHH:MMZ`, with seconds, a
+/// space instead of the T, or a bare date (its midnight).
+pub(crate) fn parse_review(s: &str) -> Option<chrono::DateTime<chrono::Utc>> {
+    let s = s.trim();
+    for f in ["%Y-%m-%dT%H:%MZ", "%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%d %H:%M", "%Y-%m-%dT%H:%M"] {
+        if let Ok(t) = chrono::NaiveDateTime::parse_from_str(s, f) {
+            return Some(t.and_utc());
+        }
+    }
+    chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok().map(|d| d.and_hms_opt(0, 0, 0).unwrap().and_utc())
+}
+
+/// Whether a report names something that exists: a file under the workspace,
+/// a transaction hash, a Solana signature. A rating of 4 or 5 says the work
+/// is real, and 477 of 594 ratings in the week to 2026-09-03 were 5s — NOOP
+/// reports included — so ratings carried no signal and prompt evolution had
+/// nothing to work from. Deliberate ceiling: token-level, it checks that an
+/// artifact is named and exists, not that it is the right one.
+pub(crate) fn names_artifact(report: &str, workspace: &std::path::Path) -> bool {
+    let is_b58 = |t: &str| t.len() >= 80 && t.chars().all(|c| c.is_ascii_alphanumeric() && !"0OIl".contains(c));
+    let is_hex_hash = |t: &str| t.len() == 66 && t.starts_with("0x") && t[2..].chars().all(|c| c.is_ascii_hexdigit());
+    report
+        .split(|c: char| c.is_whitespace() || "()[]<>`'\",;".contains(c))
+        .map(|t| t.trim_end_matches(|c: char| ".:!?".contains(c)))
+        .filter(|t| t.len() >= 6)
+        .any(|t| {
+            if is_hex_hash(t) || is_b58(t) {
+                return true;
+            }
+            if !t.contains('/') {
+                return false;
+            }
+            let p = std::path::Path::new(t);
+            if p.is_absolute() {
+                p.starts_with(workspace) && p.exists()
+            } else {
+                workspace.join(p).exists()
+            }
+        })
 }
 
 /// Output ceiling for the summarisation calls (history compaction, dropped
@@ -1429,6 +1490,43 @@ Drop superseded detail, resolved dead ends, and chatter.",
                     self.log_line(caller, "dispatch-refused", &why);
                     return why;
                 }
+                // An ops lane is run by its routines. On 2026-09-02 the
+                // treasury, listings, inbox and X lanes took 265 of 700
+                // dispatches while their fifty scripts reported ok all day:
+                // the cfo re-ran the ledger match by hand 495 times. A
+                // dispatch here is the exception path — something failed —
+                // or the one daily look.
+                if let Some(o) = objective.filter(|o| self.ctx.store.objective_kind(*o) == "ops") {
+                    let owner = self.ctx.store.objective_owner(o).unwrap_or_default();
+                    let (ok, total, failing) = self.ctx.store.routine_status_for_owner(&owner);
+                    let key = format!("ops_dispatch:{o}");
+                    let now = chrono::Utc::now().timestamp();
+                    let last: i64 = self.ctx.store.kv_get(&key).and_then(|v| v.parse().ok()).unwrap_or(0);
+                    if failing.is_empty() {
+                        if now - last < 86_400 {
+                            let why = if total == 0 {
+                                format!(
+                                    "REFUSED: #{o} is an OPS lane and {} owns no routines yet. An ops lane's work is scripts: \
+                                     add_routine the check or action and own_routine it to the lane's owner. Its one hands-on \
+                                     dispatch per day is spent; the next opens at {}.",
+                                    if owner.is_empty() { "nobody".to_string() } else { owner.clone() },
+                                    chrono::DateTime::from_timestamp(last + 86_400, 0).map(|t| t.format("%H:%MZ").to_string()).unwrap_or_default()
+                                )
+                            } else {
+                                format!(
+                                    "REFUSED: #{o} is an OPS lane run by its routines — {ok}/{total} report ok at their last run, so there is \
+                                     nothing for a model to do here. A dispatch on an ops lane is admitted when a routine is failing (it \
+                                     names the failure) or once per 24h as the human look, and today's look is spent (next at {}). If \
+                                     this is new work no routine covers, the routine IS the work: add_routine it.",
+                                    chrono::DateTime::from_timestamp(last + 86_400, 0).map(|t| t.format("%H:%MZ").to_string()).unwrap_or_default()
+                                )
+                            };
+                            self.log_line(caller, "dispatch-refused", &why);
+                            return why;
+                        }
+                        self.ctx.store.kv_set(&key, &now.to_string());
+                    }
+                }
                 if let Some(o) = objective {
                     self.ctx.store.touch_objective(o);
                 }
@@ -1525,7 +1623,24 @@ Drop superseded detail, resolved dead ends, and chatter.",
                 if !(1..=5).contains(&score) {
                     return "ERROR: score must be 1-5".into();
                 }
+                if score >= 4 {
+                    let report = self.ctx.store.last_report(agent).unwrap_or_default();
+                    if !names_artifact(&report, &self.ctx.workspace) {
+                        return format!(
+                            "REFUSED: a {score} says the work exists, and {agent}'s report names no artifact — no file that exists \
+                             under the workspace, no transaction hash or signature. Work with nothing to show is a 3 at most \
+                             (a NOOP that was correct is a 3: right, and nothing delivered). Rate it 1-3, or have them deliver \
+                             the artifact and re-report."
+                        );
+                    }
+                }
                 self.ctx.store.add_rating(agent, score, s(a, "note"));
+                // A rated build on a lane is what the recommit budget resets on.
+                if let Some((Some(o), class)) = self.ctx.store.latest_dispatch(agent) {
+                    if class == "build" {
+                        self.ctx.store.kv_set(&format!("recommits:{o}"), "0");
+                    }
+                }
                 format!("rated {agent}: {score}/5")
             }
             "fire" => {
@@ -1613,8 +1728,7 @@ Drop superseded detail, resolved dead ends, and chatter.",
                         let cap = self.ctx.cfg.max_active_objectives;
                         let open = self.ctx.store.active_objective_count();
                         if cap > 0 && open >= cap {
-                            let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
-                            let overdue = self.ctx.store.overdue_objectives(&today);
+                            let overdue = self.ctx.store.overdue_objectives(&review_now(), &horizon_limit(self.ctx.cfg.max_review_horizon_hours));
                             let soonest = self
                                 .ctx
                                 .store
@@ -1652,14 +1766,14 @@ Drop superseded detail, resolved dead ends, and chatter.",
                         }
                         if let Some(k) = a["kind"].as_str() {
                             if !self.ctx.store.set_objective_kind(id, k) {
-                                return format!("ERROR: kind must be profit, growth, infra or explore (got '{k}')");
+                                return format!("ERROR: kind must be profit, growth, infra, explore or ops (got '{k}')");
                             }
                         }
                         self.ctx.store.set_objective_review(id, s(a, "review_date"), s(a, "kill_criterion"));
                         if s(a, "review_date").is_empty() {
                             return format!(
                                 "objective #{id} added at rank {rank}, but with NO REVIEW DATE — it will stand in your brief every episode until it has one. \
-                                 Set it now: objectives(update, id={id}, review_date=YYYY-MM-DD, kill_criterion=...). Tag dispatches with objective:{id}."
+                                 Set it now: objectives(update, id={id}, review_date=YYYY-MM-DDTHH:MMZ, kill_criterion=...). Tag dispatches with objective:{id}."
                             );
                         }
                         format!("objective #{id} added at rank {rank}. Tag dispatches with objective:{id} so the board tracks its progress; if it needs more than one dispatch, get a plan onto it first.")
@@ -1684,8 +1798,8 @@ Drop superseded detail, resolved dead ends, and chatter.",
                             }
                         }
                         if let Some(k) = a["kind"].as_str() {
-                            if !["profit", "growth", "infra", "explore"].contains(&k) {
-                                return format!("ERROR: kind must be profit, growth, infra or explore (got '{k}')");
+                            if !["profit", "growth", "infra", "explore", "ops"].contains(&k) {
+                                return format!("ERROR: kind must be profit, growth, infra, explore or ops (got '{k}')");
                             }
                             ok |= self.ctx.store.set_objective_kind(id, k);
                         }
@@ -2093,28 +2207,52 @@ detail, and anything already acted on and closed.",
     /// 2026-09-02 and pushed to 09-09 without anything having changed. A push
     /// is allowed, but a bounded one, and a second consecutive push has to say
     /// what changed.
-    fn recommit_fault(&self, id: i64, new_date: &str, note: &str) -> Option<String> {
-        let today = chrono::Utc::now().date_naive();
-        let want = chrono::NaiveDate::parse_from_str(new_date, "%Y-%m-%d").ok()?;
-        let days = (want - today).num_days();
-        let max = self.ctx.cfg.max_review_horizon_days;
-        if max > 0 && days > max {
+    fn recommit_fault(&self, id: i64, new_time: &str, note: &str) -> Option<String> {
+        let now = chrono::Utc::now();
+        let Some(want) = parse_review(new_time) else {
             return Some(format!(
-                "REFUSED: a review date {days} days out is not a commitment, it is a shelf. Set #{id} at most {max} days ahead \
-                 ({}), or if the bet genuinely needs longer than that to show anything, it is the wrong bet for a company this \
-                 size — close it and say so.",
-                (today + chrono::Duration::days(max)).format("%Y-%m-%d")
+                "REFUSED: review_date '{new_time}' is not a time. Write it as YYYY-MM-DDTHH:MMZ (hour resolution), e.g. {}.",
+                (now + chrono::Duration::hours(6)).format("%Y-%m-%dT%H:00Z")
+            ));
+        };
+        let hours = (want - now).num_minutes() as f64 / 60.0;
+        let max = self.ctx.cfg.max_review_horizon_hours;
+        if max > 0 && hours > max as f64 {
+            return Some(format!(
+                "REFUSED: a review {hours:.0} hours out is not a commitment, it is a shelf. Set #{id} at most {max} hours ahead \
+                 (by {}), or if the bet genuinely needs longer than that to show anything, it is the wrong size for a company \
+                 this small — cut it down to what can show something inside {max} hours, or close it and say so.",
+                horizon_limit(max)
             ));
         }
-        // A slide is only a slide when the old date had actually arrived.
+        // A slide is a push made while the old time is landing: already
+        // passed, or inside its final six hours. Before hour resolution the
+        // rule bit only on the day itself, and objective 39 slid from 09-03 to
+        // 09-04 the evening before without a word.
         let old = self.ctx.store.objective_review_date(id);
-        let due = chrono::NaiveDate::parse_from_str(&old, "%Y-%m-%d").is_ok_and(|d| d <= today);
-        if due && want > today && note.trim().len() < 20 {
+        let old_dt = parse_review(&old);
+        let landing = old_dt.is_some_and(|o| o <= now + chrono::Duration::hours(6));
+        if landing && want > now && note.trim().len() < 20 {
             return Some(format!(
-                "REFUSED: #{id} came due on {old} and this pushes it to {new_date} without saying what changed. \
-                 A date that moves on the day it lands means nothing. Pass a note (one line, what you learned since {old} \
+                "REFUSED: #{id} comes due at {old} and this pushes it to {new_time} without saying what changed. \
+                 A time that moves as it lands means nothing. Pass a note (one line, what you learned since it was set \
                  that makes another window worth spending), or close the objective."
             ));
+        }
+        // The recommit budget: a later time is a recommit, and only a rated
+        // build-class report between recommits resets the count (rate_work).
+        if old_dt.is_some_and(|o| want > o) {
+            let key = format!("recommits:{id}");
+            let n: u32 = self.ctx.store.kv_get(&key).and_then(|v| v.parse().ok()).unwrap_or(0);
+            let cap = self.ctx.cfg.max_recommits;
+            if cap > 0 && n >= cap {
+                return Some(format!(
+                    "REFUSED: #{id} has already been recommitted {n} times with no build-class report rated in between. \
+                     A lane that keeps moving its own date and delivering nothing is not a bet. The only moves left are \
+                     objectives(done) or objectives(drop) — or dispatch a BUILD on it, rate what it delivers, and the budget resets."
+                ));
+            }
+            self.ctx.store.kv_set(&key, &(n + 1).to_string());
         }
         None
     }
@@ -2468,7 +2606,7 @@ detail, and anything already acted on and closed.",
             let directives = open_directives_text(&self.ctx.store.open_directives());
             let fuel = fuel_brief_line(&self.ctx.store);
             let ideas = overdue_ideas_line(&self.ctx.workspace);
-            let stale_objectives = overdue_objectives_line(&self.ctx.store);
+            let stale_objectives = overdue_objectives_line(&self.ctx.store, self.ctx.cfg.max_review_horizon_hours);
             history.push(Message::text(
                 "user",
                 format!(
@@ -2915,7 +3053,27 @@ Save one-off lessons with save_playbook. Then continue the mission.\n\n{log}{sta
                     }
                     c
                 };
-                let board = self.ctx.store.objectives_board(&counts);
+                // What the binary knows and the CEO cannot write: the ledger
+                // tally per lane, and each ops lane's routine status.
+                let board = {
+                    let mut extra = crate::state::lane_ledger(&self.ctx.workspace);
+                    for (id, kind, owner) in self.ctx.store.active_objective_meta() {
+                        if kind == "ops" {
+                            let (ok, total, failing) = self.ctx.store.routine_status_for_owner(&owner);
+                            let line = if total == 0 {
+                                " — OPS lane with NO ROUTINES: its work is scripts (add_routine + own_routine); dispatches are refused past one a day".to_string()
+                            } else if failing.is_empty() {
+                                format!(" — OPS: {ok}/{total} routines ok, nothing to dispatch")
+                            } else {
+                                format!(" — OPS: {ok}/{total} routines ok, FAILING: {}", failing.join(", "))
+                            };
+                            extra.entry(id).or_default().push_str(&line);
+                        } else if kind == "profit" && !extra.contains_key(&id) {
+                            extra.insert(id, format!(" — LEDGER: no pnl rows tagged #{id} — nothing this lane did has reached the books"));
+                        }
+                    }
+                    self.ctx.store.objectives_board_with(&counts, &extra, &horizon_limit(self.ctx.cfg.max_review_horizon_hours))
+                };
                 let body = if board.is_empty() {
                     "[Objective board] EMPTY. Write it now with objectives(add, title, rank): every live bet the \
 company is pursuing, ranked (1 = most important). The board survives restarts and compaction; your chat \

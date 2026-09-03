@@ -229,6 +229,10 @@ Episodes lose their in-flight dispatches on every crash."
     // X Activity stream: mention events push instead of paid polling. The
     // task no-ops instantly when X credentials are not configured.
     tokio::spawn(tools::x::activity_stream(orch.ctx.clone()));
+    // Restart triage is the scripts' job: every shell routine fires within
+    // the minute and the board's ops lines carry the results.
+    let rerun = orch.ctx.store.reset_routine_clocks();
+    orch.ctx.store.log("core", "routines-rerun", &format!("{rerun} shell routine(s) due now after start"));
     tokio::spawn(routines::serve(
         orch.ctx.store.clone(),
         orch.ctx.workspace.clone(),
@@ -741,6 +745,98 @@ mod tests {
     }
 
     #[test]
+    fn the_board_carries_what_the_binary_knows_and_a_rating_needs_an_artifact() {
+        use crate::state::{lane_ledger, prompt_usable, tagged_objective, Store};
+        // the ledger tag, in the shapes agents actually write
+        assert_eq!(tagged_objective("TRIPLET kill-exit (obj #5): sold full dev bag"), Some(5));
+        assert_eq!(tagged_objective("obj39 $LICK dev bag"), Some(39));
+        assert_eq!(tagged_objective("objective 34 entry"), Some(34));
+        assert_eq!(tagged_objective("AI fuel top-up (obj6, $15 sized)"), Some(6));
+        assert_eq!(tagged_objective("no tag here, an object lesson"), None);
+        // the tally comes from workspace.db, per asset, bookkeeping excluded
+        let dir = std::env::temp_dir().join(format!("khan-ledger-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        {
+            let w = rusqlite::Connection::open(dir.join("workspace.db")).unwrap();
+            w.execute_batch(
+                "CREATE TABLE pnl (id INTEGER PRIMARY KEY, ts TEXT, category TEXT, asset TEXT, amount REAL, usd_value REAL, note TEXT);
+                 INSERT INTO pnl(category, asset, amount, note) VALUES
+                   ('expense','SOL',-0.06,'PINKPROOF launch dev buy (obj #5)'),
+                   ('sell','SOL',0.048,'PINKPROOF kill-exit (obj #5)'),
+                   ('creator-fee','ETH',0.0006,'obj39 LICK fee claim'),
+                   ('bookkeeping','SOL',0,'obj 5 note only');",
+            )
+            .unwrap();
+        }
+        let tally = lane_ledger(&dir);
+        assert!(tally[&5].contains("2 rows") && tally[&5].contains("-0.0120 SOL"), "{}", tally[&5]);
+        assert!(tally[&39].contains("+0.0006 ETH"), "{}", tally[&39]);
+        assert!(lane_ledger(std::path::Path::new("/nonexistent")).is_empty());
+
+        // the board shows the tally and an ops lane's routine status
+        let store = Store::open(":memory:").unwrap();
+        let launch = store.add_objective("trend launches", 1);
+        let ops = store.add_objective("treasury ops", 2);
+        assert!(store.set_objective_kind(ops, "ops"));
+        assert!(!store.set_objective_kind(ops, "chores"));
+        store.upsert_routine("check-pnl", "true", 900, "", "cfo");
+        store.upsert_routine("check-lp", "true", 900, "", "cfo");
+        store.mark_routine_run("check-pnl", 1, "ok");
+        store.mark_routine_run("check-lp", 1, "ALERT");
+        let (ok, total, failing) = store.routine_status_for_owner("cfo");
+        assert_eq!((ok, total), (1, 2));
+        assert_eq!(failing, vec!["check-lp (ALERT)".to_string()]);
+        assert_eq!(store.reset_routine_clocks(), 2, "shell routines are due again after a restart");
+        assert_eq!(store.due_routines(5).len(), 2);
+        let mut extra = std::collections::HashMap::new();
+        extra.insert(launch, tally[&5].clone());
+        extra.insert(ops, " — OPS: 1/2 routines ok, FAILING: check-lp (ALERT)".to_string());
+        store.set_objective_review(launch, "2099-01-01", "");
+        let board = store.objectives_board_with(&std::collections::HashMap::new(), &extra, "2026-09-04T12:00Z");
+        assert!(board.contains("LEDGER (pnl rows tagged #5): 2 rows"), "{board}");
+        assert!(board.contains("OPS: 1/2 routines ok"), "{board}");
+        assert!(board.contains("BEYOND THE HORIZON"), "{board}");
+        assert_eq!(store.active_objective_meta().len(), 2);
+
+        // a rating of 4 or 5 needs an artifact the report names
+        std::fs::create_dir_all(dir.join("pumpfun/tmp/evidence")).unwrap();
+        std::fs::write(dir.join("pumpfun/tmp/evidence/obj5_watch.md"), b"x").unwrap();
+        assert!(crate::agent::names_artifact("wrote pumpfun/tmp/evidence/obj5_watch.md, exit 0", &dir));
+        assert!(crate::agent::names_artifact(&format!("saved {}", dir.join("pumpfun/tmp/evidence/obj5_watch.md").display()), &dir));
+        assert!(crate::agent::names_artifact("tx 4hqdZmiPYQrgemC8URQFLqY7AzVtfteovBVvNbVMSLMJ14Fy2xAjZMst8GzPVBRhBBDYK5SHAsLU7AA8hPtJmyg2 landed", &dir));
+        assert!(crate::agent::names_artifact("hash 0xca334db6ca334db6ca334db6ca334db6ca334db6ca334db6ca334db6ca334db6", &dir));
+        assert!(!crate::agent::names_artifact("NOOP — no posts, no paid X calls, nothing else.", &dir));
+        assert!(!crate::agent::names_artifact("wrote pumpfun/tmp/evidence/missing.md", &dir));
+        assert!(!crate::agent::names_artifact("see /etc/passwd", &dir));
+        assert!(store.last_report("nobody").is_none());
+        store.log("scout", "report", "done: pumpfun/tmp/evidence/obj5_watch.md");
+        assert!(store.last_report("scout").unwrap().contains("obj5_watch"));
+        store.record_dispatch("scout", Some(launch), "build", "1:x");
+        assert_eq!(store.latest_dispatch("scout"), Some((Some(launch), "build".to_string())));
+
+        // a prompt is text, never a pointer; a saved pointer is skipped at read
+        assert!(!prompt_usable("https://raw.githubusercontent.com/x/y/CEO_PROMPT.md"));
+        assert!(!prompt_usable("short"));
+        let real = "You are the CEO. ".repeat(40);
+        assert!(prompt_usable(&real));
+        store.update_prompt("CEO", &real, "seed").unwrap();
+        assert!(store.update_prompt("CEO", "https://example.com/prompt.md", "oops").is_err());
+        assert_eq!(store.get_prompt("CEO").as_deref(), Some(real.as_str()));
+
+        // the skill index lists what is used; the rest is reachable by name
+        store.save_skill("token_site_standard", "site rules", "body", "seeded").unwrap();
+        store.save_skill("old_unused", "dusty", "body", "seeded").unwrap();
+        store.log_skill_load("scout", "token_site_standard");
+        let recent = store.recent_skills(14, 0);
+        assert_eq!(recent.len(), 1, "{recent:?}");
+        assert_eq!(recent[0].0, "token_site_standard");
+        assert_eq!(store.recent_skills(14, 3).len(), 2, "just-created skills stay listed");
+        assert_eq!(store.search_skills("DUST").len(), 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn the_live_database_is_not_the_agents_to_move() {
         use crate::tools::shell::moves_live_db;
         // the 2026-09-03 sequence, each step
@@ -810,17 +906,20 @@ mod tests {
     #[test]
     fn a_lane_answers_for_its_own_date_and_the_board_is_a_budget() {
         let store = crate::state::Store::open(":memory:").unwrap();
-        let today = "2026-09-02";
+        let today = "2026-09-02T12:00Z";
         // an objective with no review date stands in the brief from the moment it opens
         let a = store.add_objective("listings", 1);
-        assert_eq!(store.overdue_objectives(today).len(), 1);
-        assert!(crate::agent::overdue_objectives_line(&store).contains("NO REVIEW DATE EVER SET"));
-        // a date in the future settles it; one in the past brings it back
-        assert!(store.set_objective_review(a, "2026-09-09", "still not listed anywhere"));
-        assert!(store.overdue_objectives(today).is_empty());
-        assert!(crate::agent::overdue_objectives_line(&store).is_empty());
+        assert_eq!(store.overdue_objectives(today, "").len(), 1);
+        assert!(crate::agent::overdue_objectives_line(&store, 24).contains("NO REVIEW DATE EVER SET"));
+        // a time in the future settles it; one in the past brings it back
+        assert!(store.set_objective_review(a, "2099-09-09T10:00Z", "still not listed anywhere"));
+        assert!(store.overdue_objectives(today, "").is_empty());
+        // ...unless it is past the horizon, which is a shelf
+        assert!(store.overdue_objectives(today, "2026-09-03T12:00Z")[0].4, "beyond the horizon is shelved");
+        let line = crate::agent::overdue_objectives_line(&store, 24);
+        assert!(line.contains("beyond the 24h horizon"), "{line}");
         assert!(store.set_objective_review(a, "2026-09-01", ""));
-        let line = crate::agent::overdue_objectives_line(&store);
+        let line = crate::agent::overdue_objectives_line(&store, 24);
         assert!(line.contains("#1 listings"), "{line}");
         assert!(line.contains("kills if: still not listed anywhere"), "{line}");
         // the date rides the board line too, so it is felt where allocation happens
@@ -832,13 +931,21 @@ mod tests {
         assert!(store.set_objective_review(a, "2026-09-01", ""));
         // closing it takes it off the board entirely
         store.update_objective(a, None, None, None, None, Some("done"));
-        assert!(store.overdue_objectives(today).is_empty());
+        assert!(store.overdue_objectives(today, "").is_empty());
 
         // the shipped budget
         let cfg: crate::config::Config = toml::from_str(include_str!("../khan.toml.example")).unwrap();
         assert_eq!(cfg.max_active_objectives, 6);
         assert_eq!(cfg.max_consecutive_checks, 2);
-        assert_eq!(cfg.max_review_horizon_days, 7);
+        assert_eq!(cfg.max_review_horizon_hours, 24);
+        assert_eq!(cfg.max_recommits, 2);
+        // review times parse at hour resolution, and a bare date is its midnight
+        let t = crate::agent::parse_review("2026-09-03T15:00Z").unwrap();
+        assert_eq!(t.format("%H:%M").to_string(), "15:00");
+        assert_eq!(crate::agent::parse_review("2026-09-03").unwrap().format("%H:%M").to_string(), "00:00");
+        assert!(crate::agent::parse_review("next week").is_none());
+        assert!(crate::agent::horizon_limit(0).is_empty());
+        assert!(crate::agent::horizon_limit(24) > crate::agent::review_now());
         // the wider compaction retry stays well under the model's own ceiling
         assert!(crate::agent::SUMMARY_RETRY_MAX_TOKENS > crate::agent::SUMMARY_MAX_TOKENS);
         assert!(crate::agent::SUMMARY_RETRY_MAX_TOKENS < 65_536 / 2);

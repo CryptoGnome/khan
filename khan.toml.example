@@ -128,13 +128,17 @@ max_active_objectives = 6
 # what a lane does instead of finishing. Was hardcoded at 3, which let a lane
 # spend most of a day checking itself. 0 disables.
 max_consecutive_checks = 2
-# How far ahead a review date may be set. A bet that cannot show anything
-# inside this window is the wrong size for a company running on a small
-# treasury — and a date far enough out is indistinguishable from no date at
-# all: six of ten lanes landed on the same day a week out within minutes of
-# each other on 2026-09-02. A lane that comes due and is pushed anyway must
-# also say what changed. 0 disables.
-max_review_horizon_days = 7
+# How far ahead a review time may be set, in hours. A bet that cannot show
+# anything inside this window is the wrong size for a company running on a
+# small treasury — and a date far enough out is indistinguishable from no date
+# at all: six of ten lanes landed on the same day a week out within minutes of
+# each other on 2026-09-02. Review times are hour-resolution
+# (2026-09-03T15:00Z); a lane pushed inside its last six hours must say what
+# changed. 0 disables.
+max_review_horizon_hours = 24
+# How many times a lane may push its review later without a build-class
+# report rated in between. Past this only done or drop remain. 0 disables.
+max_recommits = 2
 # Refuse the dear seller without guessing where the cheap band trades. bu0y
 # fills at the cheapest source that can serve, and on 2026-09-02 luna's cheap
 # band filled up and 117 of 132 fills overflowed to a seller at ~4x. A fixed

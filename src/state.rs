@@ -163,6 +163,73 @@ pub fn redact(s: &str) -> String {
     out
 }
 
+/// Whether a stored prompt can run an agent: real text, not a pointer.
+pub fn prompt_usable(content: &str) -> bool {
+    let t = content.trim();
+    t.chars().count() >= 400 && !(t.starts_with("http://") || t.starts_with("https://"))
+}
+
+/// What the ledger says about each objective, computed here rather than
+/// written by the CEO: the net of every workspace `pnl` row whose note tags
+/// the objective ("obj 5", "obj#5", "objective 5"), per asset. The trend-launch
+/// lane ran eight launches at an identical loss between 2026-08-31 and
+/// 2026-09-02 and stayed open, because no board line ever showed the tally.
+/// Deliberate ceiling: rows carry the tag only when the agent wrote one, so
+/// an untagged trade is invisible here — the board says so per lane.
+pub fn lane_ledger(workspace: &std::path::Path) -> std::collections::HashMap<i64, String> {
+    use std::collections::{BTreeMap, HashMap};
+    let mut out = HashMap::new();
+    let path = workspace.join("workspace.db");
+    let Ok(c) = Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY) else {
+        return out;
+    };
+    let Ok(mut stmt) = c.prepare("SELECT COALESCE(category,''), COALESCE(asset,''), COALESCE(amount,0), COALESCE(note,'') FROM pnl") else {
+        return out;
+    };
+    let Ok(rows) = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, f64>(2)?, r.get::<_, String>(3)?))) else {
+        return out;
+    };
+    let mut per: HashMap<i64, (usize, BTreeMap<String, f64>)> = HashMap::new();
+    for (category, asset, amount, note) in rows.flatten() {
+        let Some(id) = tagged_objective(&note) else { continue };
+        if category == "bookkeeping" || amount == 0.0 || asset.is_empty() {
+            continue;
+        }
+        let e = per.entry(id).or_default();
+        e.0 += 1;
+        *e.1.entry(asset).or_insert(0.0) += amount;
+    }
+    for (id, (n, assets)) in per {
+        let nets = assets
+            .iter()
+            .map(|(a, v)| format!("{v:+.4} {a}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        out.insert(id, format!(" — LEDGER (pnl rows tagged #{id}): {n} rows, net {nets}"));
+    }
+    out
+}
+
+/// The objective a ledger note tags: "obj 5", "obj#5", "obj #5", "objective 5".
+pub fn tagged_objective(note: &str) -> Option<i64> {
+    let lower = note.to_lowercase();
+    for key in ["objective", "obj"] {
+        let mut from = 0;
+        while let Some(i) = lower[from..].find(key) {
+            let start = from + i;
+            let before_ok = start == 0 || !lower.as_bytes()[start - 1].is_ascii_alphanumeric();
+            let rest = &lower[start + key.len()..];
+            let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '#' || c == ':');
+            let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+            if before_ok && !digits.is_empty() {
+                return digits.parse().ok();
+            }
+            from = start + key.len();
+        }
+    }
+    None
+}
+
 /// (device, inode) of the file at `path`; None off Unix or for ":memory:".
 fn file_identity(path: &str) -> Option<(u64, u64)> {
     #[cfg(unix)]
@@ -485,17 +552,23 @@ impl Store {
     /// Active objectives whose own review date has passed, oldest first, plus
     /// the ones that never got a date at all (reported with an empty date).
     /// (id, title, review_date, kill_criterion)
-    pub fn overdue_objectives(&self, today: &str) -> Vec<(i64, String, String, String)> {
+    /// Active objectives that owe a decision: no review time, a review time
+    /// that has passed, or one past `horizon` (a shelf, not a commitment).
+    /// Review strings are `YYYY-MM-DD` or `YYYY-MM-DDTHH:MMZ`; both compare
+    /// correctly as text against a `now` in the second form. `horizon` empty
+    /// disables the shelf check. The fifth field is true for a shelved one.
+    pub fn overdue_objectives(&self, now: &str, horizon: &str) -> Vec<(i64, String, String, String, bool)> {
         let c = self.conn.lock().unwrap();
         let Ok(mut stmt) = c.prepare(
-            "SELECT id, title, COALESCE(review_date,''), COALESCE(kill_criterion,'') FROM objectives \
-             WHERE status='active' AND (COALESCE(review_date,'')='' OR review_date < ?1) \
+            "SELECT id, title, COALESCE(review_date,''), COALESCE(kill_criterion,''), \
+                    (?2 != '' AND review_date > ?2) FROM objectives \
+             WHERE status='active' AND (COALESCE(review_date,'')='' OR review_date <= ?1 OR (?2 != '' AND review_date > ?2)) \
              ORDER BY COALESCE(NULLIF(review_date,''), '0000-00-00'), id",
         ) else {
             return Vec::new();
         };
         let rows = stmt
-            .query_map(params![today], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+            .query_map(params![now, horizon], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))
             .map(|it| it.filter_map(|x| x.ok()).collect())
             .unwrap_or_default();
         rows
@@ -547,7 +620,7 @@ impl Store {
     /// accepted — a free-text category would silently fall out of the weekly
     /// review's grouping.
     pub fn set_objective_kind(&self, id: i64, kind: &str) -> bool {
-        if !["profit", "growth", "infra", "explore"].contains(&kind) {
+        if !["profit", "growth", "infra", "explore", "ops"].contains(&kind) {
             return false;
         }
         let now = chrono::Utc::now().to_rfc3339();
@@ -727,6 +800,18 @@ impl Store {
     /// with in-flight counts (passed in from the orchestrator) and how long since
     /// anything advanced each one. Facts only — the judgment is the model's job.
     pub fn objectives_board(&self, inflight: &std::collections::HashMap<i64, usize>) -> String {
+        self.objectives_board_with(inflight, &std::collections::HashMap::new(), "")
+    }
+
+    /// The board with what the binary knows and the CEO cannot write: a
+    /// per-objective suffix (`extra`: the ledger tally, an ops lane's routine
+    /// status) and the review horizon, past which a date reads as a shelf.
+    pub fn objectives_board_with(
+        &self,
+        inflight: &std::collections::HashMap<i64, usize>,
+        extra: &std::collections::HashMap<i64, String>,
+        horizon: &str,
+    ) -> String {
         let mix = self.objective_mix_24h();
         let c = self.conn.lock().unwrap();
         let Ok(mut stmt) = c.prepare(
@@ -747,7 +832,8 @@ impl Store {
             rows.iter().map(|r| (r.0, r.1.as_str())).collect();
         let now = chrono::Utc::now();
         let (mut ready, mut blocked) = (Vec::new(), Vec::new());
-        let today = now.format("%Y-%m-%d").to_string();
+        // Hour resolution: a date-only review compares as its midnight.
+        let today = now.format("%Y-%m-%dT%H:%MZ").to_string();
         for (id, title, rank, plan, note, blocked_by, updated, owner, plan_updated, kind, review_date) in &rows {
             let waiting = Self::unresolved(blocked_by, &active);
             if waiting.is_empty() {
@@ -772,9 +858,14 @@ impl Store {
                 if review_date.is_empty() {
                     line.push_str(" — NO REVIEW DATE");
                 } else if review_date.as_str() <= today.as_str() {
-                    line.push_str(&format!(" — REVIEW DUE {review_date}: close it, drop it, or recommit with a new date"));
+                    line.push_str(&format!(" — REVIEW DUE {review_date}: close it, drop it, or recommit with a new time"));
+                } else if !horizon.is_empty() && review_date.as_str() > horizon {
+                    line.push_str(&format!(" — review {review_date} is BEYOND THE HORIZON ({horizon}): a shelf, not a commitment — recommit inside it or close"));
                 } else {
                     line.push_str(&format!(" — review {review_date}"));
+                }
+                if let Some(x) = extra.get(id) {
+                    line.push_str(x);
                 }
                 // The mix is what "going in circles" looks like from the board:
                 // an objective whose day was all checks of earlier work is not
@@ -1304,6 +1395,68 @@ explore (buys knowledge).\n{}\n",
             .unwrap_or_default()
     }
 
+    /// Shell routines owned by `owner`: how many report ok, how many exist,
+    /// and the names of the ones that do not — the status line of an ops lane.
+    pub fn routine_status_for_owner(&self, owner: &str) -> (usize, usize, Vec<String>) {
+        let c = self.conn.lock().unwrap();
+        let Ok(mut stmt) = c.prepare(
+            "SELECT name, COALESCE(last_status,'never ran') FROM routines \
+             WHERE enabled=1 AND COALESCE(agent,'')='' AND owner=?1 ORDER BY name",
+        ) else {
+            return (0, 0, Vec::new());
+        };
+        let rows: Vec<(String, String)> = stmt
+            .query_map(params![owner], |r| Ok((r.get(0)?, r.get(1)?)))
+            .map(|it| it.filter_map(|x| x.ok()).collect())
+            .unwrap_or_default();
+        let failing: Vec<String> = rows.iter().filter(|(_, s)| s != "ok").map(|(n, s)| format!("{n} ({s})")).collect();
+        (rows.len() - failing.len(), rows.len(), failing)
+    }
+
+    /// Make every shell routine due now. On boot this is the restart triage:
+    /// the scripts re-establish page health, ledger match and the rest within
+    /// a minute, at zero model cost, instead of the CEO re-deriving them by
+    /// hand (twenty minutes and a dozen shells after the 2026-09-03 restart).
+    /// Review routines are left on their clocks — they dispatch a model.
+    pub fn reset_routine_clocks(&self) -> usize {
+        let c = self.conn.lock().unwrap();
+        c.execute("UPDATE routines SET last_run=0 WHERE enabled=1 AND COALESCE(agent,'')=''", [])
+            .unwrap_or(0)
+    }
+
+    /// Active objectives as (id, kind, owner), for the binary-side board extras.
+    pub fn active_objective_meta(&self) -> Vec<(i64, String, String)> {
+        let c = self.conn.lock().unwrap();
+        let Ok(mut stmt) = c.prepare("SELECT id, COALESCE(kind,''), COALESCE(owner,'') FROM objectives WHERE status='active'") else {
+            return Vec::new();
+        };
+        stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .map(|it| it.filter_map(|x| x.ok()).collect())
+            .unwrap_or_default()
+    }
+
+    /// The most recent report an agent filed, if any.
+    pub fn last_report(&self, agent: &str) -> Option<String> {
+        let c = self.conn.lock().unwrap();
+        c.query_row(
+            "SELECT COALESCE(detail,'') FROM run_log WHERE agent=?1 AND event='report' ORDER BY id DESC LIMIT 1",
+            params![agent],
+            |r| r.get(0),
+        )
+        .ok()
+    }
+
+    /// An agent's most recent dispatch: (objective, class).
+    pub fn latest_dispatch(&self, agent: &str) -> Option<(Option<i64>, String)> {
+        let c = self.conn.lock().unwrap();
+        c.query_row(
+            "SELECT objective, class FROM dispatches WHERE agent=?1 ORDER BY id DESC LIMIT 1",
+            params![agent],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .ok()
+    }
+
     pub fn mark_routine_run(&self, name: &str, now_epoch: i64, status: &str) {
         let c = self.conn.lock().unwrap();
         let _ = c.execute(
@@ -1651,17 +1804,32 @@ explore (buys knowledge).\n{}\n",
         }
     }
 
+    /// The newest version of a prompt that is actually a prompt. On
+    /// 2026-08-29 the CEO saved version 11 of its own prompt as a bare URL to
+    /// a file that does not exist, and ran for five days on the mandate alone
+    /// — the mission, the flagship, the risk rules all gone from context, with
+    /// nothing anywhere saying so. A version that fails `prompt_usable` is
+    /// skipped, so the last real one stays live.
     pub fn get_prompt(&self, name: &str) -> Option<String> {
         let c = self.conn.lock().unwrap();
-        c.query_row(
-            "SELECT content FROM prompts WHERE name=?1 ORDER BY version DESC LIMIT 1",
-            params![name],
-            |r| r.get(0),
-        )
-        .ok()
+        let Ok(mut stmt) = c.prepare("SELECT content FROM prompts WHERE name=?1 ORDER BY version DESC") else {
+            return None;
+        };
+        let versions: Vec<String> = stmt
+            .query_map(params![name], |r| r.get::<_, String>(0))
+            .map(|it| it.flatten().collect())
+            .unwrap_or_default();
+        versions.into_iter().find(|p| prompt_usable(p))
     }
 
     pub fn update_prompt(&self, name: &str, content: &str, reason: &str) -> Result<i64> {
+        if !prompt_usable(content) {
+            anyhow::bail!(
+                "a prompt is the full text an agent runs on, not a pointer: this is {} characters{} — pass the whole prompt (edit the current one and send it back complete)",
+                content.trim().chars().count(),
+                if content.trim().starts_with("http") { " and reads as a URL, which nothing fetches" } else { "" }
+            );
+        }
         let c = self.conn.lock().unwrap();
         let next: i64 = c
             .query_row("SELECT COALESCE(MAX(version),0)+1 FROM prompts WHERE name=?1", params![name], |r| r.get(0))
@@ -1757,6 +1925,36 @@ explore (buys knowledge).\n{}\n",
             |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .ok()
+    }
+
+    /// The skills worth indexing on every call: loaded within `loaded_days`
+    /// or created within `created_days`. 243 skills rode every request of
+    /// every agent on 2026-09-02 (19k characters, roughly 5k tokens, 11,800
+    /// times a day) while 60 of them had been loaded in the past week.
+    pub fn recent_skills(&self, loaded_days: i64, created_days: i64) -> Vec<(String, String)> {
+        let loaded = (chrono::Utc::now() - chrono::Duration::days(loaded_days)).to_rfc3339();
+        let created = (chrono::Utc::now() - chrono::Duration::days(created_days)).to_rfc3339();
+        let c = self.conn.lock().unwrap();
+        let Ok(mut stmt) = c.prepare(
+            "SELECT name, description FROM skill_defs s
+             WHERE version=(SELECT MAX(version) FROM skill_defs WHERE name=s.name)
+               AND (name IN (SELECT skill FROM skill_loads WHERE ts>?1) OR created_at>?2)
+             ORDER BY name",
+        ) else {
+            return vec![];
+        };
+        stmt.query_map(params![loaded, created], |r| Ok((r.get(0)?, r.get(1)?)))
+            .map(|it| it.filter_map(|x| x.ok()).collect())
+            .unwrap_or_default()
+    }
+
+    /// Skills whose name or description contains `q` (case-insensitive).
+    pub fn search_skills(&self, q: &str) -> Vec<(String, String)> {
+        let needle = q.to_lowercase();
+        self.list_skills()
+            .into_iter()
+            .filter(|(n, d)| n.to_lowercase().contains(&needle) || d.to_lowercase().contains(&needle))
+            .collect()
     }
 
     /// Latest version of every skill: (name, description).
