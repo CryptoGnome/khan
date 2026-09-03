@@ -312,7 +312,8 @@ token count is printed. **There is no spend cap — watch it.**
   dates say.
 - **The board carries what the binary knows** — each profit lane's line shows
   the ledger's own tally (net per asset over every `pnl` row tagged with the
-  objective), computed from workspace.db rather than written by the CEO. The
+  objective, plus the closed trades on every ticker those rows name),
+  computed from workspace.db rather than written by the CEO. The
   trend-launch lane ran eight launches at an identical loss and stayed open
   because no line ever showed the number.
 - **Ops lanes are run by their routines** — an objective of kind `ops`
