@@ -60,6 +60,37 @@ a substitute for reading the schema.
   episode that moves real funds, re-sync the touched row to on-chain truth
   before finishing — a correct query against a stale row is still a wrong answer.
 
+## The write guard (UPDATE and DELETE)
+
+A parametrized UPDATE with no WHERE clause overwrites EVERY row in the table,
+and the database gives no warning. A position re-sync hit this live and
+polluted four rows with a single balance before the books-vs-chain check
+caught it a minute later. There were no routine backups; the restore
+depended on an unrelated forensic snapshot, the columns the UPDATE happened
+not to touch, and live chain reads.
+
+For any bookkeeping write from a script:
+1. Every UPDATE and DELETE carries an explicit WHERE naming the exact rows.
+2. Print the affected row count and ASSERT it equals the expected number
+   BEFORE committing.
+3. Read and print the target rows first, and assert their pre-state — the
+   values you are about to change must be the ones you think are there.
+4. A scoped script beats an inline one-liner for anything with more than one
+   statement. The file is the audit trail.
+
+## The INSERT arity trap
+
+`N values for M columns` is the database's own arity check passed through
+verbatim. It is always a caller bug and never a tool defect — the count in
+the message comes from the statement itself. A bare `INSERT INTO t VALUES
+(...)` needs EXACTLY the table's full column count; an explicit column list
+needs the same number of expressions as names. PRAGMA and COUNT the columns
+before composing the statement, the same reflex as above.
+
+Where a dedicated tool owns a table — a disclosure ledger that stamps its own
+timestamp and validates its note format — never hand-INSERT into it at all.
+A hand INSERT skips the validation the tool exists to apply.
+
 ## Verification
 Every query in a piece of work either targets a table queried earlier in the
 same episode, or is preceded by its PRAGMA. If a run's failures include a

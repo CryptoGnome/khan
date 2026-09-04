@@ -1653,6 +1653,10 @@ mod tests {
             "token_listing_submissions",
             "email_policy",
             "token_site_standard",
+            "capital_allocation_dynamic",
+            "copy_figures_engine_pattern",
+            "watcher_claim_cycle_verification",
+            "fee_claim_scheduler",
         ] {
             assert!(names.contains(&n.to_string()), "missing seed '{n}' in {names:?}");
         }

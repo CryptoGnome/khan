@@ -46,6 +46,12 @@ there is no human on the trigger to catch a bad input.
 - Money paths add disclosure to the sequence: disclose BEFORE, execute, verify
   on-chain, disclose AFTER. The tool should refuse to execute if the before-
   disclosure is not recorded.
+- A tool that backs up its target before writing REFRESHES that backup on
+  every run — so the second run's backup holds the first run's output. Never
+  rely on a tool's own `.bak` as the only restore source; take your own
+  safety copy first.
+- A backup written during testing holds a test-modified file. Delete it, or
+  it becomes a poison restore source for whoever reaches for it next.
 
 ## Verification
 The tool ships only when its own suite covers: no-op dry run, happy-path dry
