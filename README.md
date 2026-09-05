@@ -318,6 +318,17 @@ token count is printed. **There is no spend cap — watch it.**
   messages: on 2026-09-03 thirteen serial delegates held one open for four
   hours, 153 alerts queued behind it, and a launch blocked on a budget question
   went unread for three of them.
+- **A launch fires in the window and is not done until it is posted** — the
+  shell refuses a live token launch outside `launch_window_open_utc`–
+  `launch_window_close_utc` (default 13:00–03:00 UTC, 9am–11pm Eastern), the
+  CEO brief says when the window opens or closes, and every launch booked in
+  the last 48 hours that no `x_post` has named (ticker or mint) stands in the
+  brief until one does. Five of eight launches on 2026-09-04/05 fired between
+  01:23Z and 08:15Z into an asleep audience, and the X lane's own session plan
+  never mentioned them. Custom-tool descriptions are capped at 280 characters
+  (`create_tool` refuses longer; older rows ride their first paragraph) — the
+  catalogue rides every call of every agent, and description text alone was
+  32k of its 48k characters.
 - **The board carries what the binary knows** — each profit lane's line shows
   the ledger's own tally (net per asset over every `pnl` row tagged with the
   objective, plus the closed trades on every ticker those rows name),

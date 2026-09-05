@@ -847,6 +847,51 @@ mod tests {
     }
 
     #[test]
+    fn a_launch_fires_in_the_window_and_is_not_done_until_it_is_posted() {
+        use crate::state::{unannounced_launches, Store};
+        use crate::tools::custom::{ride_description, DESCRIPTION_CAP};
+        use crate::tools::shell::fires_launch;
+        // the live fire, in the shapes the log holds; dry-runs and reads pass
+        assert!(fires_launch("cd /data/workspace/pumpfun/tmp && NAME=TITLE KHAN_ALLOW_LAUNCH=yes python3 launch_experiment.py --live").is_some());
+        assert!(fires_launch("python3 pumpfun/tmp/launch_experiment.py --live 2>&1 | tail -30").is_some());
+        assert!(fires_launch("python3 launch_experiment.py 2>&1 | tail -20").is_none());
+        assert!(fires_launch("sed -n '440,500p' pumpfun/tmp/launch_experiment.py").is_none());
+        assert!(fires_launch("grep -n '--live' pumpfun/tmp/launch_experiment.py").is_none());
+        // a launch is unannounced until an x_post names its ticker or mint
+        let dir = std::env::temp_dir().join(format!("khan-launch-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let recent = (chrono::Utc::now() - chrono::Duration::hours(2)).format("%Y-%m-%d %H:%M:%S").to_string();
+        let old = (chrono::Utc::now() - chrono::Duration::hours(60)).format("%Y-%m-%d %H:%M:%S").to_string();
+        {
+            let w = rusqlite::Connection::open(dir.join("workspace.db")).unwrap();
+            w.execute_batch(&format!(
+                "CREATE TABLE positions (id INTEGER PRIMARY KEY, ts TEXT, chain TEXT, asset TEXT, size REAL, entry_usd REAL, status TEXT, note TEXT, cost_sol REAL, mint TEXT);
+                 INSERT INTO positions(ts, asset, status, note, mint) VALUES
+                   ('{recent}','TITLE','open','obj49 pump.fun launch dev buy 0.05 SOL, mint 25QRmint','25QRmint'),
+                   ('{recent}','NOREPLY','open','obj49 pump.fun launch dev buy 0.05 SOL, mint 5oCcmint','5oCcmint'),
+                   ('{old}','DOMA','open','obj49 pump.fun launch dev buy 0.05 SOL, mint 6eHtmint','6eHtmint'),
+                   ('{recent}','WIF','open','swing entry 0.10 SOL','wifmint');"
+            ))
+            .unwrap();
+        }
+        let store = Store::open(":memory:").unwrap();
+        let pending: Vec<String> = unannounced_launches(&dir, &store, 48).into_iter().map(|r| r.0).collect();
+        assert_eq!(pending, vec!["TITLE", "NOREPLY"], "swings and launches older than the horizon are not the list");
+        store.log("launch-mgr", "x_post", "{\"text\":\"TITLE FIGHT. $TITLE contract: 25QRmint\"}");
+        store.log("x-worker", "x_post", "{\"text\":\"the outbox coin is live: 5oCcmint\"}");
+        assert!(unannounced_launches(&dir, &store, 48).is_empty(), "a post naming the ticker or the mint announces it");
+        let _ = std::fs::remove_dir_all(&dir);
+        // a description rides one paragraph, capped
+        let long = format!("Checks a page.\n\nUsage: {}", "x".repeat(400));
+        assert_eq!(ride_description(&long), "Checks a page.");
+        let wall = "w".repeat(DESCRIPTION_CAP + 50);
+        let rode = ride_description(&wall);
+        assert!(rode.starts_with(&"w".repeat(DESCRIPTION_CAP)) && rode.ends_with("(full text in tool_defs)"));
+        assert_eq!(ride_description("  short  "), "short");
+    }
+
+    #[test]
     fn the_live_database_is_not_the_agents_to_move() {
         use crate::tools::shell::moves_live_db;
         // the 2026-09-03 sequence, each step
@@ -953,6 +998,10 @@ mod tests {
         // runs are rationed: both hold the loop that drains the company's inbox
         assert_eq!(cfg.episode_max_minutes, 45);
         assert_eq!(cfg.max_blocking_delegates, 2);
+        // the shipped launch window is 9am-11pm Eastern and wraps midnight
+        assert_eq!((cfg.launch_window_open_utc, cfg.launch_window_close_utc), (13, 3));
+        assert!(cfg.launch_window_open(13) && cfg.launch_window_open(23) && cfg.launch_window_open(2));
+        assert!(!cfg.launch_window_open(3) && !cfg.launch_window_open(8) && !cfg.launch_window_open(12));
         assert!(cfg.episode_max_minutes * 60 > cfg.heartbeat_secs, "an episode may not outlast many heartbeats");
         // review times parse at hour resolution, and a bare date is its midnight
         let t = crate::agent::parse_review("2026-09-03T15:00Z").unwrap();

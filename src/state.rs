@@ -181,6 +181,44 @@ pub fn prompt_usable(content: &str) -> bool {
 /// where entry and exit sit on one row per trade. Deliberate ceiling: the
 /// link is the ticker name in the note, and a trade whose ticker never
 /// appears in a tagged row stays invisible.
+/// Launches booked in the last `hours` that no X post has named since:
+/// (ticker, launch time, minutes ago). A post counts when its text carries
+/// the mint or `$TICKER` — the tool-call log holds the text. Ceiling: a post
+/// the seller refused still counts, as the log records the attempt.
+pub fn unannounced_launches(workspace: &std::path::Path, store: &Store, hours: i64) -> Vec<(String, String, i64)> {
+    let mut out = vec![];
+    let path = workspace.join("workspace.db");
+    let Ok(c) = Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY) else {
+        return out;
+    };
+    let now = chrono::Utc::now();
+    let since = (now - chrono::Duration::hours(hours)).format("%Y-%m-%d %H:%M:%S").to_string();
+    let Ok(mut stmt) = c.prepare(
+        "SELECT COALESCE(ts,''), COALESCE(asset,''), COALESCE(mint,'') FROM positions
+         WHERE note LIKE '%launch dev buy%' AND ts >= ?1 ORDER BY ts",
+    ) else {
+        return out;
+    };
+    let Ok(rows) = stmt.query_map([&since], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?))) else {
+        return out;
+    };
+    for (ts, asset, mint) in rows.flatten() {
+        if asset.is_empty() {
+            continue;
+        }
+        // positions stamps "YYYY-MM-DD HH:MM:SS"; run_log stamps RFC 3339.
+        let since_post = ts.replacen(' ', "T", 1);
+        if store.x_posted_about(&since_post, &asset, &mint) {
+            continue;
+        }
+        let ago = chrono::NaiveDateTime::parse_from_str(&ts, "%Y-%m-%d %H:%M:%S")
+            .map(|t| (now.naive_utc() - t).num_minutes())
+            .unwrap_or(0);
+        out.push((asset, ts, ago));
+    }
+    out
+}
+
 pub fn lane_ledger(workspace: &std::path::Path) -> std::collections::HashMap<i64, String> {
     use std::collections::{BTreeMap, HashMap};
     let mut out = HashMap::new();
@@ -1187,6 +1225,20 @@ explore (buys knowledge).\n{}\n",
     }
 
     // --- tool health (so broken tooling becomes visible, not silently retried) ---
+
+    /// Whether an x_post since `since` named this launch (its mint or $TICKER).
+    pub fn x_posted_about(&self, since: &str, ticker: &str, mint: &str) -> bool {
+        let c = self.conn.lock().unwrap();
+        let tag = format!("%${ticker}%");
+        let by_mint = if mint.is_empty() { "%\u{0}%".to_string() } else { format!("%{mint}%") };
+        c.query_row(
+            "SELECT COUNT(*) FROM run_log WHERE event='x_post' AND ts > ?1 AND (detail LIKE ?2 OR detail LIKE ?3)",
+            rusqlite::params![since, tag, by_mint],
+            |r| r.get::<_, i64>(0),
+        )
+        .map(|n| n > 0)
+        .unwrap_or(false)
+    }
 
     pub fn record_tool_call(&self, tool: &str, ok: bool, err: &str) {
         let c = self.conn.lock().unwrap();

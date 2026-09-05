@@ -21,7 +21,7 @@ pub fn management_schemas() -> Vec<Value> {
             "description": "Create a NEW custom tool, or improve an existing one (same name = new version, old versions kept). The tool immediately becomes available to ALL agents as a real callable tool. The script reads its arguments as JSON from the KHAN_TOOL_ARGS environment variable and prints its result to stdout. It runs in the workspace directory with a 120s timeout.",
             "parameters": {"type": "object", "properties": {
                 "name": {"type": "string", "description": "snake_case tool name"},
-                "description": {"type": "string", "description": "What the tool does — shown to agents deciding whether to call it"},
+                "description": {"type": "string", "description": "What the tool does and when to call it, one paragraph, at most 280 characters — it rides every call of every agent. How-to goes in the tool's output or a skill."},
                 "parameters": {"type": "object", "description": "JSON Schema for the tool's arguments, e.g. {\"type\":\"object\",\"properties\":{\"text\":{\"type\":\"string\"}},\"required\":[\"text\"]}"},
                 "lang": {"type": "string", "enum": ["python", "bash", "powershell"], "description": "python works everywhere; bash on Linux; powershell on Windows (or where pwsh is installed)"},
                 "script": {"type": "string", "description": "Full script source. Read args from the KHAN_TOOL_ARGS env var (JSON), print the result to stdout."},
@@ -95,6 +95,26 @@ pub fn schema_fault(params: &Value) -> Option<String> {
     None
 }
 
+/// Characters of a custom tool's description that ride every call.
+///
+/// The registry is 65 tools and rides every request of every agent, roughly
+/// 8,000 a day. Measured 2026-09-05: 117 of 153 saved descriptions ran past
+/// 300 characters (one to 2,480), and description text alone was 32k of the
+/// 48k-character catalogue — about 5k tokens per call spent restating how-to
+/// that belongs in the tool's own output or a skill.
+pub const DESCRIPTION_CAP: usize = 280;
+
+/// The part of a description that rides: its first paragraph, capped.
+/// Rows saved before the cap existed are cut here rather than refused.
+pub fn ride_description(desc: &str) -> String {
+    let first = desc.trim().split("\n\n").next().unwrap_or("").trim();
+    if first.chars().count() <= DESCRIPTION_CAP {
+        return first.to_string();
+    }
+    let cut: String = first.chars().take(DESCRIPTION_CAP).collect();
+    format!("{}… (full text in tool_defs)", cut.trim_end())
+}
+
 /// Schemas for all registered custom tools (latest versions).
 pub fn registry_schemas(ctx: &ToolCtx) -> Vec<Value> {
     ctx.store
@@ -110,7 +130,7 @@ pub fn registry_schemas(ctx: &ToolCtx) -> Vec<Value> {
                 parameters = json!({"type": "object", "properties": {}});
             }
             json!({"type": "function", "function": {
-                "name": name, "description": format!("[custom tool] {desc}"), "parameters": parameters}})
+                "name": name, "description": format!("[custom tool] {}", ride_description(&desc)), "parameters": parameters}})
         })
         .collect()
 }
@@ -126,6 +146,14 @@ pub fn create(ctx: &ToolCtx, args: &Value) -> Result<String> {
     let lang = args["lang"].as_str().unwrap_or("");
     if !matches!(lang, "python" | "bash" | "powershell") {
         bail!("lang must be 'python', 'bash', or 'powershell'");
+    }
+    let desc_len = args["description"].as_str().unwrap_or("").trim().chars().count();
+    if desc_len > DESCRIPTION_CAP {
+        bail!(
+            "description is {desc_len} characters; the cap is {DESCRIPTION_CAP}. It rides EVERY call of EVERY agent (65 tools \
+             × ~8,000 calls a day), so it says what the tool does and when to call it — one paragraph. Usage detail, \
+             examples and caveats go in the tool's own output (print them on bad args) or in a skill."
+        );
     }
     let params = &args["parameters"];
     if !params.is_object() || params["type"] != "object" {

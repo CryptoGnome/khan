@@ -166,6 +166,45 @@ pub(crate) fn overdue_ideas_line(workspace: &std::path::Path) -> String {
 /// brief. Same shape as the ideas line, and for the same reason: the ideas
 /// version cleared five stale rows within an hour of shipping, because a
 /// decision asked for by name gets made and one left implicit does not.
+/// The brief's launch lines: the window, and launches nobody has posted.
+///
+/// On 2026-09-05 TITLE launched at 05:33Z and NOREPLY at 08:15Z; the X lane
+/// was running its own session plan and neither post named the launch until
+/// hours later. A launch is not done until its post exists, so the binary
+/// keeps the list rather than trusting two lanes to meet.
+pub(crate) fn launch_lines(store: &crate::state::Store, workspace: &std::path::Path, cfg: &crate::config::Config) -> String {
+    use chrono::Timelike;
+    let mut out = String::new();
+    let (o, c) = (cfg.launch_window_open_utc % 24, cfg.launch_window_close_utc % 24);
+    if o != c {
+        let hour = chrono::Utc::now().hour();
+        let until = |h: u32| (h + 24 - hour - 1) % 24 + 1;
+        if cfg.launch_window_open(hour) {
+            out.push_str(&format!(
+                "\n\nLAUNCH WINDOW OPEN until {c:02}:00 UTC ({}h left): staged kits fire now; the shell refuses live launches after it closes.",
+                until(c)
+            ));
+        } else {
+            out.push_str(&format!(
+                "\n\nLAUNCH WINDOW CLOSED until {o:02}:00 UTC ({}h): the shell refuses live launches. Stage kits — metadata pinned, args written, dry-run green, post drafted — and dispatch the fire for the open, not now.",
+                until(o)
+            ));
+        }
+    }
+    let rows = crate::state::unannounced_launches(workspace, store, 48);
+    if !rows.is_empty() {
+        let shown = rows
+            .iter()
+            .map(|(asset, ts, ago)| format!("\n  - ${asset} launched {} ({}h{:02}m ago, no post naming it since)", ts.replacen(' ', "T", 1), ago / 60, ago % 60))
+            .collect::<String>();
+        out.push_str(&format!(
+            "\n\nLAUNCHES WITHOUT AN X POST ({}):{shown}\nA launch is not done until its post exists: an x_post carrying $TICKER and the contract address, from the launch's own lane, inside the hour. The X lane's session plan does not cover this and never has — dispatch the poster with the exact text, or refuse the next fire until the last one is announced.",
+            rows.len()
+        ));
+    }
+    out
+}
+
 pub(crate) fn overdue_objectives_line(store: &crate::state::Store, horizon_hours: i64) -> String {
     let rows = store.overdue_objectives(&review_now(), &horizon_limit(horizon_hours));
     if rows.is_empty() {
@@ -2622,12 +2661,13 @@ detail, and anything already acted on and closed.",
             let fuel = fuel_brief_line(&self.ctx.store);
             let ideas = overdue_ideas_line(&self.ctx.workspace);
             let stale_objectives = overdue_objectives_line(&self.ctx.store, self.ctx.cfg.max_review_horizon_hours);
+            let launches = launch_lines(&self.ctx.store, &self.ctx.workspace, &self.ctx.cfg);
             history.push(Message::text(
                 "user",
                 format!(
                     "[Company brief — composed fresh each episode; durable truth lives on the objective board, in memories and in skills]\n\
 It is now {now} UTC. Anything dated before this already happened. A dated announcement is history, not a catalyst — and a date WITHOUT a year never resolves to the current calendar: it resolves to the document's own publication date (commit date, Last-Modified, weekday arithmetic). Check that before treating any date as upcoming.\n\n\
-BASE DIRECTIVE from your founder:\n{directive}\n\nTEAM:\n{roster}{policy}{directives}{fuel}{ideas}{stale_objectives}\n\nRECENT ACTIVITY (public log tail):\n{recent}",
+BASE DIRECTIVE from your founder:\n{directive}\n\nTEAM:\n{roster}{policy}{directives}{fuel}{ideas}{stale_objectives}{launches}\n\nRECENT ACTIVITY (public log tail):\n{recent}",
                     now = chrono::Utc::now().format("%Y-%m-%d %H:%M")
                 ),
             ));

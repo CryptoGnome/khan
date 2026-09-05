@@ -1,3 +1,4 @@
+use chrono::Timelike;
 use super::ToolCtx;
 use anyhow::Result;
 use std::time::Duration;
@@ -105,6 +106,15 @@ pub async fn run_with_env(
     if let Some(word) = moves_live_db(command) {
         return Ok(format!("{DB_BLOCKED} (matched \"{word}\")"));
     }
+    if let Some(word) = fires_launch(command) {
+        let hour = chrono::Utc::now().hour();
+        if !ctx.cfg.launch_window_open(hour) {
+            return Ok(format!(
+                "{LAUNCH_WINDOW_BLOCKED} The window is {:02}:00–{:02}:00 UTC and it is {hour:02}:xx now (matched \"{word}\").",
+                ctx.cfg.launch_window_open_utc, ctx.cfg.launch_window_close_utc
+            ));
+        }
+    }
     let dir = match cwd {
         Some(c) if !c.is_empty() => ctx.workspace.join(c),
         _ => ctx.workspace.clone(),
@@ -116,7 +126,33 @@ pub const GH_BLOCKED: &str = "ERROR: gh is not available (it would use the found
 
 pub const PITCH_BLOCKED: &str = "REFUSED: this is an outbound email pitching for attention, which the founder banned on 2026-09-02 (directive #155, skill email_policy). The company inbox is transactional only: listing submissions and their replies, account verification, deposit and payment problems, anything a counterparty needs to complete a transaction. Podcasts, interviews, features, partnerships, AMAs, newsletter mentions, press and Show-HN asks are not sends — attention comes from being a good account and shipping things worth talking about. If this send genuinely unblocks money, say which objective and which amount in the command itself and it will pass.";
 
+pub const LAUNCH_WINDOW_BLOCKED: &str = "REFUSED: this is a live token launch and the launch window is closed. Of the eight launches on 2026-09-04/05, five fired between 01:23Z and 08:15Z — the US audience asleep, a dev buy nobody could buy into, and every one of them opened below its floors. Stage the kit (metadata pinned, args file written, dry-run green, the X post drafted) and fire it when the window opens; a staged kit fires in one command, a night launch is a write-off.";
+
 pub const DB_BLOCKED: &str = "REFUSED: khan.db is the running company's open database, and this command would move, replace, or delete the file under it. On 2026-09-03 exactly that (VACUUM INTO a copy, rename the original aside, move the copy into place) left the binary writing to a file nobody could see for seven hours: the board and roster vanished, the site froze, and the X refresh token rotated into a file that was then thrown away. Read it with khan_db_query or sqlite in mode=ro; never rename, copy, truncate, or remove it. Compaction and backups are the founder's, not the company's — if the volume is full, delete evidence dumps and spill files instead.";
+
+/// The marker by which a command fires a LIVE token launch, if it does.
+///
+/// Every launch since 2026-09-02 ran `launch_experiment.py --live` with
+/// `KHAN_ALLOW_LAUNCH=yes`; a dry-run carries neither. Ceiling: a launcher
+/// under another name with its own gate slips past — the brief's window line
+/// is the second fence, and the launch record in workspace.db the audit.
+pub fn fires_launch(command: &str) -> Option<&'static str> {
+    let c = command.to_lowercase();
+    if c.contains("khan_allow_launch=yes") {
+        return Some("KHAN_ALLOW_LAUNCH=yes");
+    }
+    // `--live` counts only as an argument to the launcher: agents grep and
+    // read the script all day, and a read at night is not a launch.
+    for (i, _) in c.match_indices("launch_experiment") {
+        let tail = &c[i..];
+        let end = ["|", "&&", ";", "
+"].iter().filter_map(|t| tail.find(t)).min().unwrap_or(tail.len());
+        if tail[..end].contains(" --live") {
+            return Some("launch_experiment --live");
+        }
+    }
+    None
+}
 
 /// The verb by which a command would move, overwrite, or remove the live
 /// database, if it does.

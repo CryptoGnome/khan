@@ -185,6 +185,13 @@ episode_max_minutes = 45
 # tool insists on dispatch. Blocking holds the only loop that drains alerts,
 # reports and founder messages; background work does not. 0 disables.
 max_blocking_delegates = 2
+# Hours (UTC) between which a live token launch may fire. Outside them the
+# shell refuses `--live` launches and the brief says when the window reopens,
+# so kits get staged rather than fired. 13:00-03:00 UTC is 9am-11pm Eastern:
+# of the eight launches on 2026-09-04/05, five fired between 01:23Z and
+# 08:15Z into an asleep audience. Close < open wraps midnight; equal disables.
+launch_window_open_utc = 13
+launch_window_close_utc = 3
 # Turn cap for a QUIET heartbeat: nothing queued, no finished task. One look,
 # one action or close. Measured 2026-09-01: 151 heartbeats, 786 steps, 88 of
 # them dispatched nothing — five steps of spot-checks each, every five minutes.

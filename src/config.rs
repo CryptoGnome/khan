@@ -152,6 +152,15 @@ pub struct Config {
     /// only loop that drains alerts, reports and founder messages.
     #[serde(default = "default_max_blocking_delegates")]
     pub max_blocking_delegates: u32,
+    /// Hours (UTC) between which a live token launch may fire; the shell
+    /// refuses one outside them and the brief says so. Of the eight launches
+    /// on 2026-09-04/05, five fired between 01:23Z and 08:15Z — a US audience
+    /// asleep, a dev buy with nobody to sell to. Close < open wraps midnight.
+    /// Equal hours disable the window.
+    #[serde(default = "default_launch_window_open_utc")]
+    pub launch_window_open_utc: u32,
+    #[serde(default = "default_launch_window_close_utc")]
+    pub launch_window_close_utc: u32,
     /// Max agent-loop iterations for a delegated employee task.
     #[serde(default = "default_employee_max_iters")]
     pub employee_max_iters: u64,
@@ -232,6 +241,22 @@ fn default_episode_max_minutes() -> u64 {
 
 fn default_max_blocking_delegates() -> u32 {
     2
+}
+
+fn default_launch_window_open_utc() -> u32 {
+    13
+}
+
+fn default_launch_window_close_utc() -> u32 {
+    3
+}
+
+impl Config {
+    /// Whether a live launch may fire at this UTC hour.
+    pub fn launch_window_open(&self, hour: u32) -> bool {
+        let (o, c) = (self.launch_window_open_utc % 24, self.launch_window_close_utc % 24);
+        o == c || if o < c { hour >= o && hour < c } else { hour >= o || hour < c }
+    }
 }
 #[allow(dead_code)]
 fn default_reflect_every() -> u64 {
