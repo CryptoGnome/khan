@@ -10,10 +10,19 @@ per-venue skills; a venue skill may add detail but never subtract from it.
 ## The law
 
 - **Real launches ship FULLY dressed**: image/logo, a one-line thesis in
-  the description, the X account link, and a site on one of our subdomains
-  wherever the venue's metadata carries links. Users scanning listings
+  the description, the links the venue carries filled honestly, and a site
+  on one of our own subdomains wherever the venue's metadata carries links.
+  The site link is the load-bearing dressing. Users scanning listings
   filter for filled metadata with real links — a blank listing reads as a
   rug and forfeits the launch before the first candle.
+- **A social field is CONDITIONAL, and an absent account is compliant.**
+  Where no per-launch social account exists — and creating one may be
+  walled, or buying one banned — OMIT that field rather than leaving an
+  empty string, and do not burn a cycle sourcing a link for it. The
+  company's own flagship handle is NEVER linked from an experiment launch:
+  pointing the flagship audience at an experiment is its own mistake. This
+  clause is what stops "ships fully dressed" from being read as a gate
+  failure on a launch that is dressed as honestly as it can be.
 - **Probe/test launches are never silent blanks**: name them as tests and
   put an honest description in the metadata ("infrastructure test, not for
   trading"). A blank token under our deployer is indistinguishable from an

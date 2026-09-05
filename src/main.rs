@@ -1657,6 +1657,8 @@ mod tests {
             "copy_figures_engine_pattern",
             "watcher_claim_cycle_verification",
             "fee_claim_scheduler",
+            "launch_presentation",
+            "revenue_ideation",
         ] {
             assert!(names.contains(&n.to_string()), "missing seed '{n}' in {names:?}");
         }

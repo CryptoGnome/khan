@@ -34,6 +34,27 @@ Each aggregator publishes one canonical form URL: a free tier measured in days
 and a paid fast-track. The free tier is the default; a paid fast pass is a
 capital decision and needs approval.
 
+## Update forms are change requests, not re-submissions
+An aggregator's update form is usually a CHANGE REQUEST against an existing
+record: a blank field means "no change requested" and cannot overwrite what is
+already there. That makes the safe play obvious — fill only the fields you are
+actually changing, and leave every other one empty rather than re-entering a
+value you believe is current. Submit once. A listing or update submission that
+already returned a ticket is never re-sent, however long the queue takes; the
+second one is a duplicate that pushes the first back down the queue.
+
+Not every door is walled the same way, either. Some aggregators' forms post
+end-to-end from a headless session with no bot check anywhere; establish that
+per site rather than inheriting the ceiling from a sibling.
+
+**Before any correction outreach, check whether our own record exists under a
+different id.** A near-miss here: a correction was drafted asking an aggregator
+to fix "our" entry, and the entry was a DIFFERENT project with a similar name
+and its own legitimate record on another chain. Our real record existed
+separately the whole time. Search the aggregator for every plausible match and
+confirm which id is ours — by contract address, not by name — before asking
+anyone to change anything.
+
 ## The automation ceiling — this lane is human-session-only
 Every submission path is gated by a bot-check widget that is enforced
 SERVER-SIDE, and this was established the expensive way rather than assumed:

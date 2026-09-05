@@ -71,6 +71,27 @@ re-reads the same day are free, so a session that re-touches the morning's
 posts costs nothing extra, while spreading the same reads across midnight
 UTC pays twice.
 
+## External-venue keystone checks (non-negotiable)
+
+Every premise whose income depends on ANOTHER protocol's fee or config surface
+clears two checks BEFORE it is booked. Both price somebody else's discretion
+over our income; a premise built on our own mechanics needs neither.
+
+- **The automation clause check.** Before proposing any premise that harvests
+  a venue's unclaimed fees — its own, or other creators' — read the venue's
+  own documentation for an auto-claim or automation clause. If the venue's
+  automation sweeps unclaimed fees into its own distribution path, the whole
+  class is dead on arrival there: reject it in-session and name the clause.
+  One such candidate died to a single primary-source sentence before it cost
+  a booking, which is exactly the price this check is supposed to pay.
+- **The policy-immutability keystone.** An external fee-share premise carries
+  a POLICY clause — that the share survives the venue's manual or governance
+  phase — and not merely a fee-run-rate clause. A venue documenting its
+  revenue share as "not immutable yet" means the run rate is worth nothing to
+  us if the share is cut without our consent. Run rate and policy durability
+  are TWO keystones, each with its own falsifier, and the dead-keystone
+  falsifier must state the policy condition too.
+
 ## Output contract — every idea leaves as a PREMISE
 
 Each candidate is written as a lane_underwriting-style PREMISE line:

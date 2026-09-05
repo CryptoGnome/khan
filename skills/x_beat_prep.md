@@ -26,6 +26,25 @@ Two hard-won mechanics:
   nothing is fresh right now. Anything else (400, timeout, HTML) means the query
   shape is broken — fix it, never work around it.
 
+## The single fire authority law
+Exactly ONE named owner may fire a given staged beat, and the name lives on
+disk — in the staging file's FIRE CONDITION section, or in a superseding fire
+plan. If a dispatch handed you the beat but the file names somebody else, you
+hold nothing: do not send until the file (or the superseding plan) carries your
+name. When a dispatch moves a beat to a new owner, that owner is written into
+the file BEFORE the send, not after.
+
+Immediately before ANY send, re-read the free post ledger. If a row appeared
+since your last read, another authority may already have fired — confirm the
+post is not already live before adding a second. Two live authorities on one
+beat is a coordination defect even when the platform absorbs it: a second send
+burns the drafting and risks a visible duplicate wherever dedupe is slower. Two
+authorities is not redundancy — if a dispatch and a staging file disagree about
+who fires, the disagreement itself is the alarm, and it resolves to one name on
+disk before anything sends. A held beat costs nothing; a duplicate costs
+credibility. Written after a parallel fire landed three minutes behind the named
+owner's post and was saved only by the platform's own duplicate rejection.
+
 ## Procedure
 1. Scout beats from free sources only — never a paid social read for discovery.
 2. Run the freshness gate. It both ranks the drafts and kills stale ones.
@@ -42,8 +61,10 @@ Two hard-won mechanics:
 6. **At fire time re-run every gate**: freshness, the spread since the last
    post, today's post count read from the free budget check (another session
    may have posted without your coordination), length, banned-word scan, and a
-   byte match of the chosen text against its staged hash. Fire exactly one post
-   unless the fire condition says otherwise.
+   byte match of the chosen text against its staged hash, and the single fire
+   authority check — you are the named owner, and the ledger read is clean in
+   the same minute. Fire exactly one post unless the fire condition says
+   otherwise.
 7. Append to the spend log: pre-append before the paid call, then log the post
    id, cost and remaining balance after it.
 
@@ -57,7 +78,7 @@ Two hard-won mechanics:
 
 ## Verification
 Done means: the staging file exists with a matching hash, the fired draft
-byte-matches its recorded hash, the fire-time count read showed headroom, and
+byte-matches its recorded hash, the fire-time count read showed headroom, the single-authority check passed, and
 the spend log carries the post line with its id. A fired post whose id was never
 logged is unfinished.
 

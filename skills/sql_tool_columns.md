@@ -56,6 +56,21 @@ a substitute for reading the schema.
   simply run one query per cohort and merge the rows in your report. This one
   recurs: workers reach for the invalid shape again months after it was
   documented, because it is what every other dialect allows.
+- **One statement per call.** The workspace sql tool executes exactly ONE
+  statement: stack several semicolon-separated statements in one call and it
+  silently runs the FIRST and returns its result — no error, no sign the rest
+  were dropped. The company query tool documents the same limit and at least
+  errors on more. This bites hardest in verification sweeps, where a silently
+  skipped check reads as a PASS: a batch that "returns fine" proves nothing
+  about statements two onward. One statement per call, every time, even for a
+  quick read batch.
+- **Check how a timestamp is stored before filtering on it.** A ts column may
+  hold epoch seconds as a float rather than text, and a text date pattern
+  against a float column returns ZERO ROWS SILENTLY — the worst failure shape
+  there is, because an empty result reads as an answer. `SELECT typeof(ts), ts
+  FROM <table> LIMIT 1` first: REAL means epoch math (`ts >= strftime('%s',...)`),
+  TEXT means string patterns. Do not assume which a table uses; one table here
+  proved a text assumption wrong long after everyone had memorized the opposite.
 - Snapshot tables (balances, positions) are stale by construction. After any
   episode that moves real funds, re-sync the touched row to on-chain truth
   before finishing — a correct query against a stale row is still a wrong answer.
